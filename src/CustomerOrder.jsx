@@ -492,9 +492,10 @@ export default function CustomerOrder({ shopUid }) {
 
       {cartCount > 0 && (
         <div style={{
-          position: "fixed", bottom: 0, left: 0, right: 0, background: COLORS.espresso5, color: "#fff",
-          padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between",
-          boxShadow: "0 -4px 16px rgba(0,0,0,0.15)", animation: "fadeIn .2s ease",
+          position: "fixed", left: 16, right: 16, bottom: 16, maxWidth: 420, margin: "0 auto",
+          background: COLORS.espresso5, color: "#fff", borderRadius: 16,
+          padding: "12px 14px 12px 18px", display: "flex", alignItems: "center", justifyContent: "space-between",
+          boxShadow: "0 8px 24px rgba(43,29,20,0.35)", animation: "fadeIn .2s ease",
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{ position: "relative" }}>

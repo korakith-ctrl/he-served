@@ -857,6 +857,7 @@ function MenuEditor({ menu, ingredients, optionGroups, categories, onSave, onCan
     ...menu, optionGroupIds: menu.optionGroupIds || [], available: menu.available ?? true,
     category: menu.category || "", imageUrl: menu.imageUrl || "",
   });
+  const [imageError, setImageError] = useState(false);
 
   function toggleOptionGroup(groupId) {
     setForm((f) => {
@@ -894,11 +895,21 @@ function MenuEditor({ menu, ingredients, optionGroups, categories, onSave, onCan
         </div>
         <div style={{ flex: 1 }}>
           <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ลิงก์รูปเมนู (ถ้ามี)</label>
-          <input className="cfield" value={form.imageUrl} onChange={(e) => setForm({ ...form, imageUrl: e.target.value })} placeholder="https://..." />
+          <input className="cfield" value={form.imageUrl} onChange={(e) => { setForm({ ...form, imageUrl: e.target.value }); setImageError(false); }} placeholder="https://..." />
+          <p style={{ fontSize: 10.5, color: "var(--espresso-2)", margin: "3px 0 0", lineHeight: 1.5 }}>
+            ต้องเป็นลิงก์รูปโดยตรง (ลงท้าย .jpg/.png ฯลฯ) เช่นจาก imgur.com — ลิงก์แชร์จาก Google Photos ใช้ไม่ได้
+          </p>
         </div>
       </div>
       {form.imageUrl && (
-        <img src={form.imageUrl} alt="ตัวอย่างรูป" style={{ width: 90, height: 90, objectFit: "cover", borderRadius: 10, border: "1px solid var(--line)", marginBottom: 14 }} />
+        <div style={{ marginBottom: 14 }}>
+          <img
+            src={form.imageUrl} alt="ตัวอย่างรูป"
+            onLoad={() => setImageError(false)} onError={() => setImageError(true)}
+            style={{ width: 90, height: 90, objectFit: "cover", borderRadius: 10, border: "1px solid var(--line)" }}
+          />
+          {imageError && <p style={{ fontSize: 11, color: "var(--danger)", margin: "4px 0 0" }}>โหลดรูปไม่ขึ้น — ตรวจว่าเป็นลิงก์รูปโดยตรงหรือยัง</p>}
+        </div>
       )}
 
       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, marginBottom: 14 }}>
