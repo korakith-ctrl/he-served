@@ -7,6 +7,9 @@
         "menus": {
           ".read": "auth != null"
         },
+        "optionGroups": {
+          ".read": "auth != null"
+        },
         "settings": {
           "shopName": { ".read": "auth != null" },
           "promptpayId": { ".read": "auth != null" }

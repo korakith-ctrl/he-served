@@ -1,12 +1,25 @@
 import { useState, useEffect } from "react";
-import { db, auth } from "./firebase";
-import { signInAnonymously } from "firebase/auth";
-import { ref, onValue, push, set } from "firebase/database";
+import { initializeApp, getApps, getApp } from "firebase/app";
+import { getAuth, signInAnonymously } from "firebase/auth";
+import { getDatabase, ref, onValue, push, set } from "firebase/database";
 import QRCode from "qrcode";
 import generatePayload from "promptpay-qr";
+import { firebaseConfig } from "./firebase";
+
+// Isolated secondary app so an anonymous customer session never shares
+// Auth persistence with the owner dashboard's login on the same device/browser.
+const customerApp = getApps().some((a) => a.name === "customer-order")
+  ? getApp("customer-order")
+  : initializeApp(firebaseConfig, "customer-order");
+const auth = getAuth(customerApp);
+const db = getDatabase(customerApp);
 
 function money(n) {
   return (Number(n) || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function genLineId() {
+  return "line_" + Math.random().toString(36).slice(2, 9);
 }
 
 const wrap = {
@@ -26,13 +39,19 @@ const field = {
   width: "100%", border: "1px solid #E4DBC9", borderRadius: 8, padding: "9px 10px", fontSize: 14,
   boxSizing: "border-box", marginTop: 4,
 };
+const overlay = {
+  position: "fixed", inset: 0, background: "rgba(43,29,20,0.45)", display: "flex",
+  alignItems: "flex-end", justifyContent: "center", zIndex: 50,
+};
 
 export default function CustomerOrder({ shopUid }) {
   const [authUid, setAuthUid] = useState(null);
   const [shopName, setShopName] = useState("");
   const [menus, setMenus] = useState(null);
+  const [optionGroups, setOptionGroups] = useState([]);
   const [promptpayId, setPromptpayId] = useState("");
-  const [cart, setCart] = useState({});
+  const [cart, setCart] = useState([]);
+  const [pickingMenu, setPickingMenu] = useState(null);
   const [phone, setPhone] = useState("");
   const [step, setStep] = useState("menu");
   const [error, setError] = useState("");
@@ -51,7 +70,8 @@ export default function CustomerOrder({ shopUid }) {
     const unsub1 = onValue(ref(db, `shops/${shopUid}/menus`), (snap) => setMenus(snap.val() || []));
     const unsub2 = onValue(ref(db, `shops/${shopUid}/settings/shopName`), (snap) => setShopName(snap.val() || "ร้านกาแฟ"));
     const unsub3 = onValue(ref(db, `shops/${shopUid}/settings/promptpayId`), (snap) => setPromptpayId(snap.val() || ""));
-    return () => { unsub1(); unsub2(); unsub3(); };
+    const unsub4 = onValue(ref(db, `shops/${shopUid}/optionGroups`), (snap) => setOptionGroups(snap.val() || []));
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); };
   }, [authUid, shopUid]);
 
   useEffect(() => {
@@ -63,22 +83,39 @@ export default function CustomerOrder({ shopUid }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order?.id]);
 
-  function setQty(menuId, qty) {
-    setCart((c) => ({ ...c, [menuId]: Math.max(0, qty) }));
+  function groupsForMenu(menu) {
+    const ids = menu.optionGroupIds || [];
+    return optionGroups.filter((g) => ids.includes(g.id));
   }
 
-  const cartItems = menus ? Object.entries(cart)
-    .filter(([, qty]) => qty > 0)
-    .map(([menuId, qty]) => {
-      const m = menus.find((x) => x.id === menuId);
-      return m ? { menuId, name: m.name, qty, unitPrice: m.priceStore } : null;
-    })
-    .filter(Boolean) : [];
-  const total = cartItems.reduce((s, i) => s + i.unitPrice * i.qty, 0);
+  function openMenu(menu) {
+    const groups = groupsForMenu(menu);
+    if (groups.length === 0) {
+      addToCart(menu, 1, []);
+      return;
+    }
+    setPickingMenu(menu);
+  }
+
+  function addToCart(menu, qty, options) {
+    const unitPrice = menu.priceStore + options.reduce((s, o) => s + (o.priceDelta || 0), 0);
+    setCart((c) => [...c, { lineId: genLineId(), menuId: menu.id, name: menu.name, unitPrice, qty, options }]);
+  }
+
+  function removeLine(lineId) {
+    setCart((c) => c.filter((l) => l.lineId !== lineId));
+  }
+
+  function setLineQty(lineId, qty) {
+    if (qty <= 0) { removeLine(lineId); return; }
+    setCart((c) => c.map((l) => (l.lineId === lineId ? { ...l, qty } : l)));
+  }
+
+  const total = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0);
 
   async function checkout() {
     setError("");
-    if (cartItems.length === 0) { setError("กรุณาเลือกเมนูอย่างน้อย 1 รายการ"); return; }
+    if (cart.length === 0) { setError("กรุณาเลือกเมนูอย่างน้อย 1 รายการ"); return; }
     if (!phone.trim()) { setError("กรุณาใส่เบอร์โทร"); return; }
     if (!promptpayId) { setError("ร้านนี้ยังไม่เปิดรับชำระผ่าน QR (ยังไม่ได้ตั้งค่า PromptPay)"); return; }
     setSubmitting(true);
@@ -87,7 +124,7 @@ export default function CustomerOrder({ shopUid }) {
       const orderData = {
         customerUid: authUid,
         customerPhone: phone.trim(),
-        items: cartItems,
+        items: cart.map(({ lineId, ...rest }) => rest),
         total,
         status: "pending",
         createdAt: new Date().toISOString(),
@@ -105,7 +142,7 @@ export default function CustomerOrder({ shopUid }) {
     }
   }
 
-  if (error && !menus && step === "menu" && !authUid) {
+  if (!authUid && error) {
     return <div style={wrap}><div style={card}>{error}</div></div>;
   }
 
@@ -134,9 +171,14 @@ export default function CustomerOrder({ shopUid }) {
             </div>
           )}
           <div style={{ textAlign: "left", marginTop: 10, borderTop: "1px dashed #E4DBC9", paddingTop: 10 }}>
-            {order.items.map((i) => (
-              <div key={i.menuId} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 3 }}>
-                <span>{i.name} x{i.qty}</span><span>฿{money(i.unitPrice * i.qty)}</span>
+            {order.items.map((i, idx) => (
+              <div key={idx} style={{ fontSize: 12.5, marginBottom: 6 }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span>{i.name} x{i.qty}</span><span>฿{money(i.unitPrice * i.qty)}</span>
+                </div>
+                {i.options?.length > 0 && (
+                  <div style={{ color: "#8A7A6B", fontSize: 11 }}>{i.options.map((o) => o.label).join(", ")}</div>
+                )}
               </div>
             ))}
           </div>
@@ -151,9 +193,12 @@ export default function CustomerOrder({ shopUid }) {
         <div style={card}>
           <p style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: "#54663F", fontWeight: 500, margin: 0 }}>{shopName}</p>
           <h1 style={{ fontFamily: "'Fraunces', serif", fontSize: 20, margin: "4px 0 14px" }}>สรุปออเดอร์</h1>
-          {cartItems.map((i) => (
-            <div key={i.menuId} style={{ display: "flex", justifyContent: "space-between", fontSize: 13.5, marginBottom: 4 }}>
-              <span>{i.name} x{i.qty}</span><span>฿{money(i.unitPrice * i.qty)}</span>
+          {cart.map((l) => (
+            <div key={l.lineId} style={{ marginBottom: 6 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13.5 }}>
+                <span>{l.name} x{l.qty}</span><span>฿{money(l.unitPrice * l.qty)}</span>
+              </div>
+              {l.options.length > 0 && <div style={{ fontSize: 11, color: "#8A7A6B" }}>{l.options.map((o) => o.label).join(", ")}</div>}
             </div>
           ))}
           <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 600, fontSize: 15, borderTop: "1px dashed #E4DBC9", marginTop: 8, paddingTop: 8 }}>
@@ -184,31 +229,125 @@ export default function CustomerOrder({ shopUid }) {
 
         {menus.length === 0 && <p style={{ fontSize: 13, color: "#8A7A6B" }}>ร้านยังไม่มีเมนู</p>}
 
-        {menus.map((m) => {
-          const qty = cart[m.id] || 0;
-          return (
-            <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #EFE9DB" }}>
-              <div>
-                <div style={{ fontWeight: 500, fontSize: 14 }}>{m.name}</div>
-                <div style={{ fontSize: 12, color: "#8A7A6B" }}>฿{money(m.priceStore)}</div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <button style={{ ...btn, padding: "4px 10px" }} onClick={() => setQty(m.id, qty - 1)}>−</button>
-                <span style={{ minWidth: 18, textAlign: "center" }}>{qty}</span>
-                <button style={{ ...btn, padding: "4px 10px" }} onClick={() => setQty(m.id, qty + 1)}>+</button>
-              </div>
+        {menus.map((m) => (
+          <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #EFE9DB" }}>
+            <div>
+              <div style={{ fontWeight: 500, fontSize: 14 }}>{m.name}</div>
+              <div style={{ fontSize: 12, color: "#8A7A6B" }}>฿{money(m.priceStore)}</div>
             </div>
-          );
-        })}
+            <button style={btn} onClick={() => openMenu(m)}>เพิ่ม</button>
+          </div>
+        ))}
+
+        {cart.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <p style={{ fontSize: 12.5, fontWeight: 600, color: "#5C4A3B", margin: "0 0 8px" }}>ตะกร้าของคุณ</p>
+            {cart.map((l) => (
+              <div key={l.lineId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, marginBottom: 6 }}>
+                <div>
+                  <div>{l.name}{l.options.length > 0 && <span style={{ color: "#8A7A6B", fontSize: 11 }}> ({l.options.map((o) => o.label).join(", ")})</span>}</div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <button style={{ ...btn, padding: "3px 9px" }} onClick={() => setLineQty(l.lineId, l.qty - 1)}>−</button>
+                  <span style={{ minWidth: 16, textAlign: "center" }}>{l.qty}</span>
+                  <button style={{ ...btn, padding: "3px 9px" }} onClick={() => setLineQty(l.lineId, l.qty + 1)}>+</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {error && <p style={{ fontSize: 12, color: "#A33A3A", margin: "10px 0 0" }}>{error}</p>}
 
         <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 600, fontSize: 15, marginTop: 14 }}>
           <span>รวม</span><span>฿{money(total)}</span>
         </div>
-        <button style={{ ...btnAccent, marginTop: 12 }} onClick={() => { setError(""); if (cartItems.length === 0) { setError("กรุณาเลือกเมนูอย่างน้อย 1 รายการ"); return; } setStep("phone"); }}>
+        <button style={{ ...btnAccent, marginTop: 12 }} onClick={() => { setError(""); if (cart.length === 0) { setError("กรุณาเลือกเมนูอย่างน้อย 1 รายการ"); return; } setStep("phone"); }}>
           ต่อไป
         </button>
+      </div>
+
+      {pickingMenu && (
+        <OptionPickerModal
+          menu={pickingMenu}
+          groups={groupsForMenu(pickingMenu)}
+          onCancel={() => setPickingMenu(null)}
+          onConfirm={(qty, options) => { addToCart(pickingMenu, qty, options); setPickingMenu(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function OptionPickerModal({ menu, groups, onCancel, onConfirm }) {
+  const [qty, setQty] = useState(1);
+  const [selections, setSelections] = useState({});
+  const [err, setErr] = useState("");
+
+  function pick(groupId, choice) {
+    setSelections((s) => ({ ...s, [groupId]: choice }));
+  }
+
+  function confirm() {
+    for (const g of groups) {
+      if (g.required && !selections[g.id]) {
+        setErr(`กรุณาเลือก "${g.name}"`);
+        return;
+      }
+    }
+    const options = groups
+      .map((g) => selections[g.id])
+      .filter(Boolean)
+      .map((c) => ({ groupId: c.groupId, groupName: c.groupName, choiceId: c.id, label: c.label, priceDelta: c.priceDelta || 0 }));
+    onConfirm(qty, options);
+  }
+
+  return (
+    <div style={overlay} onClick={onCancel}>
+      <div style={{ background: "#fff", borderRadius: "16px 16px 0 0", padding: 20, width: "100%", maxWidth: 420, maxHeight: "85vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 18, margin: "0 0 14px" }}>{menu.name}</h2>
+
+        {groups.map((g) => (
+          <div key={g.id} style={{ marginBottom: 16 }}>
+            <p style={{ fontSize: 13, fontWeight: 600, margin: "0 0 2px" }}>{g.name}</p>
+            <p style={{ fontSize: 11, color: "#8A7A6B", margin: "0 0 8px" }}>{g.required ? "กรุณาเลือก 1 ข้อ" : "เลือกได้ (ไม่บังคับ)"}</p>
+            {g.choices.map((c) => {
+              const selected = selections[g.id]?.id === c.id;
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => pick(g.id, { ...c, groupId: g.id, groupName: g.name })}
+                  style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%",
+                    textAlign: "left", padding: "9px 12px", marginBottom: 6, borderRadius: 9, cursor: "pointer",
+                    border: selected ? "1.5px solid #6E8256" : "1px solid #E4DBC9",
+                    background: selected ? "#E4EAD9" : "#fff", color: "#3E2C20", fontSize: 13,
+                  }}
+                >
+                  <span>
+                    <div style={{ fontWeight: 500 }}>{c.label}</div>
+                    {c.note && <div style={{ fontSize: 11, color: "#8A7A6B" }}>{c.note}</div>}
+                  </span>
+                  <span style={{ fontSize: 12.5, whiteSpace: "nowrap", marginLeft: 8 }}>{c.priceDelta ? `+฿${c.priceDelta}` : "฿0"}</span>
+                </button>
+              );
+            })}
+          </div>
+        ))}
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "6px 0 16px" }}>
+          <span style={{ fontSize: 13 }}>จำนวน</span>
+          <button style={{ ...btn, padding: "4px 10px" }} onClick={() => setQty((q) => Math.max(1, q - 1))}>−</button>
+          <span style={{ minWidth: 18, textAlign: "center" }}>{qty}</span>
+          <button style={{ ...btn, padding: "4px 10px" }} onClick={() => setQty((q) => q + 1)}>+</button>
+        </div>
+
+        {err && <p style={{ fontSize: 12, color: "#A33A3A", margin: "0 0 10px" }}>{err}</p>}
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <button style={btn} onClick={onCancel}>ยกเลิก</button>
+          <button style={btnAccent} onClick={confirm}>เพิ่มลงตะกร้า</button>
+        </div>
       </div>
     </div>
   );

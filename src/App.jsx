@@ -91,20 +91,68 @@ function seedPlatforms() {
   ];
 }
 
+function seedOptionGroups() {
+  return [
+    {
+      id: genId("opt"),
+      name: "เมล็ดกาแฟ",
+      required: true,
+      choices: [
+        { id: genId("choice"), label: "Classic - Medium Dark", note: "fruity, Caramel, Chocolate, Nutty", priceDelta: 0 },
+        { id: genId("choice"), label: "Brazil Blend - Medium", note: "caramel Candy, Rich Milk Chocolate", priceDelta: 20 },
+      ],
+    },
+    {
+      id: genId("opt"),
+      name: "ระดับความหวาน",
+      required: true,
+      choices: [
+        { id: genId("choice"), label: "หวานปกติ", note: "", priceDelta: 0 },
+        { id: genId("choice"), label: "หวาน 50%", note: "", priceDelta: 0 },
+        { id: genId("choice"), label: "หวาน 25%", note: "", priceDelta: 0 },
+        { id: genId("choice"), label: "ไม่หวาน", note: "", priceDelta: 0 },
+      ],
+    },
+    {
+      id: genId("opt"),
+      name: "นมที่ใช้",
+      required: false,
+      choices: [
+        { id: genId("choice"), label: "นมสด", note: "", priceDelta: 0 },
+        { id: genId("choice"), label: "นม Oat", note: "", priceDelta: 10 },
+        { id: genId("choice"), label: "ไม่ใส่นม", note: "", priceDelta: 0 },
+      ],
+    },
+  ];
+}
+
 function defaultState() {
+  const optionGroups = seedOptionGroups();
+  const [beanGroup, sweetnessGroup, milkGroup] = optionGroups;
+  const menus = seedMenus();
+  for (const m of menus) {
+    const hasCoffee = m.ingredients.some((l) => l.ingredientId === "coffee_bluekoff");
+    const hasMilk = m.ingredients.some((l) => l.ingredientId === "milk_fresh");
+    m.optionGroupIds = [
+      ...(hasCoffee ? [beanGroup.id] : []),
+      sweetnessGroup.id,
+      ...(hasMilk ? [milkGroup.id] : []),
+    ];
+  }
   return {
     ingredients: seedIngredients(),
-    menus: seedMenus(),
+    menus,
     sales: [],
     purchases: [],
     settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "" },
+    optionGroups,
   };
 }
 
 function normalizeData(raw) {
   return {
     ingredients: raw.ingredients || [],
-    menus: (raw.menus || []).map((m) => ({ ...m, ingredients: m.ingredients || [] })),
+    menus: (raw.menus || []).map((m) => ({ ...m, ingredients: m.ingredients || [], optionGroupIds: m.optionGroupIds || [] })),
     sales: raw.sales || [],
     purchases: raw.purchases || [],
     settings: {
@@ -113,6 +161,7 @@ function normalizeData(raw) {
       platforms: raw.settings?.platforms || [],
       promptpayId: raw.settings?.promptpayId || "",
     },
+    optionGroups: (raw.optionGroups || []).map((g) => ({ ...g, choices: g.choices || [] })),
   };
 }
 
@@ -158,6 +207,7 @@ const TABS = [
   { id: "sell", label: "ขายเครื่องดื่ม", icon: "cash-register" },
   { id: "orders", label: "ออเดอร์ลูกค้า", icon: "receipt" },
   { id: "menus", label: "เมนู & สูตร", icon: "cup" },
+  { id: "options", label: "ตัวเลือกเสริม", icon: "list-details" },
   { id: "ingredients", label: "วัตถุดิบ & สต็อก", icon: "boxes" },
   { id: "reports", label: "รายงาน", icon: "chart-line" },
   { id: "settings", label: "ตั้งค่า", icon: "settings" },
@@ -312,6 +362,7 @@ function ShopApp({ uid }) {
           {tab === "menus" && <MenusPanel data={data} ingredientsById={ingredientsById} updateData={updateData} showToast={showToast} />}
           {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "reports" && <ReportsPanel data={data} />}
+          {tab === "options" && <OptionGroupsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "settings" && <SettingsPanel data={data} updateData={updateData} showToast={showToast} uid={uid} />}
         </div>
 
@@ -559,7 +610,8 @@ function OrdersPanel({ uid, recordSale, showToast }) {
   function confirmPaid(order) {
     update(ref(db, `orders/${uid}/${order.id}`), { status: "paid" }).catch((err) => showToast("อัปเดตไม่สำเร็จ: " + err.message));
     for (const item of order.items) {
-      recordSale(item.menuId, item.qty, "online", {});
+      const upcharge = (item.options || []).reduce((s, o) => s + (o.priceDelta || 0), 0);
+      recordSale(item.menuId, item.qty, "online", { upcharge, milkLabel: (item.options || []).map((o) => o.label).join(", ") || null });
     }
     showToast(`ยืนยันออเดอร์ ${order.customerPhone} แล้ว บันทึกยอดขายให้อัตโนมัติ`);
   }
@@ -585,9 +637,14 @@ function OrdersPanel({ uid, recordSale, showToast }) {
                 <span>{new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</span>
               </div>
               <div style={{ margin: "8px 0", fontSize: 13 }}>
-                {o.items.map((i) => (
-                  <div key={i.menuId} style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span>{i.name} x{i.qty}</span><span>฿{money(i.unitPrice * i.qty)}</span>
+                {o.items.map((i, idx) => (
+                  <div key={idx} style={{ marginBottom: 4 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span>{i.name} x{i.qty}</span><span>฿{money(i.unitPrice * i.qty)}</span>
+                    </div>
+                    {i.options?.length > 0 && (
+                      <div style={{ fontSize: 11, color: "var(--espresso-2)" }}>{i.options.map((o2) => o2.label).join(", ")}</div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -628,7 +685,7 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
   const [editing, setEditing] = useState(null);
 
   function newMenu() {
-    setEditing({ id: null, name: "", priceStore: 0, priceDelivery: 0, ingredients: [] });
+    setEditing({ id: null, name: "", priceStore: 0, priceDelivery: 0, ingredients: [], optionGroupIds: [] });
   }
 
   function saveMenu(menu) {
@@ -650,7 +707,7 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
   }
 
   if (editing) {
-    return <MenuEditor menu={editing} ingredients={data.ingredients} onSave={saveMenu} onCancel={() => setEditing(null)} />;
+    return <MenuEditor menu={editing} ingredients={data.ingredients} optionGroups={data.optionGroups} onSave={saveMenu} onCancel={() => setEditing(null)} />;
   }
 
   return (
@@ -713,8 +770,15 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
   );
 }
 
-function MenuEditor({ menu, ingredients, onSave, onCancel }) {
-  const [form, setForm] = useState(menu);
+function MenuEditor({ menu, ingredients, optionGroups, onSave, onCancel }) {
+  const [form, setForm] = useState({ ...menu, optionGroupIds: menu.optionGroupIds || [] });
+
+  function toggleOptionGroup(groupId) {
+    setForm((f) => {
+      const has = f.optionGroupIds.includes(groupId);
+      return { ...f, optionGroupIds: has ? f.optionGroupIds.filter((id) => id !== groupId) : [...f.optionGroupIds, groupId] };
+    });
+  }
 
   function addLine() {
     setForm((f) => ({ ...f, ingredients: [...f.ingredients, { ingredientId: ingredients[0]?.id, qty: 0 }] }));
@@ -756,6 +820,18 @@ function MenuEditor({ menu, ingredients, onSave, onCancel }) {
         </div>
       ))}
       <button className="cbtn" onClick={addLine}><Icon name="plus" size={13} /> เพิ่มส่วนผสม</button>
+
+      <p style={{ fontSize: 12, color: "var(--espresso-2)", margin: "16px 0 6px" }}>ตัวเลือกเสริมที่ลูกค้าจะเห็นตอนสั่ง (ตั้งค่ากลุ่มตัวเลือกได้ในแท็บ "ตัวเลือกเสริม")</p>
+      {optionGroups.length === 0 ? (
+        <EmptyNote text="ยังไม่มีกลุ่มตัวเลือกให้เลือก" />
+      ) : (
+        optionGroups.map((g) => (
+          <label key={g.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, marginBottom: 4 }}>
+            <input type="checkbox" checked={form.optionGroupIds.includes(g.id)} onChange={() => toggleOptionGroup(g.id)} />
+            {g.name}{g.required ? " (บังคับเลือก)" : ""}
+          </label>
+        ))
+      )}
 
       <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
         <button className="cbtn cbtn-accent" onClick={() => onSave(form)}>บันทึกเมนู</button>
@@ -1039,6 +1115,82 @@ function ReportsPanel({ data }) {
   );
 }
 
+function OptionGroupsPanel({ data, updateData, showToast }) {
+  function addGroup() {
+    updateData((next) => {
+      next.optionGroups.push({ id: genId("opt"), name: "ตัวเลือกใหม่", required: false, choices: [] });
+    });
+  }
+  function removeGroup(groupId) {
+    updateData((next) => {
+      next.optionGroups = next.optionGroups.filter((g) => g.id !== groupId);
+      for (const m of next.menus) m.optionGroupIds = (m.optionGroupIds || []).filter((id) => id !== groupId);
+    });
+  }
+  function patchGroup(groupId, patch) {
+    updateData((next) => {
+      const g = next.optionGroups.find((x) => x.id === groupId);
+      if (g) Object.assign(g, patch);
+    });
+  }
+  function addChoice(groupId) {
+    updateData((next) => {
+      const g = next.optionGroups.find((x) => x.id === groupId);
+      if (g) g.choices.push({ id: genId("choice"), label: "ตัวเลือกใหม่", note: "", priceDelta: 0 });
+    });
+  }
+  function patchChoice(groupId, choiceId, patch) {
+    updateData((next) => {
+      const g = next.optionGroups.find((x) => x.id === groupId);
+      const c = g?.choices.find((x) => x.id === choiceId);
+      if (c) Object.assign(c, patch);
+    });
+  }
+  function removeChoice(groupId, choiceId) {
+    updateData((next) => {
+      const g = next.optionGroups.find((x) => x.id === groupId);
+      if (g) g.choices = g.choices.filter((c) => c.id !== choiceId);
+    });
+  }
+
+  return (
+    <div style={{ maxWidth: 640 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <SectionTitle icon="list-details" text="ตัวเลือกเสริมสำหรับลูกค้า (เช่น เมล็ดกาแฟ, ความหวาน, นม)" />
+        <button className="cbtn cbtn-accent" onClick={addGroup}><Icon name="plus" size={14} /> เพิ่มกลุ่มตัวเลือก</button>
+      </div>
+      <p style={{ fontSize: 11.5, color: "var(--espresso-2)", margin: "0 0 14px" }}>
+        ตั้งค่าที่นี่ครั้งเดียว แล้วไปติ๊กเลือกว่าเมนูไหนใช้กลุ่มตัวเลือกไหนได้ในแท็บ "เมนู & สูตร" ตอนแก้ไขเมนู
+      </p>
+
+      {data.optionGroups.length === 0 && <EmptyNote text={'ยังไม่มีกลุ่มตัวเลือก กด "เพิ่มกลุ่มตัวเลือก" เพื่อเริ่ม'} />}
+
+      {data.optionGroups.map((g) => (
+        <div key={g.id} style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14, marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+            <input className="cfield" value={g.name} onChange={(e) => patchGroup(g.id, { name: e.target.value })} style={{ flex: 1 }} />
+            <label style={{ fontSize: 12, color: "var(--espresso-2)", display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>
+              <input type="checkbox" checked={g.required} onChange={(e) => patchGroup(g.id, { required: e.target.checked })} />
+              บังคับเลือก
+            </label>
+            <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => removeGroup(g.id)}><Icon name="trash" size={13} /></button>
+          </div>
+
+          {g.choices.map((c) => (
+            <div key={c.id} style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center", paddingLeft: 12 }}>
+              <input className="cfield" value={c.label} onChange={(e) => patchChoice(g.id, c.id, { label: e.target.value })} placeholder="ชื่อตัวเลือก" style={{ flex: 1.2 }} />
+              <input className="cfield" value={c.note} onChange={(e) => patchChoice(g.id, c.id, { note: e.target.value })} placeholder="คำอธิบาย (ถ้ามี)" style={{ flex: 1.5 }} />
+              <input className="cfield" type="number" value={c.priceDelta} onChange={(e) => patchChoice(g.id, c.id, { priceDelta: Number(e.target.value) })} style={{ width: 70 }} title="ราคาเพิ่ม (บาท)" />
+              <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => removeChoice(g.id, c.id)}><Icon name="x" size={13} /></button>
+            </div>
+          ))}
+          <button className="cbtn" style={{ marginLeft: 12 }} onClick={() => addChoice(g.id)}><Icon name="plus" size={13} /> เพิ่มตัวเลือกย่อย</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function SettingsPanel({ data, updateData, showToast, uid }) {
   const [shopName, setShopName] = useState(data.settings.shopName);
   const [overhead, setOverhead] = useState(data.settings.overheadPerCup);
@@ -1150,7 +1302,7 @@ export default function App() {
     );
   }
 
-  if (!user) return <Login />;
+  if (!user || user.isAnonymous) return <Login />;
 
   return (
     <div style={{ minHeight: "100vh", padding: "24px 12px" }}>
