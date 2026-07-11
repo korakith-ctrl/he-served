@@ -99,6 +99,20 @@ function defaultState() {
   };
 }
 
+function normalizeData(raw) {
+  return {
+    ingredients: raw.ingredients || [],
+    menus: (raw.menus || []).map((m) => ({ ...m, ingredients: m.ingredients || [] })),
+    sales: raw.sales || [],
+    purchases: raw.purchases || [],
+    settings: {
+      overheadPerCup: raw.settings?.overheadPerCup ?? 3.1,
+      shopName: raw.settings?.shopName ?? "ร้านกาแฟของฉัน",
+      platforms: raw.settings?.platforms || [],
+    },
+  };
+}
+
 function resolveLines(menu, substitutions) {
   return menu.ingredients.map((line) => {
     const subId = substitutions[line.ingredientId];
@@ -156,7 +170,7 @@ function ShopApp({ uid }) {
   useEffect(() => {
     const unsub = onValue(shopRef, (snap) => {
       if (snap.exists()) {
-        setData(snap.val());
+        setData(normalizeData(snap.val()));
       } else {
         const seeded = defaultState();
         set(shopRef, seeded).catch((err) => showToast("บันทึกไม่สำเร็จ: " + err.message));
