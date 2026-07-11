@@ -159,11 +159,12 @@ function ShopApp({ uid }) {
         setData(snap.data());
       } else {
         const seeded = defaultState();
-        setDoc(docRef, seeded).catch(() => {});
+        setDoc(docRef, seeded).catch((err) => showToast("บันทึกไม่สำเร็จ: " + err.message));
         setData(seeded);
       }
       isFirstSnapshot.current = false;
-    }, () => {
+    }, (err) => {
+      showToast("เชื่อมต่อฐานข้อมูลไม่สำเร็จ: " + err.message);
       setData(defaultState());
     });
     return () => unsub();
@@ -173,7 +174,7 @@ function ShopApp({ uid }) {
   useEffect(() => {
     if (!data || isFirstSnapshot.current) return;
     const t = setTimeout(() => {
-      setDoc(docRef, data).catch(() => {});
+      setDoc(docRef, data).catch((err) => showToast("บันทึกไม่สำเร็จ: " + err.message));
     }, 400);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
