@@ -66,8 +66,8 @@ function seedIngredients() {
 }
 
 function seedMenus() {
-  const mk = (name, priceStore, priceDelivery, ings) => ({
-    id: genId("menu"), name, priceStore, priceDelivery, available: true,
+  const mk = (name, priceStore, priceDelivery, ings, category) => ({
+    id: genId("menu"), name, priceStore, priceDelivery, available: true, category: category || "กาแฟ", imageUrl: "",
     ingredients: ings.map(([ingredientId, qty]) => ({ ingredientId, qty })),
   });
   const pack = [["cup_16", 1], ["lid_98", 1], ["straw_black", 1], ["zipbag_drink", 1], ["sticker", 1]];
@@ -77,8 +77,8 @@ function seedMenus() {
     mk("Iced Latte", 50, 60, [["coffee_bluekoff", 18], ["milk_fresh", 110], ["water", 40], ["ice", 90], ...pack]),
     mk("Iced Mocha", 55, 65, [["coffee_bluekoff", 18], ["cocoa_powder", 5], ["milk_fresh", 70], ["milk_condensed", 20], ["milk_evaporated", 20], ["ice", 90], ...pack]),
     mk("Iced Es-Yen", 45, 55, [["coffee_bluekoff", 18], ["milk_fresh", 60], ["milk_condensed", 25], ["milk_evaporated", 25], ["ice", 90], ...pack]),
-    mk("Iced Cocoa", 50, 60, [["cocoa_powder", 20], ["milk_fresh", 40], ["milk_condensed", 25], ["milk_evaporated", 25], ["water", 60], ["ice", 90], ...pack]),
-    mk("Matcha Latte", 60, 70, [["matcha_peace", 4], ["milk_fresh", 150], ["syrup", 15], ["ice", 90], ...pack]),
+    mk("Iced Cocoa", 50, 60, [["cocoa_powder", 20], ["milk_fresh", 40], ["milk_condensed", 25], ["milk_evaporated", 25], ["water", 60], ["ice", 90], ...pack], "โกโก้ / ชา"),
+    mk("Matcha Latte", 60, 70, [["matcha_peace", 4], ["milk_fresh", 150], ["syrup", 15], ["ice", 90], ...pack], "มัทฉะ"),
   ];
 }
 
@@ -152,7 +152,10 @@ function defaultState() {
 function normalizeData(raw) {
   return {
     ingredients: raw.ingredients || [],
-    menus: (raw.menus || []).map((m) => ({ ...m, ingredients: m.ingredients || [], optionGroupIds: m.optionGroupIds || [], available: m.available ?? true })),
+    menus: (raw.menus || []).map((m) => ({
+      ...m, ingredients: m.ingredients || [], optionGroupIds: m.optionGroupIds || [],
+      available: m.available ?? true, category: m.category || "อื่นๆ", imageUrl: m.imageUrl || "",
+    })),
     sales: raw.sales || [],
     purchases: raw.purchases || [],
     settings: {
@@ -746,10 +749,11 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
   const [editing, setEditing] = useState(null);
 
   function newMenu() {
-    setEditing({ id: null, name: "", priceStore: 0, priceDelivery: 0, ingredients: [], optionGroupIds: [], available: true });
+    setEditing({ id: null, name: "", priceStore: 0, priceDelivery: 0, ingredients: [], optionGroupIds: [], available: true, category: "กาแฟ", imageUrl: "" });
   }
 
   function saveMenu(menu) {
+    menu = { ...menu, category: menu.category.trim() || "อื่นๆ" };
     updateData((next) => {
       if (menu.id) {
         const idx = next.menus.findIndex((m) => m.id === menu.id);
@@ -775,7 +779,8 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
   }
 
   if (editing) {
-    return <MenuEditor menu={editing} ingredients={data.ingredients} optionGroups={data.optionGroups} onSave={saveMenu} onCancel={() => setEditing(null)} />;
+    const categories = [...new Set(data.menus.map((m) => m.category).filter(Boolean))];
+    return <MenuEditor menu={editing} ingredients={data.ingredients} optionGroups={data.optionGroups} categories={categories} onSave={saveMenu} onCancel={() => setEditing(null)} />;
   }
 
   return (
@@ -792,7 +797,13 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
           return (
             <div key={menu.id} style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14, fontFamily: "var(--f-mono)", opacity: menu.available ? 1 : 0.6 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
-                <div style={{ fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 16, color: "var(--espresso-5)" }}>{menu.name}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                  {menu.imageUrl && <img src={menu.imageUrl} alt="" width={32} height={32} style={{ borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />}
+                  <div>
+                    <div style={{ fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 16, color: "var(--espresso-5)" }}>{menu.name}</div>
+                    <div style={{ fontSize: 10.5, color: "var(--espresso-2)", textTransform: "uppercase", letterSpacing: ".03em" }}>{menu.category}</div>
+                  </div>
+                </div>
                 <div style={{ display: "flex", gap: 4 }}>
                   <button className="cbtn" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => toggleAvailable(menu)} title={menu.available ? "ปิดขายชั่วคราว" : "เปิดขาย"}>
                     {menu.available ? "เปิดขาย" : "หมด"}
@@ -841,8 +852,11 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
   );
 }
 
-function MenuEditor({ menu, ingredients, optionGroups, onSave, onCancel }) {
-  const [form, setForm] = useState({ ...menu, optionGroupIds: menu.optionGroupIds || [], available: menu.available ?? true });
+function MenuEditor({ menu, ingredients, optionGroups, categories, onSave, onCancel }) {
+  const [form, setForm] = useState({
+    ...menu, optionGroupIds: menu.optionGroupIds || [], available: menu.available ?? true,
+    category: menu.category || "", imageUrl: menu.imageUrl || "",
+  });
 
   function toggleOptionGroup(groupId) {
     setForm((f) => {
@@ -869,6 +883,23 @@ function MenuEditor({ menu, ingredients, optionGroups, onSave, onCancel }) {
       <SectionTitle icon="cup" text={menu.id ? "แก้ไขเมนู" : "เมนูใหม่"} />
       <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ชื่อเมนู</label>
       <input className="cfield" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ marginBottom: 10 }} />
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>หมวดหมู่ (โชว์เป็นแท็บในหน้าลูกค้า)</label>
+          <input className="cfield" list="menu-categories" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="เช่น กาแฟ, ชาผลไม้" />
+          <datalist id="menu-categories">
+            {categories.map((c) => <option key={c} value={c} />)}
+          </datalist>
+        </div>
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ลิงก์รูปเมนู (ถ้ามี)</label>
+          <input className="cfield" value={form.imageUrl} onChange={(e) => setForm({ ...form, imageUrl: e.target.value })} placeholder="https://..." />
+        </div>
+      </div>
+      {form.imageUrl && (
+        <img src={form.imageUrl} alt="ตัวอย่างรูป" style={{ width: 90, height: 90, objectFit: "cover", borderRadius: 10, border: "1px solid var(--line)", marginBottom: 14 }} />
+      )}
 
       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, marginBottom: 14 }}>
         <input type="checkbox" checked={form.available} onChange={(e) => setForm({ ...form, available: e.target.checked })} />
