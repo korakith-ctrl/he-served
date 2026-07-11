@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, signInAnonymously } from "firebase/auth";
-import { getDatabase, ref, onValue, push, set } from "firebase/database";
+import { getDatabase, ref, onValue, get, push, set } from "firebase/database";
 import QRCode from "qrcode";
 import generatePayload from "promptpay-qr";
 import { firebaseConfig } from "./firebase";
@@ -14,12 +14,34 @@ const customerApp = getApps().some((a) => a.name === "customer-order")
 const auth = getAuth(customerApp);
 const db = getDatabase(customerApp);
 
+const STATUS_TEXT = {
+  pending: "รอร้านยืนยันการรับเงิน...",
+  paid: "ร้านได้รับเงินแล้ว กำลังเตรียมคิว...",
+  preparing: "กำลังชงเครื่องดื่มของคุณ...",
+  ready: "พร้อมรับแล้ว! มารับที่หน้าร้านได้เลย",
+  cancelled: "ออเดอร์นี้ถูกยกเลิก",
+};
+
 function money(n) {
   return (Number(n) || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function genLineId() {
   return "line_" + Math.random().toString(36).slice(2, 9);
+}
+
+function loadMyOrderIds(shopUid) {
+  try {
+    return JSON.parse(localStorage.getItem(`myOrders_${shopUid}`) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveMyOrderId(shopUid, orderId) {
+  const ids = loadMyOrderIds(shopUid).filter((id) => id !== orderId);
+  ids.unshift(orderId);
+  localStorage.setItem(`myOrders_${shopUid}`, JSON.stringify(ids.slice(0, 20)));
 }
 
 const wrap = {
@@ -52,12 +74,14 @@ export default function CustomerOrder({ shopUid }) {
   const [promptpayId, setPromptpayId] = useState("");
   const [cart, setCart] = useState([]);
   const [pickingMenu, setPickingMenu] = useState(null);
+  const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [step, setStep] = useState("menu");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [order, setOrder] = useState(null);
   const [qrDataUrl, setQrDataUrl] = useState(null);
+  const [myOrders, setMyOrders] = useState([]);
 
   useEffect(() => {
     signInAnonymously(auth)
@@ -89,6 +113,7 @@ export default function CustomerOrder({ shopUid }) {
   }
 
   function openMenu(menu) {
+    if (menu.available === false) return;
     const groups = groupsForMenu(menu);
     if (groups.length === 0) {
       addToCart(menu, 1, []);
@@ -116,6 +141,7 @@ export default function CustomerOrder({ shopUid }) {
   async function checkout() {
     setError("");
     if (cart.length === 0) { setError("กรุณาเลือกเมนูอย่างน้อย 1 รายการ"); return; }
+    if (!name.trim()) { setError("กรุณาใส่ชื่อ"); return; }
     if (!phone.trim()) { setError("กรุณาใส่เบอร์โทร"); return; }
     if (!promptpayId) { setError("ร้านนี้ยังไม่เปิดรับชำระผ่าน QR (ยังไม่ได้ตั้งค่า PromptPay)"); return; }
     setSubmitting(true);
@@ -123,6 +149,7 @@ export default function CustomerOrder({ shopUid }) {
       const newRef = push(ref(db, `orders/${shopUid}`));
       const orderData = {
         customerUid: authUid,
+        customerName: name.trim(),
         customerPhone: phone.trim(),
         items: cart.map(({ lineId, ...rest }) => rest),
         total,
@@ -130,6 +157,7 @@ export default function CustomerOrder({ shopUid }) {
         createdAt: new Date().toISOString(),
       };
       await set(newRef, orderData);
+      saveMyOrderId(shopUid, newRef.key);
       const payload = generatePayload(promptpayId, { amount: total });
       const url = await QRCode.toDataURL(payload, { width: 260, margin: 1 });
       setQrDataUrl(url);
@@ -142,6 +170,29 @@ export default function CustomerOrder({ shopUid }) {
     }
   }
 
+  async function openMyOrders() {
+    setError("");
+    const ids = loadMyOrderIds(shopUid);
+    const results = await Promise.all(ids.map(async (id) => {
+      const snap = await get(ref(db, `orders/${shopUid}/${id}`));
+      return snap.exists() ? { id, ...snap.val() } : null;
+    }));
+    setMyOrders(results.filter(Boolean));
+    setStep("myorders");
+  }
+
+  async function reopenOrder(o) {
+    if (o.status === "pending" && promptpayId) {
+      const payload = generatePayload(promptpayId, { amount: o.total });
+      const url = await QRCode.toDataURL(payload, { width: 260, margin: 1 });
+      setQrDataUrl(url);
+    } else {
+      setQrDataUrl(null);
+    }
+    setOrder(o);
+    setStep("pay");
+  }
+
   if (!authUid && error) {
     return <div style={wrap}><div style={card}>{error}</div></div>;
   }
@@ -150,24 +201,53 @@ export default function CustomerOrder({ shopUid }) {
     return <div style={wrap}><div style={card}>กำลังโหลดเมนู...</div></div>;
   }
 
+  if (step === "myorders") {
+    return (
+      <div style={wrap}>
+        <div style={card}>
+          <p style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: "#54663F", fontWeight: 500, margin: 0 }}>{shopName}</p>
+          <h1 style={{ fontFamily: "'Fraunces', serif", fontSize: 20, margin: "4px 0 14px" }}>ออเดอร์ของฉัน</h1>
+          {myOrders.length === 0 ? (
+            <p style={{ fontSize: 13, color: "#8A7A6B" }}>ยังไม่มีประวัติการสั่งซื้อจากอุปกรณ์นี้</p>
+          ) : (
+            myOrders.map((o) => (
+              <button key={o.id} onClick={() => reopenOrder(o)} style={{
+                display: "block", width: "100%", textAlign: "left", background: "#fff", border: "1px solid #E4DBC9",
+                borderRadius: 10, padding: 12, marginBottom: 8, cursor: "pointer",
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                  <span>{new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</span>
+                  <span style={{ fontWeight: 600 }}>฿{money(o.total)}</span>
+                </div>
+                <div style={{ fontSize: 12, color: "#8A7A6B", marginTop: 2 }}>{STATUS_TEXT[o.status] || o.status}</div>
+              </button>
+            ))
+          )}
+          <button style={{ ...btn, marginTop: 8 }} onClick={() => setStep("menu")}>ย้อนกลับ</button>
+        </div>
+      </div>
+    );
+  }
+
   if (step === "pay" && order) {
-    const paid = order.status === "paid" || order.status === "done";
+    const showQr = order.status === "pending";
     return (
       <div style={wrap}>
         <div style={{ ...card, textAlign: "center" }}>
           <p style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: "#54663F", fontWeight: 500, margin: 0 }}>{shopName}</p>
-          <h1 style={{ fontFamily: "'Fraunces', serif", fontSize: 20, margin: "4px 0 14px" }}>สแกนจ่ายผ่าน PromptPay</h1>
-          {!paid ? (
+          <h1 style={{ fontFamily: "'Fraunces', serif", fontSize: 20, margin: "4px 0 14px" }}>
+            {showQr ? "สแกนจ่ายผ่าน PromptPay" : "สถานะออเดอร์"}
+          </h1>
+          {showQr ? (
             <>
-              <img src={qrDataUrl} alt="PromptPay QR" width={220} height={220} style={{ borderRadius: 10, border: "1px solid #E4DBC9" }} />
+              {qrDataUrl && <img src={qrDataUrl} alt="PromptPay QR" width={220} height={220} style={{ borderRadius: 10, border: "1px solid #E4DBC9" }} />}
               <p style={{ fontSize: 22, fontWeight: 600, fontFamily: "'Fraunces', serif", margin: "14px 0 4px" }}>฿{money(order.total)}</p>
-              <p style={{ fontSize: 12, color: "#8A7A6B", margin: "0 0 14px" }}>รอร้านยืนยันการรับเงิน... (หน้านี้จะอัปเดตอัตโนมัติ)</p>
+              <p style={{ fontSize: 12, color: "#8A7A6B", margin: "0 0 14px" }}>{STATUS_TEXT.pending} (หน้านี้จะอัปเดตอัตโนมัติ)</p>
             </>
           ) : (
             <div style={{ padding: "24px 0" }}>
-              <p style={{ fontSize: 40, margin: 0 }}>✅</p>
-              <p style={{ fontSize: 16, fontWeight: 600, margin: "10px 0 4px" }}>ร้านยืนยันรับเงินแล้ว</p>
-              <p style={{ fontSize: 12.5, color: "#8A7A6B" }}>ขอบคุณที่อุดหนุนครับ/ค่ะ</p>
+              <p style={{ fontSize: 40, margin: 0 }}>{order.status === "ready" ? "✅" : order.status === "cancelled" ? "✖️" : "☕"}</p>
+              <p style={{ fontSize: 16, fontWeight: 600, margin: "10px 0 4px" }}>{STATUS_TEXT[order.status] || order.status}</p>
             </div>
           )}
           <div style={{ textAlign: "left", marginTop: 10, borderTop: "1px dashed #E4DBC9", paddingTop: 10 }}>
@@ -182,6 +262,7 @@ export default function CustomerOrder({ shopUid }) {
               </div>
             ))}
           </div>
+          <button style={{ ...btn, marginTop: 14, width: "100%" }} onClick={() => { setOrder(null); setStep("menu"); }}>กลับไปหน้าเมนู</button>
         </div>
       </div>
     );
@@ -205,7 +286,10 @@ export default function CustomerOrder({ shopUid }) {
             <span>รวม</span><span>฿{money(total)}</span>
           </div>
 
-          <label style={{ fontSize: 12, color: "#8A7A6B", display: "block", marginTop: 16 }}>เบอร์โทรศัพท์</label>
+          <label style={{ fontSize: 12, color: "#8A7A6B", display: "block", marginTop: 16 }}>ชื่อ</label>
+          <input style={field} value={name} onChange={(e) => setName(e.target.value)} placeholder="ชื่อของคุณ" />
+
+          <label style={{ fontSize: 12, color: "#8A7A6B", display: "block", marginTop: 12 }}>เบอร์โทรศัพท์</label>
           <input style={field} type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="08xxxxxxxx" />
 
           {error && <p style={{ fontSize: 12, color: "#A33A3A", margin: "10px 0 0" }}>{error}</p>}
@@ -224,20 +308,30 @@ export default function CustomerOrder({ shopUid }) {
   return (
     <div style={wrap}>
       <div style={card}>
-        <p style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: "#54663F", fontWeight: 500, margin: 0 }}>{shopName}</p>
-        <h1 style={{ fontFamily: "'Fraunces', serif", fontSize: 20, margin: "4px 0 14px" }}>สั่งเครื่องดื่ม</h1>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
+          <div>
+            <p style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: "#54663F", fontWeight: 500, margin: 0 }}>{shopName}</p>
+            <h1 style={{ fontFamily: "'Fraunces', serif", fontSize: 20, margin: "4px 0 14px" }}>สั่งเครื่องดื่ม</h1>
+          </div>
+          {loadMyOrderIds(shopUid).length > 0 && (
+            <button style={{ ...btn, fontSize: 12, padding: "6px 10px" }} onClick={openMyOrders}>ออเดอร์ของฉัน</button>
+          )}
+        </div>
 
         {menus.length === 0 && <p style={{ fontSize: 13, color: "#8A7A6B" }}>ร้านยังไม่มีเมนู</p>}
 
-        {menus.map((m) => (
-          <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #EFE9DB" }}>
-            <div>
-              <div style={{ fontWeight: 500, fontSize: 14 }}>{m.name}</div>
-              <div style={{ fontSize: 12, color: "#8A7A6B" }}>฿{money(m.priceStore)}</div>
+        {menus.map((m) => {
+          const soldOut = m.available === false;
+          return (
+            <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #EFE9DB", opacity: soldOut ? 0.5 : 1 }}>
+              <div>
+                <div style={{ fontWeight: 500, fontSize: 14 }}>{m.name}</div>
+                <div style={{ fontSize: 12, color: "#8A7A6B" }}>{soldOut ? "หมดวันนี้" : `฿${money(m.priceStore)}`}</div>
+              </div>
+              <button style={btn} disabled={soldOut} onClick={() => openMenu(m)}>{soldOut ? "หมด" : "เพิ่ม"}</button>
             </div>
-            <button style={btn} onClick={() => openMenu(m)}>เพิ่ม</button>
-          </div>
-        ))}
+          );
+        })}
 
         {cart.length > 0 && (
           <div style={{ marginTop: 16 }}>

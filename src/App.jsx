@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { auth, db } from "./firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { ref, onValue, set, update } from "firebase/database";
@@ -67,7 +67,7 @@ function seedIngredients() {
 
 function seedMenus() {
   const mk = (name, priceStore, priceDelivery, ings) => ({
-    id: genId("menu"), name, priceStore, priceDelivery,
+    id: genId("menu"), name, priceStore, priceDelivery, available: true,
     ingredients: ings.map(([ingredientId, qty]) => ({ ingredientId, qty })),
   });
   const pack = [["cup_16", 1], ["lid_98", 1], ["straw_black", 1], ["zipbag_drink", 1], ["sticker", 1]];
@@ -152,7 +152,7 @@ function defaultState() {
 function normalizeData(raw) {
   return {
     ingredients: raw.ingredients || [],
-    menus: (raw.menus || []).map((m) => ({ ...m, ingredients: m.ingredients || [], optionGroupIds: m.optionGroupIds || [] })),
+    menus: (raw.menus || []).map((m) => ({ ...m, ingredients: m.ingredients || [], optionGroupIds: m.optionGroupIds || [], available: m.available ?? true })),
     sales: raw.sales || [],
     purchases: raw.purchases || [],
     settings: {
@@ -198,6 +198,28 @@ function todayStr(d = new Date()) {
   return d.toISOString().slice(0, 10);
 }
 
+function playOrderChime() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const now = ctx.currentTime;
+    [880, 1175].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, now + i * 0.14);
+      gain.gain.exponentialRampToValueAtTime(0.2, now + i * 0.14 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.14 + 0.3);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + i * 0.14);
+      osc.stop(now + i * 0.14 + 0.32);
+    });
+    setTimeout(() => ctx.close(), 700);
+  } catch {
+    // Web Audio unavailable — silently skip
+  }
+}
+
 function Icon({ name, size = 18, style }) {
   return <i className={"ti ti-" + name} style={{ fontSize: size, ...style }} aria-hidden="true"></i>;
 }
@@ -217,9 +239,28 @@ function ShopApp({ uid }) {
   const [data, setData] = useState(null);
   const [tab, setTab] = useState("dashboard");
   const [toast, setToast] = useState(null);
+  const [orders, setOrders] = useState([]);
+  const prevPendingCount = useRef(0);
+  const isFirstOrdersSnapshot = useRef(true);
 
   const shopRef = ref(db, "shops/" + uid);
   const isFirstSnapshot = useMemo(() => ({ current: true }), [uid]);
+
+  useEffect(() => {
+    const unsub = onValue(ref(db, `orders/${uid}`), (snap) => {
+      const val = snap.val() || {};
+      const list = Object.entries(val).map(([id, o]) => ({ id, ...o }));
+      list.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+      const pendingCount = list.filter((o) => o.status === "pending").length;
+      if (!isFirstOrdersSnapshot.current && pendingCount > prevPendingCount.current) {
+        playOrderChime();
+      }
+      prevPendingCount.current = pendingCount;
+      isFirstOrdersSnapshot.current = false;
+      setOrders(list);
+    });
+    return () => unsub();
+  }, [uid]);
 
   useEffect(() => {
     const unsub = onValue(shopRef, (snap) => {
@@ -348,17 +389,26 @@ function ShopApp({ uid }) {
         <Header shopName={data.settings.shopName} onSignOut={() => signOut(auth)} />
 
         <div style={{ display: "flex", gap: 2, padding: "0 20px", borderBottom: "1px solid var(--line)", overflowX: "auto" }}>
-          {TABS.map((t) => (
-            <button key={t.id} className={"ctab" + (tab === t.id ? " active" : "")} onClick={() => setTab(t.id)}>
-              <Icon name={t.icon} size={16} /> {t.label}
-            </button>
-          ))}
+          {TABS.map((t) => {
+            const pendingCount = t.id === "orders" ? orders.filter((o) => o.status === "pending").length : 0;
+            return (
+              <button key={t.id} className={"ctab" + (tab === t.id ? " active" : "")} onClick={() => setTab(t.id)} style={{ position: "relative" }}>
+                <Icon name={t.icon} size={16} /> {t.label}
+                {pendingCount > 0 && (
+                  <span style={{
+                    background: "var(--danger)", color: "#fff", fontSize: 10, fontWeight: 600, lineHeight: 1,
+                    borderRadius: 999, padding: "3px 6px", marginLeft: 2,
+                  }}>{pendingCount}</span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
         <div style={{ padding: 20, minHeight: 320 }}>
           {tab === "dashboard" && <Dashboard data={data} ingredientsById={ingredientsById} setTab={setTab} recordSale={recordSale} />}
           {tab === "sell" && <SellPanel data={data} ingredientsById={ingredientsById} recordSale={recordSale} />}
-          {tab === "orders" && <OrdersPanel uid={uid} recordSale={recordSale} showToast={showToast} />}
+          {tab === "orders" && <OrdersPanel uid={uid} orders={orders} recordSale={recordSale} showToast={showToast} />}
           {tab === "menus" && <MenusPanel data={data} ingredientsById={ingredientsById} updateData={updateData} showToast={showToast} />}
           {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "reports" && <ReportsPanel data={data} />}
@@ -593,36 +643,42 @@ function SellPanel({ data, ingredientsById, recordSale }) {
   );
 }
 
-function OrdersPanel({ uid, recordSale, showToast }) {
-  const [orders, setOrders] = useState(null);
+const ORDER_STATUS_LABEL = { pending: "รอยืนยัน", paid: "จ่ายแล้ว", preparing: "กำลังทำ", ready: "พร้อมรับ", cancelled: "ยกเลิก" };
 
-  useEffect(() => {
-    const unsub = onValue(ref(db, `orders/${uid}`), (snap) => {
-      const val = snap.val() || {};
-      const list = Object.entries(val).map(([id, o]) => ({ id, ...o }));
-      list.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-      setOrders(list);
-    });
-    return () => unsub();
-  }, [uid]);
+function OrderItemLines({ items }) {
+  return (
+    <div style={{ margin: "8px 0", fontSize: 13 }}>
+      {items.map((i, idx) => (
+        <div key={idx} style={{ marginBottom: 4 }}>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span>{i.name} x{i.qty}</span><span>฿{money(i.unitPrice * i.qty)}</span>
+          </div>
+          {i.options?.length > 0 && (
+            <div style={{ fontSize: 11, color: "var(--espresso-2)" }}>{i.options.map((o) => o.label).join(", ")}</div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function OrdersPanel({ uid, orders, recordSale, showToast }) {
+  function setStatus(order, status) {
+    update(ref(db, `orders/${uid}/${order.id}`), { status }).catch((err) => showToast("อัปเดตไม่สำเร็จ: " + err.message));
+  }
 
   function confirmPaid(order) {
-    update(ref(db, `orders/${uid}/${order.id}`), { status: "paid" }).catch((err) => showToast("อัปเดตไม่สำเร็จ: " + err.message));
+    setStatus(order, "paid");
     for (const item of order.items) {
       const upcharge = (item.options || []).reduce((s, o) => s + (o.priceDelta || 0), 0);
       recordSale(item.menuId, item.qty, "online", { upcharge, milkLabel: (item.options || []).map((o) => o.label).join(", ") || null });
     }
-    showToast(`ยืนยันออเดอร์ ${order.customerPhone} แล้ว บันทึกยอดขายให้อัตโนมัติ`);
+    showToast(`ยืนยันออเดอร์ ${order.customerName || order.customerPhone} แล้ว บันทึกยอดขายให้อัตโนมัติ`);
   }
-
-  function cancelOrder(order) {
-    update(ref(db, `orders/${uid}/${order.id}`), { status: "cancelled" }).catch((err) => showToast("อัปเดตไม่สำเร็จ: " + err.message));
-  }
-
-  if (orders === null) return <EmptyNote text="กำลังโหลดออเดอร์..." />;
 
   const pending = orders.filter((o) => o.status === "pending");
-  const others = orders.filter((o) => o.status !== "pending").slice(0, 20);
+  const inProgress = orders.filter((o) => o.status === "paid" || o.status === "preparing");
+  const history = orders.filter((o) => o.status === "ready" || o.status === "cancelled").slice(0, 20);
 
   return (
     <div>
@@ -632,45 +688,51 @@ function OrdersPanel({ uid, recordSale, showToast }) {
           {pending.map((o) => (
             <div key={o.id} style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "var(--espresso-2)" }}>
-                <span>{o.customerPhone}</span>
+                <span>{o.customerName ? `${o.customerName} · ${o.customerPhone}` : o.customerPhone}</span>
                 <span>{new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</span>
               </div>
-              <div style={{ margin: "8px 0", fontSize: 13 }}>
-                {o.items.map((i, idx) => (
-                  <div key={idx} style={{ marginBottom: 4 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>{i.name} x{i.qty}</span><span>฿{money(i.unitPrice * i.qty)}</span>
-                    </div>
-                    {i.options?.length > 0 && (
-                      <div style={{ fontSize: 11, color: "var(--espresso-2)" }}>{i.options.map((o2) => o2.label).join(", ")}</div>
-                    )}
-                  </div>
-                ))}
-              </div>
+              <OrderItemLines items={o.items} />
               <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 600, fontSize: 14, borderTop: "1px dashed var(--line)", paddingTop: 6, marginBottom: 10 }}>
                 <span>รวม</span><span>฿{money(o.total)}</span>
               </div>
               <div style={{ display: "flex", gap: 6 }}>
                 <button className="cbtn cbtn-accent" style={{ flex: 1 }} onClick={() => confirmPaid(o)}>ยืนยันรับเงินแล้ว</button>
-                <button className="cbtn cbtn-danger" onClick={() => cancelOrder(o)}><Icon name="x" size={13} /></button>
+                <button className="cbtn cbtn-danger" onClick={() => setStatus(o, "cancelled")}><Icon name="x" size={13} /></button>
               </div>
             </div>
           ))}
         </div>
       )}
 
+      <SectionTitle icon="cup" text={`กำลังทำ (${inProgress.length})`} />
+      {inProgress.length === 0 ? <EmptyNote text="ไม่มีออเดอร์ที่กำลังทำอยู่" /> : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12, marginBottom: 24 }}>
+          {inProgress.map((o) => (
+            <div key={o.id} style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "var(--espresso-2)" }}>
+                <span>{o.customerName ? `${o.customerName} · ${o.customerPhone}` : o.customerPhone}</span>
+                <span className="chpill" style={{ background: "var(--sage-light)", color: "var(--sage-dark)" }}>{ORDER_STATUS_LABEL[o.status]}</span>
+              </div>
+              <OrderItemLines items={o.items} />
+              {o.status === "paid" && <button className="cbtn cbtn-accent" style={{ width: "100%" }} onClick={() => setStatus(o, "preparing")}>เริ่มชง</button>}
+              {o.status === "preparing" && <button className="cbtn cbtn-accent" style={{ width: "100%" }} onClick={() => setStatus(o, "ready")}>พร้อมรับแล้ว</button>}
+            </div>
+          ))}
+        </div>
+      )}
+
       <SectionTitle icon="history" text="ประวัติล่าสุด" />
-      {others.length === 0 ? <EmptyNote text="ยังไม่มีประวัติ" /> : (
+      {history.length === 0 ? <EmptyNote text="ยังไม่มีประวัติ" /> : (
         <table className="cdata">
-          <thead><tr><th>เวลา</th><th>เบอร์โทร</th><th>รายการ</th><th>ยอด</th><th>สถานะ</th></tr></thead>
+          <thead><tr><th>เวลา</th><th>ลูกค้า</th><th>รายการ</th><th>ยอด</th><th>สถานะ</th></tr></thead>
           <tbody>
-            {others.map((o) => (
+            {history.map((o) => (
               <tr key={o.id}>
                 <td>{new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</td>
-                <td>{o.customerPhone}</td>
+                <td>{o.customerName ? `${o.customerName} · ${o.customerPhone}` : o.customerPhone}</td>
                 <td>{o.items.map((i) => `${i.name} x${i.qty}`).join(", ")}</td>
                 <td>฿{money(o.total)}</td>
-                <td>{o.status === "paid" ? "จ่ายแล้ว" : o.status === "cancelled" ? "ยกเลิก" : o.status}</td>
+                <td>{ORDER_STATUS_LABEL[o.status] || o.status}</td>
               </tr>
             ))}
           </tbody>
@@ -684,7 +746,7 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
   const [editing, setEditing] = useState(null);
 
   function newMenu() {
-    setEditing({ id: null, name: "", priceStore: 0, priceDelivery: 0, ingredients: [], optionGroupIds: [] });
+    setEditing({ id: null, name: "", priceStore: 0, priceDelivery: 0, ingredients: [], optionGroupIds: [], available: true });
   }
 
   function saveMenu(menu) {
@@ -698,6 +760,13 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
     });
     setEditing(null);
     showToast("บันทึกเมนูแล้ว");
+  }
+
+  function toggleAvailable(menu) {
+    updateData((next) => {
+      const m = next.menus.find((x) => x.id === menu.id);
+      if (m) m.available = !m.available;
+    });
   }
 
   function deleteMenu(id) {
@@ -721,10 +790,13 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
           const totalCost = ingredientCost + data.settings.overheadPerCup;
           const marginStore = menu.priceStore > 0 ? ((menu.priceStore - totalCost) / menu.priceStore) * 100 : 0;
           return (
-            <div key={menu.id} style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14, fontFamily: "var(--f-mono)" }}>
+            <div key={menu.id} style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14, fontFamily: "var(--f-mono)", opacity: menu.available ? 1 : 0.6 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
                 <div style={{ fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 16, color: "var(--espresso-5)" }}>{menu.name}</div>
                 <div style={{ display: "flex", gap: 4 }}>
+                  <button className="cbtn" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => toggleAvailable(menu)} title={menu.available ? "ปิดขายชั่วคราว" : "เปิดขาย"}>
+                    {menu.available ? "เปิดขาย" : "หมด"}
+                  </button>
                   <button className="cbtn" style={{ padding: "4px 8px" }} onClick={() => setEditing(menu)}><Icon name="edit" size={13} /></button>
                   <button className="cbtn cbtn-danger" style={{ padding: "4px 8px" }} onClick={() => deleteMenu(menu.id)}><Icon name="trash" size={13} /></button>
                 </div>
@@ -770,7 +842,7 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
 }
 
 function MenuEditor({ menu, ingredients, optionGroups, onSave, onCancel }) {
-  const [form, setForm] = useState({ ...menu, optionGroupIds: menu.optionGroupIds || [] });
+  const [form, setForm] = useState({ ...menu, optionGroupIds: menu.optionGroupIds || [], available: menu.available ?? true });
 
   function toggleOptionGroup(groupId) {
     setForm((f) => {
@@ -797,6 +869,11 @@ function MenuEditor({ menu, ingredients, optionGroups, onSave, onCancel }) {
       <SectionTitle icon="cup" text={menu.id ? "แก้ไขเมนู" : "เมนูใหม่"} />
       <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ชื่อเมนู</label>
       <input className="cfield" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ marginBottom: 10 }} />
+
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, marginBottom: 14 }}>
+        <input type="checkbox" checked={form.available} onChange={(e) => setForm({ ...form, available: e.target.checked })} />
+        เปิดขายเมนูนี้ (ปิดไว้ถ้าวัตถุดิบหมด ลูกค้าจะสั่งไม่ได้ชั่วคราว)
+      </label>
       <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
         <div style={{ flex: 1 }}>
           <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ราคาขายหน้าร้าน (บาท)</label>
