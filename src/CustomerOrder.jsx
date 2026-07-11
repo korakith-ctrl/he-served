@@ -32,6 +32,24 @@ const COLORS = {
   danger: "#B23A2E", line: "#E2D8C7",
 };
 
+const GLASS_PANEL = {
+  background: "rgba(255,255,255,0.42)",
+  backdropFilter: "blur(20px) saturate(180%)",
+  WebkitBackdropFilter: "blur(20px) saturate(180%)",
+  border: "1px solid rgba(255,255,255,0.55)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.6), 0 8px 24px rgba(43,29,20,0.10)",
+};
+
+function GlassBackdrop() {
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: -1, overflow: "hidden", background: "linear-gradient(160deg, #F7F1E7, #ECE1CE)" }}>
+      <div style={{ position: "absolute", top: "-10%", left: "-10%", width: "55%", height: "45%", borderRadius: "50%", background: "#0B4A7A", opacity: 0.35, filter: "blur(70px)", animation: "blobFloat1 16s ease-in-out infinite" }} />
+      <div style={{ position: "absolute", top: "-5%", right: "-12%", width: "45%", height: "40%", borderRadius: "50%", background: "#CE560D", opacity: 0.3, filter: "blur(70px)", animation: "blobFloat2 18s ease-in-out infinite" }} />
+      <div style={{ position: "absolute", bottom: "-15%", left: "20%", width: "60%", height: "50%", borderRadius: "50%", background: "#A66F42", opacity: 0.28, filter: "blur(80px)", animation: "blobFloat3 20s ease-in-out infinite" }} />
+    </div>
+  );
+}
+
 function money(n) {
   return (Number(n) || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -74,25 +92,32 @@ function saveMyOrderId(shopUid, orderId) {
 }
 
 const btn = {
-  border: `1px solid ${COLORS.line}`, background: "#fff", color: COLORS.espresso4, borderRadius: 9,
+  border: "1px solid rgba(255,255,255,0.6)",
+  background: "rgba(255,255,255,0.5)",
+  backdropFilter: "blur(14px) saturate(180%)",
+  WebkitBackdropFilter: "blur(14px) saturate(180%)",
+  color: COLORS.espresso4, borderRadius: 11,
   padding: "9px 14px", fontSize: 13.5, fontWeight: 500, cursor: "pointer",
 };
-const btnAccent = { ...btn, background: COLORS.sage, color: "#fff", borderColor: COLORS.sage, width: "100%" };
+const btnAccent = {
+  ...btn, background: COLORS.sage, color: "#fff", borderColor: COLORS.sage, width: "100%",
+  backdropFilter: "none", WebkitBackdropFilter: "none",
+};
 const field = {
-  width: "100%", border: `1px solid ${COLORS.line}`, borderRadius: 8, padding: "9px 10px", fontSize: 14,
-  boxSizing: "border-box", marginTop: 4,
+  width: "100%", border: "1px solid rgba(255,255,255,0.65)", background: "rgba(255,255,255,0.55)",
+  borderRadius: 10, padding: "9px 10px", fontSize: 14, boxSizing: "border-box", marginTop: 4,
 };
 const overlay = {
-  position: "fixed", inset: 0, background: "rgba(43,29,20,0.45)", display: "flex",
-  alignItems: "flex-end", justifyContent: "center", zIndex: 50,
+  position: "fixed", inset: 0, background: "rgba(43,29,20,0.35)",
+  backdropFilter: "blur(3px)", WebkitBackdropFilter: "blur(3px)",
+  display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 50,
 };
 const centerWrap = {
-  minHeight: "100vh", background: COLORS.cream, fontFamily: "'Inter', sans-serif", color: COLORS.espresso4,
+  minHeight: "100vh", fontFamily: "'Inter', sans-serif", color: COLORS.espresso4,
   display: "flex", justifyContent: "center", padding: "20px 12px",
 };
 const centerCard = {
-  background: "#fff", border: `1px solid ${COLORS.line}`, borderRadius: 16, padding: 20, width: "100%", maxWidth: 420,
-  height: "fit-content",
+  ...GLASS_PANEL, borderRadius: 20, padding: 20, width: "100%", maxWidth: 420, height: "fit-content",
 };
 
 const GLOBAL_CSS = `
@@ -131,6 +156,9 @@ const GLOBAL_CSS = `
     from { stroke-dashoffset: 48; }
     to { stroke-dashoffset: 0; }
   }
+  @keyframes blobFloat1 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(6%,-8%) scale(1.1); } }
+  @keyframes blobFloat2 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-8%,6%) scale(1.06); } }
+  @keyframes blobFloat3 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(5%,5%) scale(1.12); } }
 `;
 
 function MenuThumb({ imageUrl }) {
@@ -435,6 +463,7 @@ export default function CustomerOrder({ shopUid }) {
     return (
       <div className="corder" style={centerWrap}>
         <style>{GLOBAL_CSS}</style>
+        <GlassBackdrop />
         <div style={centerCard}>
           <p style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: COLORS.sageDark, fontWeight: 500, margin: 0 }}>{shopName}</p>
           <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, margin: "4px 0 14px" }}>ออเดอร์ของฉัน</h1>
@@ -443,8 +472,8 @@ export default function CustomerOrder({ shopUid }) {
           ) : (
             myOrders.map((o) => (
               <button key={o.id} onClick={() => reopenOrder(o)} style={{
-                display: "block", width: "100%", textAlign: "left", background: "#fff", border: `1px solid ${COLORS.line}`,
-                borderRadius: 10, padding: 12, marginBottom: 8, cursor: "pointer",
+                display: "block", width: "100%", textAlign: "left", background: "rgba(255,255,255,0.55)",
+                border: "1px solid rgba(255,255,255,0.65)", borderRadius: 12, padding: 12, marginBottom: 8, cursor: "pointer",
               }}>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
                   <span>{new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</span>
@@ -465,6 +494,7 @@ export default function CustomerOrder({ shopUid }) {
     return (
       <div className="corder" style={centerWrap}>
         <style>{GLOBAL_CSS}</style>
+        <GlassBackdrop />
         <div style={{ ...centerCard, textAlign: "center" }}>
           <div style={{ animation: "successPop .5s cubic-bezier(.34,1.56,.64,1)", margin: "10px auto 4px", width: 84, height: 84 }}>
             <svg viewBox="0 0 52 52" width={84} height={84}>
@@ -503,6 +533,7 @@ export default function CustomerOrder({ shopUid }) {
     return (
       <div className="corder" style={centerWrap}>
         <style>{GLOBAL_CSS}</style>
+        <GlassBackdrop />
         <div style={{ ...centerCard, textAlign: "center" }}>
           <p style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: COLORS.sageDark, fontWeight: 500, margin: 0 }}>{shopName}</p>
           <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, margin: "4px 0 14px" }}>
@@ -575,6 +606,7 @@ export default function CustomerOrder({ shopUid }) {
     return (
       <div className="corder" style={centerWrap}>
         <style>{GLOBAL_CSS}</style>
+        <GlassBackdrop />
         <div style={centerCard}>
           <p style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: COLORS.sageDark, fontWeight: 500, margin: 0 }}>{shopName}</p>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "4px 0 14px" }}>
@@ -661,6 +693,7 @@ export default function CustomerOrder({ shopUid }) {
     return (
       <div className="corder" style={centerWrap}>
         <style>{GLOBAL_CSS}</style>
+        <GlassBackdrop />
         <div style={{ ...centerCard, textAlign: "center" }}>
           <div style={{ marginBottom: 14 }}><BrandLogo height={54} /></div>
           <p style={{ fontSize: 34, margin: "0 0 10px" }}>🔒</p>
@@ -675,36 +708,39 @@ export default function CustomerOrder({ shopUid }) {
   }
 
   return (
-    <div className="corder" style={{ height: "100vh", display: "flex", flexDirection: "column", background: COLORS.cream, fontFamily: "'Inter', sans-serif", color: COLORS.espresso4 }}>
+    <div className="corder" style={{ height: "100vh", display: "flex", flexDirection: "column", fontFamily: "'Inter', sans-serif", color: COLORS.espresso4 }}>
       <style>{GLOBAL_CSS}</style>
       <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.44.0/iconfont/tabler-icons.min.css" />
+      <GlassBackdrop />
 
-      <div style={{ padding: "12px 16px", borderBottom: `1px solid ${COLORS.line}`, display: "flex", justifyContent: "space-between", alignItems: "center", background: COLORS.surface }}>
+      <div style={{ ...GLASS_PANEL, margin: "10px 10px 0", borderRadius: 18, padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <BrandLogo height={34} />
           <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 18, margin: 0, color: COLORS.espresso5 }}>{shopName}</h1>
         </div>
         {loadMyOrderIds(shopUid).length > 0 && (
-          <button style={{ ...btn, fontSize: 11.5, padding: "6px 10px" }} onClick={openMyOrders}>
+          <button style={{ ...btn, background: "rgba(255,255,255,0.55)", border: "1px solid rgba(255,255,255,0.7)", fontSize: 11.5, padding: "6px 10px" }} onClick={openMyOrders}>
             <i className="ti ti-receipt" style={{ fontSize: 13, marginRight: 4 }} aria-hidden="true"></i>ออเดอร์ของฉัน
           </button>
         )}
       </div>
 
       {bannerImageUrl && (
-        <img
-          src={bannerImageUrl}
-          alt=""
-          style={{ width: "100%", height: 84, objectFit: "cover", display: "block", flexShrink: 0 }}
-          onError={(e) => { e.currentTarget.style.display = "none"; }}
-        />
+        <div style={{ margin: "10px 10px 0", borderRadius: 16, overflow: "hidden", border: "1px solid rgba(255,255,255,0.55)", boxShadow: "0 8px 24px rgba(43,29,20,0.10)", flexShrink: 0 }}>
+          <img
+            src={bannerImageUrl}
+            alt=""
+            style={{ width: "100%", height: 84, objectFit: "cover", display: "block" }}
+            onError={(e) => { e.currentTarget.parentElement.style.display = "none"; }}
+          />
+        </div>
       )}
 
       {menus.length === 0 ? (
         <div style={{ padding: 24, textAlign: "center", color: COLORS.espresso2, fontSize: 13 }}>ร้านยังไม่มีเมนู</div>
       ) : (
-        <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-          <nav style={{ width: 92, flexShrink: 0, background: COLORS.cream2, overflowY: "auto", borderRight: `1px solid ${COLORS.line}` }}>
+        <div style={{ display: "flex", flex: 1, minHeight: 0, gap: 10, padding: "10px 10px 0" }}>
+          <nav style={{ ...GLASS_PANEL, width: 88, flexShrink: 0, overflowY: "auto", borderRadius: 16, padding: "8px 0" }}>
             {categories.map((cat) => {
               const active = activeCategory === cat;
               return (
@@ -712,9 +748,10 @@ export default function CustomerOrder({ shopUid }) {
                   key={cat}
                   onClick={() => scrollToCategory(cat)}
                   style={{
-                    display: "block", width: "100%", textAlign: "center", padding: "14px 6px", fontSize: 12.5,
-                    lineHeight: 1.3, background: active ? COLORS.cream : "transparent", color: active ? COLORS.espresso5 : COLORS.espresso2,
-                    fontWeight: active ? 600 : 500, border: "none", borderLeft: active ? `3px solid ${COLORS.sage}` : "3px solid transparent",
+                    display: "block", width: "calc(100% - 12px)", margin: "0 6px 6px", textAlign: "center", padding: "10px 6px", fontSize: 12.5,
+                    lineHeight: 1.3, borderRadius: 11, background: active ? "rgba(255,255,255,0.75)" : "transparent",
+                    color: active ? COLORS.espresso5 : COLORS.espresso2, fontWeight: active ? 600 : 500, border: "none",
+                    boxShadow: active ? "0 2px 8px rgba(43,29,20,0.10)" : "none",
                   }}
                 >
                   {cat}
@@ -723,9 +760,9 @@ export default function CustomerOrder({ shopUid }) {
             })}
           </nav>
 
-          <main ref={mainRef} style={{ flex: 1, overflowY: "auto", padding: "4px 14px 100px" }}>
+          <main ref={mainRef} style={{ flex: 1, overflowY: "auto", padding: "0 0 100px" }}>
             {categories.map((cat) => (
-              <section key={cat} data-category={cat} ref={(el) => { sectionRefs.current[cat] = el; }} style={{ paddingTop: 16 }}>
+              <section key={cat} data-category={cat} ref={(el) => { sectionRefs.current[cat] = el; }} style={{ padding: "16px 6px 0" }}>
                 <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 600, color: COLORS.espresso5, margin: "0 0 10px" }}>{cat}</h2>
                 {menus.filter((m) => m.category === cat).map((m) => {
                   const soldOut = m.available === false;
@@ -735,7 +772,7 @@ export default function CustomerOrder({ shopUid }) {
                   const canAddDirectly = groupsForMenu(m).length === 0;
                   return (
                     <div key={m.id} onClick={() => !soldOut && !singleLine && openMenu(m)} style={{
-                      display: "flex", gap: 12, alignItems: "center", padding: "10px 0", borderBottom: `1px solid ${COLORS.line}`,
+                      ...GLASS_PANEL, display: "flex", gap: 12, alignItems: "center", padding: "10px 12px", borderRadius: 14, marginBottom: 8,
                       opacity: soldOut ? 0.5 : 1, cursor: soldOut || singleLine ? "default" : "pointer",
                     }}>
                       <MenuThumb imageUrl={m.imageUrl} />
@@ -748,7 +785,7 @@ export default function CustomerOrder({ shopUid }) {
                       {singleLine ? (
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
                           <button onClick={() => setLineQty(singleLine.lineId, singleLine.qty - 1)} style={{
-                            width: 28, height: 28, borderRadius: 8, border: `1px solid ${COLORS.line}`, background: "#fff",
+                            width: 28, height: 28, borderRadius: 9, border: "1px solid rgba(255,255,255,0.7)", background: "rgba(255,255,255,0.6)",
                             color: COLORS.espresso5, fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
                           }}>−</button>
                           <span style={{ minWidth: 16, textAlign: "center", fontWeight: 600, color: COLORS.espresso5 }}>{qty}</span>
@@ -792,9 +829,10 @@ export default function CustomerOrder({ shopUid }) {
       {cartCount > 0 && (
         <div style={{
           position: "fixed", left: 16, right: 16, bottom: 16, maxWidth: 420, margin: "0 auto",
-          background: COLORS.espresso5, color: "#fff", borderRadius: 16,
+          background: "rgba(43,29,20,0.62)", backdropFilter: "blur(20px) saturate(180%)", WebkitBackdropFilter: "blur(20px) saturate(180%)",
+          border: "1px solid rgba(255,255,255,0.15)", color: "#fff", borderRadius: 16,
           padding: "12px 14px 12px 18px", display: "flex", alignItems: "center", justifyContent: "space-between",
-          boxShadow: "0 8px 24px rgba(43,29,20,0.35)", animation: "fadeIn .2s ease",
+          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.15), 0 8px 24px rgba(43,29,20,0.35)", animation: "fadeIn .2s ease",
         }}>
           <button
             onClick={() => setShowCart(true)}
@@ -885,7 +923,7 @@ function SlipUpload({ shopUid, orderId, onVerified }) {
   }
 
   return (
-    <div style={{ background: COLORS.cream2, border: `1px solid ${COLORS.line}`, borderRadius: 10, padding: "10px 12px", marginBottom: 14, textAlign: "left" }}>
+    <div style={{ background: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.6)", borderRadius: 12, padding: "10px 12px", marginBottom: 14, textAlign: "left" }}>
       <p style={{ fontSize: 12, fontWeight: 600, margin: "0 0 4px" }}>โอนเงินแล้ว? ยืนยันไวขึ้นได้</p>
       <p style={{ fontSize: 11.5, color: COLORS.espresso2, margin: "0 0 8px" }}>แนบรูปสลิปโอนเงิน ระบบจะเช็คยอดและยืนยันออเดอร์ให้อัตโนมัติ</p>
       <input ref={inputRef} type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
@@ -904,7 +942,7 @@ function SlipUpload({ shopUid, orderId, onVerified }) {
 function CartDrawer({ cart, total, onClose, onSetQty, onRemove, onCheckout }) {
   return (
     <div style={overlay} onClick={onClose}>
-      <div style={{ background: "#fff", borderRadius: "16px 16px 0 0", padding: 20, width: "100%", maxWidth: 420, maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+      <div style={{ ...GLASS_PANEL, borderRadius: "20px 20px 0 0", padding: 20, width: "100%", maxWidth: 420, maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
         <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 18, margin: "0 0 14px", color: COLORS.espresso5 }}>ตะกร้าของคุณ</h2>
 
         {cart.length === 0 ? (
@@ -967,7 +1005,7 @@ function OptionPickerModal({ menu, groups, onCancel, onConfirm }) {
 
   return (
     <div style={overlay} onClick={onCancel}>
-      <div style={{ background: "#fff", borderRadius: "16px 16px 0 0", padding: 20, width: "100%", maxWidth: 420, maxHeight: "85vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+      <div style={{ ...GLASS_PANEL, borderRadius: "20px 20px 0 0", padding: 20, width: "100%", maxWidth: 420, maxHeight: "85vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
         <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 18, margin: "0 0 14px" }}>{menu.name}</h2>
 
         {groups.map((g) => (
