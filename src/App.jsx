@@ -378,39 +378,30 @@ function ShopApp({ uid }) {
     showToast(`บันทึกการขาย ${menu.name} x${qty} (${channel === "delivery" ? (platform ? platform.name : "เดลิเวอรี่") : "หน้าร้าน"}) แล้ว`);
   }
 
+  const activeTabInfo = TABS.find((t) => t.id === tab);
+  const pendingOrderCount = orders.filter((o) => o.status === "pending").length;
+
   return (
-    <div style={{
-      fontFamily: "var(--f-body)", color: "var(--espresso-4)",
-      borderRadius: 20, overflow: "hidden", border: "1px solid rgba(255,255,255,0.55)", maxWidth: 980, margin: "0 auto", position: "relative",
-      boxShadow: "0 20px 60px rgba(6,51,96,0.12)",
-    }}>
+    <div style={{ fontFamily: "var(--f-body)", color: "var(--espresso-4)", minHeight: "100vh" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
         .coffeeapp * { box-sizing: border-box; }
         .coffeeapp button { font-family: inherit; cursor: pointer; }
         .coffeeapp input, .coffeeapp select { font-family: inherit; }
-        .cbtn {
-          border: 1px solid rgba(255,255,255,0.6); background: rgba(255,255,255,0.5);
-          backdrop-filter: blur(14px) saturate(180%); -webkit-backdrop-filter: blur(14px) saturate(180%);
-          color: var(--espresso-4); border-radius: 11px; padding: 8px 14px; font-size: 13px; font-weight: 500;
-          transition: transform .08s ease, background .15s ease;
-        }
-        .cbtn:hover { background: rgba(255,255,255,0.75); }
-        .cbtn:active { transform: scale(0.94); }
-        .cbtn-accent { background: var(--sage); color: #fff; border-color: var(--sage); backdrop-filter: none; -webkit-backdrop-filter: none; }
+        .cbtn { border: 1px solid var(--line); background: #fff; color: var(--espresso-4); border-radius: 9px; padding: 8px 14px; font-size: 13px; font-weight: 500; transition: background .15s ease, border-color .15s ease; }
+        .cbtn:hover { background: var(--cream-2); }
+        .cbtn:active { transform: scale(0.97); }
+        .cbtn-accent { background: var(--sage); color: #fff; border-color: var(--sage); }
         .cbtn-accent:hover { background: var(--sage-dark); }
-        .cbtn-danger { color: var(--danger); border-color: var(--danger-line); background: var(--danger-light); backdrop-filter: none; -webkit-backdrop-filter: none; }
+        .cbtn-danger { color: var(--danger); border-color: var(--danger-line); background: var(--danger-light); }
         .cbtn-danger:hover { background: var(--danger-line); }
-        .cbtn-edit { color: var(--info-dark); border-color: var(--info); background: var(--info-light); backdrop-filter: none; -webkit-backdrop-filter: none; }
+        .cbtn-edit { color: var(--info-dark); border-color: var(--info); background: var(--info-light); }
         .cbtn-edit:hover { background: var(--info); color: #fff; }
-        .cfield {
-          border: 1px solid rgba(255,255,255,0.65); background: rgba(255,255,255,0.55);
-          border-radius: 10px; padding: 7px 10px; font-size: 13px; color: var(--espresso-4); width: 100%;
-        }
+        .cfield { border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font-size: 13px; background: #fff; color: var(--espresso-4); width: 100%; }
         .cfield:focus { outline: 2px solid var(--sage); outline-offset: 1px; }
-        .ctab { border: none; background: transparent; color: var(--espresso-2); padding: 10px 14px; font-size: 13px; font-weight: 500; border-radius: 11px 11px 0 0; display: flex; align-items: center; gap: 6px; transition: background .15s ease, color .15s ease; }
-        .ctab.active { background: rgba(255,255,255,0.6); color: var(--espresso-5); }
-        .glass-card { background: rgba(255,255,255,0.5); backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); border: 1px solid rgba(255,255,255,0.6); box-shadow: inset 0 1px 0 rgba(255,255,255,0.6), 0 8px 24px rgba(6,51,96,0.08); }
+        .navitem { border: none; background: transparent; color: var(--espresso-3); padding: 10px 14px; font-size: 13.5px; font-weight: 500; border-radius: 10px; display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; transition: background .15s ease, color .15s ease; }
+        .navitem:hover { background: var(--cream-2); }
+        .navitem.active { background: var(--sage-light); color: var(--sage-dark); font-weight: 600; }
         table.cdata { width: 100%; border-collapse: collapse; font-size: 13px; }
         table.cdata th { text-align: left; font-weight: 500; color: var(--espresso-2); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; padding: 6px 8px; border-bottom: 1px solid var(--line); }
         table.cdata td { padding: 8px; border-bottom: 1px solid var(--line-soft); }
@@ -420,49 +411,69 @@ function ShopApp({ uid }) {
           15% { box-shadow: 0 0 0 4px var(--sage); background: var(--sage-light); }
           100% { box-shadow: 0 0 0 0 rgba(206,86,13,0); background: var(--surface); }
         }
-        @keyframes adminBlobFloat1 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(6%,-8%) scale(1.1); } }
-        @keyframes adminBlobFloat2 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-8%,6%) scale(1.06); } }
-        @keyframes adminBlobFloat3 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(5%,5%) scale(1.12); } }
+        @media (max-width: 860px) {
+          .admin-sidebar { display: none; }
+        }
       `}</style>
       <div className="coffeeapp" style={{
-        "--cream": "#F5F0EA", "--cream-2": "#EDE3D2", "--surface": "rgba(255,255,255,0.55)",
-        "--espresso-5": "#063360", "--espresso-4": "#0B4A7A", "--espresso-3": "#3A5570", "--espresso-2": "#7189A3",
-        "--sage": "#CE560D", "--sage-dark": "#A8440A", "--sage-light": "#F7E0CC",
-        "--gold": "#CE560D", "--gold-dark": "#A8440A", "--gold-light": "#F7E0CC",
-        "--info": "#3D6E8C", "--info-dark": "#2C5069", "--info-light": "#DCE9F0",
-        "--danger": "#B23A2E", "--danger-line": "#E0BDB6", "--danger-light": "#F7E7E3",
-        "--line": "#E2D8C7", "--line-soft": "#EFE6DB",
+        "--cream": "#F4F6F4", "--cream-2": "#EBEFEA", "--surface": "#FFFFFF",
+        "--espresso-5": "#063360", "--espresso-4": "#26364A", "--espresso-3": "#5B6B7C", "--espresso-2": "#8B98A5",
+        "--sage": "#CE560D", "--sage-dark": "#A8440A", "--sage-light": "#FBEBDD",
+        "--gold": "#CE560D", "--gold-dark": "#A8440A", "--gold-light": "#FBEBDD",
+        "--info": "#3D6E8C", "--info-dark": "#2C5069", "--info-light": "#E4EDF2",
+        "--danger": "#B23A2E", "--danger-line": "#E7CAC5", "--danger-light": "#FAEEEC",
+        "--line": "#E4E8E5", "--line-soft": "#EEF1EF",
         "--f-display": "'Fraunces', serif", "--f-body": "'Inter', sans-serif", "--f-mono": "'IBM Plex Mono', monospace",
-        position: "relative",
+        display: "flex", background: "var(--cream)", minHeight: "100vh",
       }}>
-        <div style={{ position: "fixed", inset: 0, zIndex: -1, overflow: "hidden", background: "linear-gradient(160deg, #F7F1E7, #ECE1CE)" }}>
-          <div style={{ position: "absolute", top: "-10%", left: "-10%", width: "55%", height: "45%", borderRadius: "50%", background: "#0B4A7A", opacity: 0.3, filter: "blur(80px)", animation: "adminBlobFloat1 18s ease-in-out infinite" }} />
-          <div style={{ position: "absolute", top: "-5%", right: "-12%", width: "45%", height: "40%", borderRadius: "50%", background: "#CE560D", opacity: 0.25, filter: "blur(80px)", animation: "adminBlobFloat2 20s ease-in-out infinite" }} />
-          <div style={{ position: "absolute", bottom: "-15%", left: "20%", width: "60%", height: "50%", borderRadius: "50%", background: "#A66F42", opacity: 0.22, filter: "blur(90px)", animation: "adminBlobFloat3 22s ease-in-out infinite" }} />
-        </div>
+        <aside className="admin-sidebar" style={{
+          width: 236, flexShrink: 0, background: "#fff", borderRight: "1px solid var(--line)",
+          display: "flex", flexDirection: "column", padding: "18px 14px", position: "sticky", top: 0, height: "100vh",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 8px 18px" }}>
+            <div style={{
+              width: 34, height: 34, borderRadius: 10, background: "var(--sage)", color: "#fff",
+              display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+            }}>
+              <Icon name="coffee" size={18} />
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <p style={{ margin: 0, fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 15, color: "var(--espresso-5)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{data.settings.shopName}</p>
+              <p style={{ margin: 0, fontSize: 10.5, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--espresso-2)" }}>ระบบหลังบ้าน</p>
+            </div>
+          </div>
 
-        <div className="glass-card" style={{ margin: "14px 14px 0", borderRadius: 18, overflow: "hidden" }}>
-          <Header shopName={data.settings.shopName} onSignOut={() => signOut(auth)} />
-
-          <div style={{ display: "flex", justifyContent: "center", gap: 2, padding: "0 16px", borderTop: "1px solid var(--line)", overflowX: "auto" }}>
+          <nav style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, overflowY: "auto" }}>
             {TABS.map((t) => {
-              const pendingCount = t.id === "orders" ? orders.filter((o) => o.status === "pending").length : 0;
+              const pendingCount = t.id === "orders" ? pendingOrderCount : 0;
               return (
-                <button key={t.id} className={"ctab" + (tab === t.id ? " active" : "")} onClick={() => setTab(t.id)} style={{ position: "relative" }}>
-                  <Icon name={t.icon} size={16} /> {t.label}
+                <button key={t.id} className={"navitem" + (tab === t.id ? " active" : "")} onClick={() => setTab(t.id)}>
+                  <Icon name={t.icon} size={17} />
+                  <span style={{ flex: 1 }}>{t.label}</span>
                   {pendingCount > 0 && (
                     <span style={{
                       background: "var(--danger)", color: "#fff", fontSize: 10, fontWeight: 600, lineHeight: 1,
-                      borderRadius: 999, padding: "3px 6px", marginLeft: 2,
+                      borderRadius: 999, padding: "3px 6px",
                     }}>{pendingCount}</span>
                   )}
                 </button>
               );
             })}
-          </div>
-        </div>
+          </nav>
 
-        <div style={{ padding: 20, minHeight: 320 }}>
+          <button className="cbtn" style={{ marginTop: 12, width: "100%", justifyContent: "center", display: "flex", alignItems: "center", gap: 6 }} onClick={() => signOut(auth)}>
+            <Icon name="logout" size={14} /> ออกจากระบบ
+          </button>
+        </aside>
+
+        <main style={{ flex: 1, minWidth: 0, padding: "22px 28px 60px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 22 }}>
+            <div>
+              <p style={{ margin: 0, fontSize: 11.5, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--espresso-2)" }}>{data.settings.shopName}</p>
+              <h1 style={{ margin: "2px 0 0", fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 24, color: "var(--espresso-5)" }}>{activeTabInfo?.label}</h1>
+            </div>
+          </div>
+
           {tab === "dashboard" && <Dashboard data={data} ingredientsById={ingredientsById} setTab={setTab} recordSale={recordSale} />}
           {tab === "sell" && <SellPanel data={data} ingredientsById={ingredientsById} recordSale={recordSale} />}
           {tab === "orders" && <OrdersPanel uid={uid} orders={orders} recordSale={recordSale} showToast={showToast} />}
@@ -471,33 +482,14 @@ function ShopApp({ uid }) {
           {tab === "reports" && <ReportsPanel data={data} />}
           {tab === "options" && <OptionGroupsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "settings" && <SettingsPanel data={data} updateData={updateData} showToast={showToast} uid={uid} />}
-        </div>
+        </main>
 
         {toast && (
           <div style={{
-            position: "absolute", bottom: 18, left: "50%", transform: "translateX(-50%)",
+            position: "fixed", bottom: 18, left: "50%", transform: "translateX(-50%)",
             background: "var(--espresso-5)", color: "#fff", padding: "9px 18px", borderRadius: 10, fontSize: 13, zIndex: 40,
           }}>{toast}</div>
         )}
-      </div>
-    </div>
-  );
-}
-
-function Header({ shopName, onSignOut }) {
-  return (
-    <div style={{ padding: "22px 20px 16px", position: "relative" }}>
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-        <div>
-          <p style={{ margin: 0, fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--sage-dark)", fontWeight: 500 }}>ระบบหลังบ้าน</p>
-          <h1 style={{ margin: "2px 0 0", fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 26, color: "var(--espresso-5)" }}>{shopName}</h1>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <Icon name="coffee" size={30} style={{ color: "var(--sage)" }} />
-          <button className="cbtn" style={{ padding: "6px 10px", fontSize: 12 }} onClick={onSignOut}>
-            <Icon name="logout" size={13} /> ออกจากระบบ
-          </button>
-        </div>
       </div>
     </div>
   );
@@ -1653,9 +1645,5 @@ export default function App() {
 
   if (!user || user.isAnonymous) return <Login />;
 
-  return (
-    <div style={{ minHeight: "100vh", padding: "24px 12px" }}>
-      <ShopApp uid={user.uid} />
-    </div>
-  );
+  return <ShopApp uid={user.uid} />;
 }
