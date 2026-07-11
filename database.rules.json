@@ -14,7 +14,8 @@
           "shopName": { ".read": "auth != null" },
           "promptpayId": { ".read": "auth != null" },
           "acceptingOrders": { ".read": "auth != null" },
-          "slipTestMode": { ".read": "auth != null" }
+          "slipTestMode": { ".read": "auth != null" },
+          "bannerImageUrl": { ".read": "auth != null" }
         }
       }
     },

@@ -202,6 +202,7 @@ export default function CustomerOrder({ shopUid }) {
   const [promptpayId, setPromptpayId] = useState("");
   const [acceptingOrders, setAcceptingOrders] = useState(true);
   const [slipTestMode, setSlipTestMode] = useState(false);
+  const [bannerImageUrl, setBannerImageUrl] = useState("");
   const [cart, setCart] = useState([]);
   const [pickingMenu, setPickingMenu] = useState(null);
   const [name, setName] = useState("");
@@ -246,7 +247,8 @@ export default function CustomerOrder({ shopUid }) {
       (err) => console.error("อ่านสถานะเปิด/ปิดร้านไม่ได้ (เช็คว่า publish database.rules.json ล่าสุดหรือยัง):", err.message)
     );
     const unsub6 = onValue(ref(db, `shops/${shopUid}/settings/slipTestMode`), (snap) => setSlipTestMode(snap.val() === true));
-    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); };
+    const unsub7 = onValue(ref(db, `shops/${shopUid}/settings/bannerImageUrl`), (snap) => setBannerImageUrl(snap.val() || ""));
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); unsub7(); };
   }, [authUid, shopUid]);
 
   useEffect(() => {
@@ -577,7 +579,9 @@ export default function CustomerOrder({ shopUid }) {
           <p style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: COLORS.sageDark, fontWeight: 500, margin: 0 }}>{shopName}</p>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "4px 0 14px" }}>
             <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, margin: 0 }}>สรุปออเดอร์</h1>
-            <button style={{ ...btn, fontSize: 12, padding: "5px 10px" }} onClick={() => setShowCart(true)}>แก้ไข</button>
+            <button style={{ ...btn, fontSize: 12, padding: "5px 10px" }} onClick={() => setShowCart(true)}>
+              <i className="ti ti-edit" style={{ fontSize: 13, marginRight: 3 }} aria-hidden="true"></i>แก้ไข
+            </button>
           </div>
           {cart.map((l) => (
             <div key={l.lineId} style={{ marginBottom: 6 }}>
@@ -675,13 +679,10 @@ export default function CustomerOrder({ shopUid }) {
       <style>{GLOBAL_CSS}</style>
       <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.44.0/iconfont/tabler-icons.min.css" />
 
-      <div style={{ padding: "14px 16px", borderBottom: `1px solid ${COLORS.line}`, display: "flex", justifyContent: "space-between", alignItems: "center", background: COLORS.surface }}>
+      <div style={{ padding: "12px 16px", borderBottom: `1px solid ${COLORS.line}`, display: "flex", justifyContent: "space-between", alignItems: "center", background: COLORS.surface }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <BrandLogo height={30} />
-          <div>
-            <p style={{ fontSize: 10, letterSpacing: ".1em", textTransform: "uppercase", color: COLORS.sageDark, fontWeight: 600, margin: 0 }}>สั่งเครื่องดื่มออนไลน์</p>
-            <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 17, margin: "2px 0 0", color: COLORS.espresso5 }}>{shopName}</h1>
-          </div>
+          <BrandLogo height={34} />
+          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 18, margin: 0, color: COLORS.espresso5 }}>{shopName}</h1>
         </div>
         {loadMyOrderIds(shopUid).length > 0 && (
           <button style={{ ...btn, fontSize: 11.5, padding: "6px 10px" }} onClick={openMyOrders}>
@@ -689,6 +690,15 @@ export default function CustomerOrder({ shopUid }) {
           </button>
         )}
       </div>
+
+      {bannerImageUrl && (
+        <img
+          src={bannerImageUrl}
+          alt=""
+          style={{ width: "100%", height: 84, objectFit: "cover", display: "block", flexShrink: 0 }}
+          onError={(e) => { e.currentTarget.style.display = "none"; }}
+        />
+      )}
 
       {menus.length === 0 ? (
         <div style={{ padding: 24, textAlign: "center", color: COLORS.espresso2, fontSize: 13 }}>ร้านยังไม่มีเมนู</div>

@@ -144,7 +144,7 @@ function defaultState() {
     menus,
     sales: [],
     purchases: [],
-    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true, slipTestMode: false },
+    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true, slipTestMode: false, bannerImageUrl: "" },
     optionGroups,
   };
 }
@@ -165,6 +165,7 @@ function normalizeData(raw) {
       promptpayId: raw.settings?.promptpayId || "",
       acceptingOrders: raw.settings?.acceptingOrders ?? true,
       slipTestMode: raw.settings?.slipTestMode ?? false,
+      bannerImageUrl: raw.settings?.bannerImageUrl || "",
     },
     optionGroups: (raw.optionGroups || []).map((g) => ({ ...g, choices: g.choices || [] })),
   };
@@ -404,6 +405,11 @@ function ShopApp({ uid }) {
         table.cdata th { text-align: left; font-weight: 500; color: var(--espresso-2); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; padding: 6px 8px; border-bottom: 1px solid var(--line); }
         table.cdata td { padding: 8px; border-bottom: 1px solid var(--line-soft); }
         .chpill { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 500; }
+        @keyframes paidFlash {
+          0% { box-shadow: 0 0 0 0 rgba(110,130,86,0); background: var(--surface); }
+          15% { box-shadow: 0 0 0 4px var(--sage); background: var(--sage-light); }
+          100% { box-shadow: 0 0 0 0 rgba(110,130,86,0); background: var(--surface); }
+        }
       `}</style>
       <div className="coffeeapp" style={{
         "--cream": "#FAF6EE", "--cream-2": "#F1EBDD", "--surface": "#FFFFFF",
@@ -751,6 +757,28 @@ function OrderItemLines({ items, note }) {
 }
 
 function OrdersPanel({ uid, orders, recordSale, showToast }) {
+  const prevStatusRef = useRef({});
+  const [justPaidIds, setJustPaidIds] = useState(new Set());
+
+  useEffect(() => {
+    const newlyPaid = [];
+    for (const o of orders) {
+      const prevStatus = prevStatusRef.current[o.id];
+      if (prevStatus && prevStatus !== "paid" && o.status === "paid") newlyPaid.push(o.id);
+      prevStatusRef.current[o.id] = o.status;
+    }
+    if (newlyPaid.length === 0) return;
+    setJustPaidIds((s) => new Set([...s, ...newlyPaid]));
+    const t = setTimeout(() => {
+      setJustPaidIds((s) => {
+        const next = new Set(s);
+        newlyPaid.forEach((id) => next.delete(id));
+        return next;
+      });
+    }, 1800);
+    return () => clearTimeout(t);
+  }, [orders]);
+
   function setStatus(order, status) {
     update(ref(db, `orders/${uid}/${order.id}`), { status }).catch((err) => showToast("อัปเดตไม่สำเร็จ: " + err.message));
   }
@@ -800,7 +828,13 @@ function OrdersPanel({ uid, orders, recordSale, showToast }) {
       {inProgress.length === 0 ? <EmptyNote text="ไม่มีออเดอร์ที่กำลังทำอยู่" /> : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12, marginBottom: 24 }}>
           {inProgress.map((o) => (
-            <div key={o.id} style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14 }}>
+            <div
+              key={o.id}
+              style={{
+                background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14,
+                animation: justPaidIds.has(o.id) ? "paidFlash 1.8s ease" : undefined,
+              }}
+            >
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "var(--espresso-2)" }}>
                 <span>{o.customerName ? `${o.customerName} · ${o.customerPhone}` : o.customerPhone}</span>
                 <StatusBadge status={o.status} />
@@ -1411,6 +1445,7 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
   const [overhead, setOverhead] = useState(data.settings.overheadPerCup);
   const [platforms, setPlatforms] = useState(data.settings.platforms);
   const [promptpayId, setPromptpayId] = useState(data.settings.promptpayId || "");
+  const [bannerImageUrl, setBannerImageUrl] = useState(data.settings.bannerImageUrl || "");
 
   function save() {
     updateData((next) => {
@@ -1418,6 +1453,7 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
       next.settings.overheadPerCup = Number(overhead);
       next.settings.platforms = platforms;
       next.settings.promptpayId = promptpayId.trim();
+      next.settings.bannerImageUrl = bannerImageUrl.trim();
     });
     showToast("บันทึกการตั้งค่าแล้ว");
   }
@@ -1517,6 +1553,23 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
             {data.settings.slipTestMode ? "ปิดโหมดทดสอบ" : "เปิดโหมดทดสอบ"}
           </button>
         </div>
+      </div>
+
+      <div style={{ marginTop: 18 }}>
+        <SectionTitle icon="photo" text="แบนเนอร์โฆษณาหน้าลูกค้า" />
+        <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ลิงก์รูปแบนเนอร์ (แถบยาวด้านบนหน้าเลือกเมนู)</label>
+        <input className="cfield" value={bannerImageUrl} onChange={(e) => setBannerImageUrl(e.target.value)} placeholder="https://..." style={{ marginBottom: 6 }} />
+        <p style={{ fontSize: 11, color: "var(--espresso-2)", margin: "0 0 8px" }}>
+          แนะนำรูปอัตราส่วนยาว ๆ (เช่น 1200×300px) เว้นว่างไว้ถ้าไม่ต้องการแสดงแบนเนอร์
+        </p>
+        {bannerImageUrl && (
+          <img
+            src={bannerImageUrl}
+            alt="ตัวอย่างแบนเนอร์"
+            style={{ width: "100%", maxHeight: 90, objectFit: "cover", borderRadius: 8, border: "1px solid var(--line)", marginBottom: 8 }}
+            onError={(e) => { e.currentTarget.style.display = "none"; }}
+          />
+        )}
       </div>
 
       <div style={{ marginTop: 6 }}>
