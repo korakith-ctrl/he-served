@@ -648,6 +648,31 @@ function SellPanel({ data, ingredientsById, recordSale }) {
 }
 
 const ORDER_STATUS_LABEL = { pending: "รอยืนยัน", paid: "จ่ายแล้ว", preparing: "กำลังทำ", ready: "พร้อมรับ", cancelled: "ยกเลิก" };
+const PAYMENT_METHOD_LABEL = { cash: "เงินสด", promptpay: "พร้อมเพย์" };
+
+function formatPickupDateTH(dateStr) {
+  if (!dateStr) return "";
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function OrderMeta({ paymentMethod, pickupDate }) {
+  if (!paymentMethod && !pickupDate) return null;
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "4px 0" }}>
+      {paymentMethod && (
+        <span className="chpill" style={{ background: "var(--cream-2)", color: "var(--espresso-3)" }}>
+          {paymentMethod === "cash" ? <Icon name="cash" size={11} /> : <Icon name="qrcode" size={11} />} {PAYMENT_METHOD_LABEL[paymentMethod] || paymentMethod}
+        </span>
+      )}
+      {pickupDate && (
+        <span className="chpill" style={{ background: "var(--cream-2)", color: "var(--espresso-3)" }}>
+          <Icon name="calendar" size={11} /> รับ {formatPickupDateTH(pickupDate)}
+        </span>
+      )}
+    </div>
+  );
+}
 
 function OrderItemLines({ items, note }) {
   return (
@@ -700,6 +725,7 @@ function OrdersPanel({ uid, orders, recordSale, showToast }) {
                 <span>{o.customerName ? `${o.customerName} · ${o.customerPhone}` : o.customerPhone}</span>
                 <span>{new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</span>
               </div>
+              <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} />
               <OrderItemLines items={o.items} note={o.note} />
               <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 600, fontSize: 14, borderTop: "1px dashed var(--line)", paddingTop: 6, marginBottom: 10 }}>
                 <span>รวม</span><span>฿{money(o.total)}</span>
@@ -722,6 +748,7 @@ function OrdersPanel({ uid, orders, recordSale, showToast }) {
                 <span>{o.customerName ? `${o.customerName} · ${o.customerPhone}` : o.customerPhone}</span>
                 <span className="chpill" style={{ background: "var(--sage-light)", color: "var(--sage-dark)" }}>{ORDER_STATUS_LABEL[o.status]}</span>
               </div>
+              <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} />
               <OrderItemLines items={o.items} note={o.note} />
               {o.status === "paid" && <button className="cbtn cbtn-accent" style={{ width: "100%" }} onClick={() => setStatus(o, "preparing")}>เริ่มชง</button>}
               {o.status === "preparing" && <button className="cbtn cbtn-accent" style={{ width: "100%" }} onClick={() => setStatus(o, "ready")}>พร้อมรับแล้ว</button>}
@@ -733,13 +760,15 @@ function OrdersPanel({ uid, orders, recordSale, showToast }) {
       <SectionTitle icon="history" text="ประวัติล่าสุด" />
       {history.length === 0 ? <EmptyNote text="ยังไม่มีประวัติ" /> : (
         <table className="cdata">
-          <thead><tr><th>เวลา</th><th>ลูกค้า</th><th>รายการ</th><th>ยอด</th><th>สถานะ</th></tr></thead>
+          <thead><tr><th>เวลา</th><th>ลูกค้า</th><th>รายการ</th><th>วันรับ</th><th>ชำระ</th><th>ยอด</th><th>สถานะ</th></tr></thead>
           <tbody>
             {history.map((o) => (
               <tr key={o.id}>
                 <td>{new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</td>
                 <td>{o.customerName ? `${o.customerName} · ${o.customerPhone}` : o.customerPhone}</td>
                 <td>{o.items.map((i) => `${i.name} x${i.qty}`).join(", ")}</td>
+                <td>{formatPickupDateTH(o.pickupDate)}</td>
+                <td>{PAYMENT_METHOD_LABEL[o.paymentMethod] || "-"}</td>
                 <td>฿{money(o.total)}</td>
                 <td>{ORDER_STATUS_LABEL[o.status] || o.status}</td>
               </tr>

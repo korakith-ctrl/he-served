@@ -38,6 +38,25 @@ function genLineId() {
   return "line_" + Math.random().toString(36).slice(2, 9);
 }
 
+function localDateStr(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function addDays(days) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return localDateStr(d);
+}
+
+function formatPickupDate(dateStr) {
+  if (!dateStr) return "";
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
+}
+
 function loadMyOrderIds(shopUid) {
   try {
     return JSON.parse(localStorage.getItem(`myOrders_${shopUid}`) || "[]");
@@ -176,6 +195,8 @@ export default function CustomerOrder({ shopUid }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [note, setNote] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("promptpay");
+  const [pickupDate, setPickupDate] = useState(addDays(1));
   const [step, setStep] = useState("menu");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -295,7 +316,8 @@ export default function CustomerOrder({ shopUid }) {
     if (cart.length === 0) { setError("กรุณาเลือกเมนูอย่างน้อย 1 รายการ"); return; }
     if (!name.trim()) { setError("กรุณาใส่ชื่อ"); return; }
     if (!phone.trim()) { setError("กรุณาใส่เบอร์โทร"); return; }
-    if (!promptpayId) { setError("ร้านนี้ยังไม่เปิดรับชำระผ่าน QR (ยังไม่ได้ตั้งค่า PromptPay)"); return; }
+    if (pickupDate < addDays(1) || pickupDate > addDays(7)) { setError("วันที่รับต้องล่วงหน้าอย่างน้อย 1 วัน และไม่เกิน 7 วัน"); return; }
+    if (paymentMethod === "promptpay" && !promptpayId) { setError("ร้านนี้ยังไม่เปิดรับชำระผ่าน QR (ยังไม่ได้ตั้งค่า PromptPay)"); return; }
     setSubmitting(true);
     try {
       const newRef = push(ref(db, `orders/${shopUid}`));
@@ -304,6 +326,8 @@ export default function CustomerOrder({ shopUid }) {
         customerName: name.trim(),
         customerPhone: phone.trim(),
         note: note.trim(),
+        paymentMethod,
+        pickupDate,
         items: cart.map(({ lineId, ...rest }) => rest),
         total,
         status: "pending",
@@ -311,9 +335,13 @@ export default function CustomerOrder({ shopUid }) {
       };
       await set(newRef, orderData);
       saveMyOrderId(shopUid, newRef.key);
-      const payload = generatePayload(promptpayId, { amount: total });
-      const url = await QRCode.toDataURL(payload, { width: 260, margin: 1 });
-      setQrDataUrl(url);
+      if (paymentMethod === "promptpay") {
+        const payload = generatePayload(promptpayId, { amount: total });
+        const url = await QRCode.toDataURL(payload, { width: 260, margin: 1 });
+        setQrDataUrl(url);
+      } else {
+        setQrDataUrl(null);
+      }
       setOrder({ id: newRef.key, ...orderData });
       setStep("pay");
     } catch (e) {
@@ -335,7 +363,7 @@ export default function CustomerOrder({ shopUid }) {
   }
 
   async function reopenOrder(o) {
-    if (o.status === "pending" && promptpayId) {
+    if (o.status === "pending" && o.paymentMethod === "promptpay" && promptpayId) {
       const payload = generatePayload(promptpayId, { amount: o.total });
       const url = await QRCode.toDataURL(payload, { width: 260, margin: 1 });
       setQrDataUrl(url);
@@ -384,26 +412,41 @@ export default function CustomerOrder({ shopUid }) {
   }
 
   if (step === "pay" && order) {
-    const showQr = order.status === "pending";
+    const isPending = order.status === "pending";
+    const isCash = order.paymentMethod === "cash";
     return (
       <div className="corder" style={centerWrap}>
         <style>{GLOBAL_CSS}</style>
         <div style={{ ...centerCard, textAlign: "center" }}>
           <p style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: COLORS.sageDark, fontWeight: 500, margin: 0 }}>{shopName}</p>
           <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, margin: "4px 0 14px" }}>
-            {showQr ? "สแกนจ่ายผ่าน PromptPay" : "สถานะออเดอร์"}
+            {isPending ? (isCash ? "ชำระเงินสดที่ร้าน" : "สแกนจ่ายผ่าน PromptPay") : "สถานะออเดอร์"}
           </h1>
-          {showQr ? (
-            <>
-              {qrDataUrl && <img src={qrDataUrl} alt="PromptPay QR" width={220} height={220} style={{ borderRadius: 10, border: `1px solid ${COLORS.line}` }} />}
-              <p style={{ fontSize: 22, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif", margin: "14px 0 4px" }}>{money(order.total)}</p>
-              <p style={{ fontSize: 12, color: COLORS.espresso2, margin: "0 0 14px" }}>{STATUS_TEXT.pending} (หน้านี้จะอัปเดตอัตโนมัติ)</p>
-            </>
+          {isPending ? (
+            isCash ? (
+              <div style={{ padding: "10px 0" }}>
+                <p style={{ fontSize: 40, margin: 0 }}>💵</p>
+                <p style={{ fontSize: 22, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif", margin: "10px 0 4px" }}>{money(order.total)}</p>
+                <p style={{ fontSize: 12, color: COLORS.espresso2, margin: "0 0 14px" }}>กรุณาชำระเงินสดตอนมารับที่ร้าน</p>
+              </div>
+            ) : (
+              <>
+                {qrDataUrl && <img src={qrDataUrl} alt="PromptPay QR" width={220} height={220} style={{ borderRadius: 10, border: `1px solid ${COLORS.line}` }} />}
+                <p style={{ fontSize: 22, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif", margin: "14px 0 4px" }}>{money(order.total)}</p>
+                <p style={{ fontSize: 12, color: COLORS.espresso2, margin: "0 0 14px" }}>{STATUS_TEXT.pending} (หน้านี้จะอัปเดตอัตโนมัติ)</p>
+              </>
+            )
           ) : (
             <div style={{ padding: "24px 0" }}>
               <p style={{ fontSize: 40, margin: 0 }}>{order.status === "ready" ? "✅" : order.status === "cancelled" ? "✖️" : "☕"}</p>
               <p style={{ fontSize: 16, fontWeight: 600, margin: "10px 0 4px" }}>{STATUS_TEXT[order.status] || order.status}</p>
             </div>
+          )}
+          {order.pickupDate && (
+            <p style={{ fontSize: 12.5, color: COLORS.espresso5, fontWeight: 600, margin: "0 0 10px" }}>
+              <i className="ti ti-calendar" style={{ fontSize: 13, marginRight: 4 }} aria-hidden="true"></i>
+              วันที่รับ: {formatPickupDate(order.pickupDate)}
+            </p>
           )}
           <div style={{ textAlign: "left", marginTop: 10, borderTop: `1px dashed ${COLORS.line}`, paddingTop: 10 }}>
             {order.items.map((i, idx) => (
@@ -450,6 +493,30 @@ export default function CustomerOrder({ shopUid }) {
 
           <label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>เบอร์โทรศัพท์</label>
           <input style={field} type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="08xxxxxxxx" />
+
+          <label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>วิธีชำระเงิน</label>
+          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            {[["promptpay", "พร้อมเพย์ (QR)"], ["cash", "เงินสด"]].map(([val, label]) => (
+              <button
+                key={val}
+                onClick={() => setPaymentMethod(val)}
+                style={{
+                  flex: 1, padding: "10px 8px", borderRadius: 9, fontSize: 13, fontWeight: 500, cursor: "pointer",
+                  border: paymentMethod === val ? `1.5px solid ${COLORS.sage}` : `1px solid ${COLORS.line}`,
+                  background: paymentMethod === val ? COLORS.sageLight : "#fff",
+                  color: paymentMethod === val ? COLORS.sageDark : COLORS.espresso4,
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>วันที่รับ (ล่วงหน้า 1-7 วัน)</label>
+          <input
+            style={field} type="date" value={pickupDate} min={addDays(1)} max={addDays(7)}
+            onChange={(e) => setPickupDate(e.target.value)}
+          />
 
           <label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>โน้ตถึงร้าน (ถ้ามี)</label>
           <textarea
