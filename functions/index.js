@@ -32,36 +32,44 @@ exports.verifySlip = onCall({ region: REGION, secrets: [SLIPOK_API_KEY] }, async
     throw new HttpsError("failed-precondition", "ออเดอร์นี้ไม่ได้อยู่ในสถานะรอชำระ");
   }
 
-  const rawBase64 = imageBase64.includes(",") ? imageBase64.split(",").pop() : imageBase64;
+  const testModeSnap = await db.ref(`shops/${shopUid}/settings/slipTestMode`).once("value");
+  const testMode = testModeSnap.val() === true;
 
   let slip;
-  try {
-    const resp = await axios.post(
-      `https://api.slipok.com/api/line/apikey/${SLIPOK_BRANCH_ID.value()}`,
-      { files: rawBase64, amount: order.total, log: true },
-      { headers: { "x-authorization": SLIPOK_API_KEY.value(), "Content-Type": "application/json" } }
-    );
-    slip = resp.data && resp.data.data;
-  } catch (err) {
-    const errData = err.response && err.response.data;
-    logger.error("slipok verify failed", errData || err.message);
-    const code = errData && errData.code;
-    if (code === 1012) throw new HttpsError("already-exists", "สลิปนี้เคยถูกใช้ยืนยันไปแล้ว");
-    if (code === 1013) throw new HttpsError("failed-precondition", "ยอดเงินในสลิปไม่ตรงกับยอดออเดอร์");
-    if (code === 1014) throw new HttpsError("failed-precondition", "สลิปนี้โอนเข้าบัญชีอื่น ไม่ใช่บัญชีร้าน");
-    if (code === 1005 || code === 1006 || code === 1007) {
-      throw new HttpsError("invalid-argument", "อ่านสลิปไม่ได้ กรุณาถ่ายรูปให้ชัดเจนแล้วลองใหม่");
+  let verifiedBy = "slipok-auto";
+  if (testMode) {
+    slip = { amount: order.total, transRef: `TEST-${Date.now()}` };
+    verifiedBy = "slipok-test-mode";
+  } else {
+    const rawBase64 = imageBase64.includes(",") ? imageBase64.split(",").pop() : imageBase64;
+    try {
+      const resp = await axios.post(
+        `https://api.slipok.com/api/line/apikey/${SLIPOK_BRANCH_ID.value()}`,
+        { files: rawBase64, amount: order.total, log: true },
+        { headers: { "x-authorization": SLIPOK_API_KEY.value(), "Content-Type": "application/json" } }
+      );
+      slip = resp.data && resp.data.data;
+    } catch (err) {
+      const errData = err.response && err.response.data;
+      logger.error("slipok verify failed", errData || err.message);
+      const code = errData && errData.code;
+      if (code === 1012) throw new HttpsError("already-exists", "สลิปนี้เคยถูกใช้ยืนยันไปแล้ว");
+      if (code === 1013) throw new HttpsError("failed-precondition", "ยอดเงินในสลิปไม่ตรงกับยอดออเดอร์");
+      if (code === 1014) throw new HttpsError("failed-precondition", "สลิปนี้โอนเข้าบัญชีอื่น ไม่ใช่บัญชีร้าน");
+      if (code === 1005 || code === 1006 || code === 1007) {
+        throw new HttpsError("invalid-argument", "อ่านสลิปไม่ได้ กรุณาถ่ายรูปให้ชัดเจนแล้วลองใหม่");
+      }
+      throw new HttpsError("internal", "ตรวจสอบสลิปไม่สำเร็จ กรุณาลองใหม่ หรือรอร้านตรวจสอบด้วยตนเอง");
     }
-    throw new HttpsError("internal", "ตรวจสอบสลิปไม่สำเร็จ กรุณาลองใหม่ หรือรอร้านตรวจสอบด้วยตนเอง");
   }
 
   await orderRef.update({
     status: "paid",
     paymentVerified: true,
     paymentVerifiedAt: Date.now(),
-    paymentVerifiedBy: "slipok-auto",
+    paymentVerifiedBy: verifiedBy,
     slipRef: slip.transRef || null,
   });
 
-  return { verified: true, amount: slip.amount, transRef: slip.transRef };
+  return { verified: true, amount: slip.amount, transRef: slip.transRef, testMode };
 });

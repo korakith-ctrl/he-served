@@ -201,6 +201,7 @@ export default function CustomerOrder({ shopUid }) {
   const [optionGroups, setOptionGroups] = useState([]);
   const [promptpayId, setPromptpayId] = useState("");
   const [acceptingOrders, setAcceptingOrders] = useState(true);
+  const [slipTestMode, setSlipTestMode] = useState(false);
   const [cart, setCart] = useState([]);
   const [pickingMenu, setPickingMenu] = useState(null);
   const [name, setName] = useState("");
@@ -244,7 +245,8 @@ export default function CustomerOrder({ shopUid }) {
       (snap) => setAcceptingOrders(snap.val() !== false),
       (err) => console.error("อ่านสถานะเปิด/ปิดร้านไม่ได้ (เช็คว่า publish database.rules.json ล่าสุดหรือยัง):", err.message)
     );
-    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); };
+    const unsub6 = onValue(ref(db, `shops/${shopUid}/settings/slipTestMode`), (snap) => setSlipTestMode(snap.val() === true));
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); };
   }, [authUid, shopUid]);
 
   useEffect(() => {
@@ -519,14 +521,21 @@ export default function CustomerOrder({ shopUid }) {
                   {order.paymentVerified ? "ยืนยันการชำระเงินแล้ว ✅" : `${STATUS_TEXT.pending} (หน้านี้จะอัปเดตอัตโนมัติ)`}
                 </p>
                 {!order.paymentVerified && (
-                  <SlipUpload
-                    shopUid={shopUid}
-                    orderId={order.id}
-                    onVerified={() => {
-                      setOrder((prev) => (prev ? { ...prev, paymentVerified: true } : prev));
-                      setStep("success");
-                    }}
-                  />
+                  <>
+                    {slipTestMode && (
+                      <p style={{ fontSize: 11, color: "#9C7530", background: "#F7E9CC", border: "1px solid #E0C489", borderRadius: 8, padding: "6px 9px", margin: "0 0 10px" }}>
+                        โหมดทดสอบ: แนบรูปอะไรก็ผ่านทันที ไม่ใช่การตรวจสอบจริง
+                      </p>
+                    )}
+                    <SlipUpload
+                      shopUid={shopUid}
+                      orderId={order.id}
+                      onVerified={() => {
+                        setOrder((prev) => (prev ? { ...prev, paymentVerified: true } : prev));
+                        setStep("success");
+                      }}
+                    />
+                  </>
                 )}
               </>
             )

@@ -144,7 +144,7 @@ function defaultState() {
     menus,
     sales: [],
     purchases: [],
-    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true },
+    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true, slipTestMode: false },
     optionGroups,
   };
 }
@@ -164,6 +164,7 @@ function normalizeData(raw) {
       platforms: raw.settings?.platforms || [],
       promptpayId: raw.settings?.promptpayId || "",
       acceptingOrders: raw.settings?.acceptingOrders ?? true,
+      slipTestMode: raw.settings?.slipTestMode ?? false,
     },
     optionGroups: (raw.optionGroups || []).map((g) => ({ ...g, choices: g.choices || [] })),
   };
@@ -391,7 +392,10 @@ function ShopApp({ uid }) {
         .cbtn:active { transform: scale(0.97); }
         .cbtn-accent { background: var(--sage); color: #fff; border-color: var(--sage); }
         .cbtn-accent:hover { background: var(--sage-dark); }
-        .cbtn-danger { color: var(--danger); border-color: var(--danger-line); }
+        .cbtn-danger { color: var(--danger); border-color: var(--danger-line); background: var(--danger-light); }
+        .cbtn-danger:hover { background: var(--danger-line); }
+        .cbtn-edit { color: var(--info-dark); border-color: var(--info); background: var(--info-light); }
+        .cbtn-edit:hover { background: var(--info); color: #fff; }
         .cfield { border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font-size: 13px; background: var(--surface); color: var(--espresso-4); width: 100%; }
         .cfield:focus { outline: 2px solid var(--sage); outline-offset: 1px; }
         .ctab { border: none; background: transparent; color: var(--espresso-2); padding: 10px 14px; font-size: 13px; font-weight: 500; border-radius: 9px 9px 0 0; display: flex; align-items: center; gap: 6px; }
@@ -695,8 +699,9 @@ function formatPickupDateTH(dateStr) {
   return new Date(y, m - 1, d).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
 }
 
-function OrderMeta({ paymentMethod, pickupDate, paymentVerified }) {
+function OrderMeta({ paymentMethod, pickupDate, paymentVerified, paymentVerifiedBy }) {
   if (!paymentMethod && !pickupDate) return null;
+  const isTestSlip = paymentVerifiedBy === "slipok-test-mode";
   return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "4px 0" }}>
       {paymentMethod && (
@@ -709,9 +714,14 @@ function OrderMeta({ paymentMethod, pickupDate, paymentVerified }) {
           <Icon name="calendar" size={11} /> รับ {formatPickupDateTH(pickupDate)}
         </span>
       )}
-      {paymentVerified && (
+      {paymentVerified && !isTestSlip && (
         <span className="chpill" style={{ background: "var(--sage-light)", color: "var(--sage-dark)" }}>
           <Icon name="check" size={11} /> ยืนยันสลิปอัตโนมัติแล้ว
+        </span>
+      )}
+      {paymentVerified && isTestSlip && (
+        <span className="chpill" style={{ background: "var(--gold-light)", color: "var(--gold-dark)" }}>
+          <Icon name="flask" size={11} /> สลิปทดสอบ (ไม่นับยอดขาย)
         </span>
       )}
     </div>
@@ -772,14 +782,14 @@ function OrdersPanel({ uid, orders, recordSale, showToast }) {
               <div style={{ fontSize: 11, color: "var(--espresso-2)", marginTop: 2 }}>
                 {new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}
               </div>
-              <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} paymentVerified={o.paymentVerified} />
+              <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} paymentVerified={o.paymentVerified} paymentVerifiedBy={o.paymentVerifiedBy} />
               <OrderItemLines items={o.items} note={o.note} />
               <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 600, fontSize: 14, borderTop: "1px dashed var(--line)", paddingTop: 6, marginBottom: 10 }}>
                 <span>รวม</span><span>฿{money(o.total)}</span>
               </div>
               <div style={{ display: "flex", gap: 6 }}>
                 <button className="cbtn cbtn-accent" style={{ flex: 1 }} onClick={() => confirmPaid(o)}>ยืนยันรับเงินแล้ว</button>
-                <button className="cbtn cbtn-danger" onClick={() => setStatus(o, "cancelled")}><Icon name="x" size={13} /></button>
+                <button className="cbtn cbtn-danger" onClick={() => setStatus(o, "cancelled")} title="ยกเลิกออเดอร์"><Icon name="x" size={13} /></button>
               </div>
             </div>
           ))}
@@ -795,7 +805,7 @@ function OrdersPanel({ uid, orders, recordSale, showToast }) {
                 <span>{o.customerName ? `${o.customerName} · ${o.customerPhone}` : o.customerPhone}</span>
                 <StatusBadge status={o.status} />
               </div>
-              <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} paymentVerified={o.paymentVerified} />
+              <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} paymentVerified={o.paymentVerified} paymentVerifiedBy={o.paymentVerifiedBy} />
               <OrderItemLines items={o.items} note={o.note} />
               {o.status === "paid" && <button className="cbtn cbtn-accent" style={{ width: "100%" }} onClick={() => setStatus(o, "preparing")}>เริ่มชง</button>}
               {o.status === "preparing" && <button className="cbtn cbtn-accent" style={{ width: "100%" }} onClick={() => setStatus(o, "ready")}>พร้อมรับแล้ว</button>}
@@ -890,8 +900,8 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
                   <button className="cbtn" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => toggleAvailable(menu)} title={menu.available ? "ปิดขายชั่วคราว" : "เปิดขาย"}>
                     {menu.available ? "เปิดขาย" : "หมด"}
                   </button>
-                  <button className="cbtn" style={{ padding: "4px 8px" }} onClick={() => setEditing(menu)}><Icon name="edit" size={13} /></button>
-                  <button className="cbtn cbtn-danger" style={{ padding: "4px 8px" }} onClick={() => deleteMenu(menu.id)}><Icon name="trash" size={13} /></button>
+                  <button className="cbtn cbtn-edit" style={{ padding: "4px 8px" }} onClick={() => setEditing(menu)} title="แก้ไขเมนู"><Icon name="edit" size={13} /></button>
+                  <button className="cbtn cbtn-danger" style={{ padding: "4px 8px" }} onClick={() => deleteMenu(menu.id)} title="ลบเมนู"><Icon name="trash" size={13} /></button>
                 </div>
               </div>
               <div style={{ borderTop: "1px dashed var(--line)", margin: "8px 0", paddingTop: 8, fontSize: 11.5 }}>
@@ -1016,7 +1026,7 @@ function MenuEditor({ menu, ingredients, optionGroups, categories, onSave, onCan
             {ingredients.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
           </select>
           <input className="cfield" style={{ width: 80 }} type="number" value={line.qty} onChange={(e) => updateLine(idx, { qty: Number(e.target.value) })} />
-          <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => removeLine(idx)}><Icon name="x" size={13} /></button>
+          <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => removeLine(idx)} title="ลบส่วนผสมนี้"><Icon name="x" size={13} /></button>
         </div>
       ))}
       <button className="cbtn" onClick={addLine}><Icon name="plus" size={13} /> เพิ่มส่วนผสม</button>
@@ -1109,8 +1119,8 @@ function IngredientsPanel({ data, updateData, showToast }) {
                     <td>{ing.altGroup ? `${ing.altGroup}${ing.altUpcharge ? ` (+฿${ing.altUpcharge})` : ""}` : "—"}</td>
                     <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                       <button className="cbtn" style={{ padding: "4px 8px", marginRight: 4 }} onClick={() => setRestocking(ing.id)}>เติมสต็อก</button>
-                      <button className="cbtn" style={{ padding: "4px 8px", marginRight: 4 }} onClick={() => setEditingId(ing.id)}><Icon name="edit" size={12} /></button>
-                      <button className="cbtn cbtn-danger" style={{ padding: "4px 8px" }} onClick={() => deleteIngredient(ing.id)}><Icon name="trash" size={12} /></button>
+                      <button className="cbtn cbtn-edit" style={{ padding: "4px 8px", marginRight: 4 }} onClick={() => setEditingId(ing.id)} title="แก้ไขวัตถุดิบ"><Icon name="edit" size={12} /></button>
+                      <button className="cbtn cbtn-danger" style={{ padding: "4px 8px" }} onClick={() => deleteIngredient(ing.id)} title="ลบวัตถุดิบ"><Icon name="trash" size={12} /></button>
                     </td>
                   </tr>
                 ))}
@@ -1378,7 +1388,7 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
               <input type="checkbox" checked={g.required} onChange={(e) => patchGroup(g.id, { required: e.target.checked })} />
               บังคับเลือก
             </label>
-            <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => removeGroup(g.id)}><Icon name="trash" size={13} /></button>
+            <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => removeGroup(g.id)} title="ลบกลุ่มตัวเลือกนี้"><Icon name="trash" size={13} /></button>
           </div>
 
           {g.choices.map((c) => (
@@ -1386,7 +1396,7 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
               <input className="cfield" value={c.label} onChange={(e) => patchChoice(g.id, c.id, { label: e.target.value })} placeholder="ชื่อตัวเลือก" style={{ flex: 1.2 }} />
               <input className="cfield" value={c.note} onChange={(e) => patchChoice(g.id, c.id, { note: e.target.value })} placeholder="คำอธิบาย (ถ้ามี)" style={{ flex: 1.5 }} />
               <input className="cfield" type="number" value={c.priceDelta} onChange={(e) => patchChoice(g.id, c.id, { priceDelta: Number(e.target.value) })} style={{ width: 70 }} title="ราคาเพิ่ม (บาท)" />
-              <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => removeChoice(g.id, c.id)}><Icon name="x" size={13} /></button>
+              <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => removeChoice(g.id, c.id)} title="ลบตัวเลือกย่อยนี้"><Icon name="x" size={13} /></button>
             </div>
           ))}
           <button className="cbtn" style={{ marginLeft: 12 }} onClick={() => addChoice(g.id)}><Icon name="plus" size={13} /> เพิ่มตัวเลือกย่อย</button>
@@ -1429,6 +1439,13 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
     showToast(data.settings.acceptingOrders ? "ปิดรับออเดอร์ลูกค้าแล้ว" : "เปิดรับออเดอร์ลูกค้าแล้ว");
   }
 
+  function toggleSlipTestMode() {
+    updateData((next) => {
+      next.settings.slipTestMode = !next.settings.slipTestMode;
+    });
+    showToast(data.settings.slipTestMode ? "ปิดโหมดทดสอบสลิปแล้ว" : "เปิดโหมดทดสอบสลิปแล้ว");
+  }
+
   return (
     <div style={{ maxWidth: 420 }}>
       <SectionTitle icon="settings" text="ตั้งค่าร้าน" />
@@ -1466,7 +1483,7 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
           <input className="cfield" value={p.name} onChange={(e) => updatePlatform(idx, { name: e.target.value })} />
           <input className="cfield" style={{ width: 80 }} type="number" value={p.gpPercent} onChange={(e) => updatePlatform(idx, { gpPercent: Number(e.target.value) })} />
           <span style={{ fontSize: 12, color: "var(--espresso-2)" }}>%</span>
-          <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => removePlatform(idx)}><Icon name="x" size={13} /></button>
+          <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => removePlatform(idx)} title="ลบแพลตฟอร์มนี้"><Icon name="x" size={13} /></button>
         </div>
       ))}
       <button className="cbtn" onClick={addPlatform}><Icon name="plus" size={13} /> เพิ่มแพลตฟอร์ม</button>
@@ -1476,6 +1493,30 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
         <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>เบอร์พร้อมเพย์ / เลขบัตรประชาชน (สำหรับ gen QR รับเงิน)</label>
         <input className="cfield" value={promptpayId} onChange={(e) => setPromptpayId(e.target.value)} placeholder="0812345678" style={{ marginBottom: 6 }} />
         <p style={{ fontSize: 11, color: "var(--espresso-2)", margin: "0 0 8px" }}>ใส่แล้วบันทึกก่อน จึงจะใช้หน้าสั่งซื้อลูกค้าได้ หน้าจ่ายเงินจะให้ลูกค้าแนบรูปสลิปเพื่อยืนยันยอดอัตโนมัติ</p>
+
+        <div style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          background: data.settings.slipTestMode ? "var(--gold-light)" : "var(--cream-2)",
+          border: `1px solid ${data.settings.slipTestMode ? "var(--gold)" : "var(--line)"}`,
+          borderRadius: 12, padding: "12px 14px", marginTop: 10,
+        }}>
+          <div>
+            <div style={{ fontWeight: 600, fontSize: 13, color: data.settings.slipTestMode ? "var(--gold-dark)" : "var(--espresso-4)" }}>
+              โหมดทดสอบสลิป
+            </div>
+            <div style={{ fontSize: 11, color: "var(--espresso-2)", marginTop: 2 }}>
+              {data.settings.slipTestMode
+                ? "แนบสลิปอะไรก็ได้แล้วผ่านทันที ไม่เรียก SlipOK จริง (ไม่เสียโควต้า)"
+                : "เปิดไว้ตอนทดสอบระบบ เพื่อไม่ให้เสียโควต้า SlipOK จริง"}
+            </div>
+          </div>
+          <button
+            className={data.settings.slipTestMode ? "cbtn cbtn-danger" : "cbtn"}
+            onClick={toggleSlipTestMode}
+          >
+            {data.settings.slipTestMode ? "ปิดโหมดทดสอบ" : "เปิดโหมดทดสอบ"}
+          </button>
+        </div>
       </div>
 
       <div style={{ marginTop: 6 }}>
