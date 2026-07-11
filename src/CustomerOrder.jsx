@@ -23,11 +23,11 @@ const STATUS_TEXT = {
 };
 
 const COLORS = {
-  cream: "#FAF6EE", cream2: "#F1EBDD", surface: "#FFFFFF",
-  espresso5: "#2B1D14", espresso4: "#3E2C20", espresso3: "#5C4A3B", espresso2: "#8A7A6B",
-  sage: "#6E8256", sageDark: "#54663F", sageLight: "#E4EAD9",
-  gold: "#C79A45", goldLight: "#F6EBD3",
-  danger: "#A33A3A", line: "#E4DBC9",
+  cream: "#F5F0EA", cream2: "#EDE3D2", surface: "#FFFFFF",
+  espresso5: "#063360", espresso4: "#0B4A7A", espresso3: "#3A5570", espresso2: "#7189A3",
+  sage: "#CE560D", sageDark: "#A8440A", sageLight: "#F7E0CC",
+  gold: "#CE560D", goldLight: "#F7E0CC",
+  danger: "#B23A2E", line: "#E2D8C7",
 };
 
 function money(n) {
@@ -75,7 +75,7 @@ const centerCard = {
 };
 
 const GLOBAL_CSS = `
-  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
   .corder * { box-sizing: border-box; }
   .corder button { font-family: inherit; cursor: pointer; }
   .corder ::-webkit-scrollbar { display: none; }
@@ -100,24 +100,33 @@ function MenuThumb({ imageUrl }) {
   );
 }
 
+function BrandLogo({ height = 64 }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: height * 0.42, letterSpacing: "-.01em", color: COLORS.espresso5 }}>ZONE 2</div>
+        <div style={{ fontSize: height * 0.13, letterSpacing: ".25em", color: COLORS.sage, fontWeight: 600, marginTop: 2 }}>RESERVE BAR</div>
+      </div>
+    );
+  }
+  return <img src="/logo.png" alt="Zone 2 Reserve Bar" onError={() => setFailed(true)} style={{ height, width: "auto", display: "block" }} />;
+}
+
 function LandingScreen({ shopName }) {
   return (
     <div className="corder" style={{
-      minHeight: "100vh", background: `linear-gradient(160deg, ${COLORS.espresso5}, ${COLORS.espresso4})`,
+      minHeight: "100vh", background: COLORS.cream,
       display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-      fontFamily: "'Inter', sans-serif", color: "#fff", textAlign: "center", padding: 24,
+      fontFamily: "'Inter', sans-serif", color: COLORS.espresso5, textAlign: "center", padding: 24,
     }}>
       <style>{GLOBAL_CSS}</style>
-      <div style={{
-        width: 72, height: 72, borderRadius: "50%", background: "rgba(255,255,255,0.1)",
-        display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 18,
-        animation: "pulseCup 1.4s ease-in-out infinite",
-      }}>
-        <i className="ti ti-coffee" style={{ fontSize: 34, color: COLORS.gold }} aria-hidden="true"></i>
+      <div style={{ animation: "pulseCup 1.6s ease-in-out infinite", marginBottom: 22 }}>
+        <BrandLogo height={76} />
       </div>
-      <p style={{ fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase", color: COLORS.gold, margin: 0, fontWeight: 600 }}>ยินดีต้อนรับสู่</p>
-      <h1 style={{ fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 26, margin: "6px 0 0" }}>{shopName || "ร้านกาแฟ"}</h1>
-      <p style={{ fontSize: 12.5, color: "rgba(255,255,255,0.6)", marginTop: 22 }}>กำลังโหลดเมนู...</p>
+      <p style={{ fontSize: 11, letterSpacing: ".18em", textTransform: "uppercase", color: COLORS.sage, margin: 0, fontWeight: 600 }}>ยินดีต้อนรับสู่</p>
+      <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 24, margin: "6px 0 0" }}>{shopName || "ร้านกาแฟ"}</h1>
+      <p style={{ fontSize: 12.5, color: COLORS.espresso2, marginTop: 22 }}>กำลังโหลดเมนู...</p>
     </div>
   );
 }
@@ -139,6 +148,7 @@ export default function CustomerOrder({ shopUid }) {
   const [qrDataUrl, setQrDataUrl] = useState(null);
   const [myOrders, setMyOrders] = useState([]);
   const [activeCategory, setActiveCategory] = useState(null);
+  const [showCart, setShowCart] = useState(false);
 
   const mainRef = useRef(null);
   const sectionRefs = useRef({});
@@ -303,7 +313,7 @@ export default function CustomerOrder({ shopUid }) {
         <style>{GLOBAL_CSS}</style>
         <div style={centerCard}>
           <p style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: COLORS.sageDark, fontWeight: 500, margin: 0 }}>{shopName}</p>
-          <h1 style={{ fontFamily: "'Fraunces', serif", fontSize: 20, margin: "4px 0 14px" }}>ออเดอร์ของฉัน</h1>
+          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, margin: "4px 0 14px" }}>ออเดอร์ของฉัน</h1>
           {myOrders.length === 0 ? (
             <p style={{ fontSize: 13, color: COLORS.espresso2 }}>ยังไม่มีประวัติการสั่งซื้อจากอุปกรณ์นี้</p>
           ) : (
@@ -333,13 +343,13 @@ export default function CustomerOrder({ shopUid }) {
         <style>{GLOBAL_CSS}</style>
         <div style={{ ...centerCard, textAlign: "center" }}>
           <p style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: COLORS.sageDark, fontWeight: 500, margin: 0 }}>{shopName}</p>
-          <h1 style={{ fontFamily: "'Fraunces', serif", fontSize: 20, margin: "4px 0 14px" }}>
+          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, margin: "4px 0 14px" }}>
             {showQr ? "สแกนจ่ายผ่าน PromptPay" : "สถานะออเดอร์"}
           </h1>
           {showQr ? (
             <>
               {qrDataUrl && <img src={qrDataUrl} alt="PromptPay QR" width={220} height={220} style={{ borderRadius: 10, border: `1px solid ${COLORS.line}` }} />}
-              <p style={{ fontSize: 22, fontWeight: 600, fontFamily: "'Fraunces', serif", margin: "14px 0 4px" }}>฿{money(order.total)}</p>
+              <p style={{ fontSize: 22, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif", margin: "14px 0 4px" }}>฿{money(order.total)}</p>
               <p style={{ fontSize: 12, color: COLORS.espresso2, margin: "0 0 14px" }}>{STATUS_TEXT.pending} (หน้านี้จะอัปเดตอัตโนมัติ)</p>
             </>
           ) : (
@@ -372,7 +382,10 @@ export default function CustomerOrder({ shopUid }) {
         <style>{GLOBAL_CSS}</style>
         <div style={centerCard}>
           <p style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: COLORS.sageDark, fontWeight: 500, margin: 0 }}>{shopName}</p>
-          <h1 style={{ fontFamily: "'Fraunces', serif", fontSize: 20, margin: "4px 0 14px" }}>สรุปออเดอร์</h1>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "4px 0 14px" }}>
+            <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, margin: 0 }}>สรุปออเดอร์</h1>
+            <button style={{ ...btn, fontSize: 12, padding: "5px 10px" }} onClick={() => setShowCart(true)}>แก้ไข</button>
+          </div>
           {cart.map((l) => (
             <div key={l.lineId} style={{ marginBottom: 6 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13.5 }}>
@@ -400,6 +413,17 @@ export default function CustomerOrder({ shopUid }) {
             </button>
           </div>
         </div>
+
+        {showCart && (
+          <CartDrawer
+            cart={cart}
+            total={total}
+            onClose={() => setShowCart(false)}
+            onSetQty={setLineQty}
+            onRemove={removeLine}
+            onCheckout={() => setShowCart(false)}
+          />
+        )}
       </div>
     );
   }
@@ -409,10 +433,13 @@ export default function CustomerOrder({ shopUid }) {
       <style>{GLOBAL_CSS}</style>
       <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.44.0/iconfont/tabler-icons.min.css" />
 
-      <div style={{ padding: "18px 16px 14px", borderBottom: `1px solid ${COLORS.line}`, display: "flex", justifyContent: "space-between", alignItems: "flex-start", background: COLORS.surface }}>
-        <div>
-          <p style={{ fontSize: 10.5, letterSpacing: ".1em", textTransform: "uppercase", color: COLORS.sageDark, fontWeight: 600, margin: 0 }}>สั่งเครื่องดื่มออนไลน์</p>
-          <h1 style={{ fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 21, margin: "3px 0 0", color: COLORS.espresso5 }}>{shopName}</h1>
+      <div style={{ padding: "14px 16px", borderBottom: `1px solid ${COLORS.line}`, display: "flex", justifyContent: "space-between", alignItems: "center", background: COLORS.surface }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <BrandLogo height={30} />
+          <div>
+            <p style={{ fontSize: 10, letterSpacing: ".1em", textTransform: "uppercase", color: COLORS.sageDark, fontWeight: 600, margin: 0 }}>สั่งเครื่องดื่มออนไลน์</p>
+            <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 17, margin: "2px 0 0", color: COLORS.espresso5 }}>{shopName}</h1>
+          </div>
         </div>
         {loadMyOrderIds(shopUid).length > 0 && (
           <button style={{ ...btn, fontSize: 11.5, padding: "6px 10px" }} onClick={openMyOrders}>
@@ -447,7 +474,7 @@ export default function CustomerOrder({ shopUid }) {
           <main ref={mainRef} style={{ flex: 1, overflowY: "auto", padding: "4px 14px 100px" }}>
             {categories.map((cat) => (
               <section key={cat} data-category={cat} ref={(el) => { sectionRefs.current[cat] = el; }} style={{ paddingTop: 16 }}>
-                <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 15, fontWeight: 600, color: COLORS.espresso5, margin: "0 0 10px" }}>{cat}</h2>
+                <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 600, color: COLORS.espresso5, margin: "0 0 10px" }}>{cat}</h2>
                 {menus.filter((m) => m.category === cat).map((m) => {
                   const soldOut = m.available === false;
                   const qty = qtyForMenu(m.id);
@@ -497,16 +524,20 @@ export default function CustomerOrder({ shopUid }) {
           padding: "12px 14px 12px 18px", display: "flex", alignItems: "center", justifyContent: "space-between",
           boxShadow: "0 8px 24px rgba(43,29,20,0.35)", animation: "fadeIn .2s ease",
         }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button
+            onClick={() => setShowCart(true)}
+            style={{ display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", color: "#fff", padding: 0 }}
+          >
             <div style={{ position: "relative" }}>
               <i className="ti ti-shopping-bag" style={{ fontSize: 22 }} aria-hidden="true"></i>
               <span style={{
-                position: "absolute", top: -8, right: -8, background: COLORS.danger, color: "#fff", fontSize: 10,
+                position: "absolute", top: -8, right: -8, background: COLORS.sage, color: "#fff", fontSize: 10,
                 fontWeight: 700, borderRadius: 999, minWidth: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center",
               }}>{cartCount}</span>
             </div>
-            <span style={{ fontSize: 16, fontWeight: 600, fontFamily: "'Fraunces', serif" }}>฿{money(total)}</span>
-          </div>
+            <span style={{ fontSize: 16, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif" }}>฿{money(total)}</span>
+            <i className="ti ti-chevron-up" style={{ fontSize: 15, opacity: 0.6 }} aria-hidden="true"></i>
+          </button>
           <button
             onClick={() => { setError(""); setStep("phone"); }}
             style={{ background: COLORS.sage, color: "#fff", border: "none", borderRadius: 10, padding: "10px 22px", fontSize: 13.5, fontWeight: 600 }}
@@ -514,6 +545,17 @@ export default function CustomerOrder({ shopUid }) {
             สั่งซื้อ
           </button>
         </div>
+      )}
+
+      {showCart && (
+        <CartDrawer
+          cart={cart}
+          total={total}
+          onClose={() => setShowCart(false)}
+          onSetQty={setLineQty}
+          onRemove={removeLine}
+          onCheckout={() => { setShowCart(false); setError(""); setStep("phone"); }}
+        />
       )}
 
       {pickingMenu && (
@@ -524,6 +566,47 @@ export default function CustomerOrder({ shopUid }) {
           onConfirm={(qty, options) => { addToCart(pickingMenu, qty, options); setPickingMenu(null); }}
         />
       )}
+    </div>
+  );
+}
+
+function CartDrawer({ cart, total, onClose, onSetQty, onRemove, onCheckout }) {
+  return (
+    <div style={overlay} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: "16px 16px 0 0", padding: 20, width: "100%", maxWidth: 420, maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 18, margin: "0 0 14px", color: COLORS.espresso5 }}>ตะกร้าของคุณ</h2>
+
+        {cart.length === 0 ? (
+          <p style={{ fontSize: 13, color: COLORS.espresso2 }}>ตะกร้าว่างเปล่า</p>
+        ) : (
+          cart.map((l) => (
+            <div key={l.lineId} style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, padding: "10px 0", borderBottom: `1px solid ${COLORS.line}` }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 500, fontSize: 14, color: COLORS.espresso5 }}>{l.name}</div>
+                {l.options.length > 0 && <div style={{ fontSize: 11.5, color: COLORS.espresso2, marginTop: 2 }}>{l.options.map((o) => o.label).join(", ")}</div>}
+                <div style={{ fontSize: 12.5, color: COLORS.sage, fontWeight: 600, marginTop: 4 }}>฿{money(l.unitPrice * l.qty)}</div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                <button style={{ ...btn, padding: "4px 10px" }} onClick={() => onSetQty(l.lineId, l.qty - 1)}>−</button>
+                <span style={{ minWidth: 18, textAlign: "center" }}>{l.qty}</span>
+                <button style={{ ...btn, padding: "4px 10px" }} onClick={() => onSetQty(l.lineId, l.qty + 1)}>+</button>
+                <button style={{ ...btn, padding: "4px 8px", color: COLORS.danger, borderColor: COLORS.danger }} onClick={() => onRemove(l.lineId)}>
+                  <i className="ti ti-trash" style={{ fontSize: 14 }} aria-hidden="true"></i>
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+
+        <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 16, marginTop: 14, fontFamily: "'Space Grotesk', sans-serif", color: COLORS.espresso5 }}>
+          <span>รวม</span><span>฿{money(total)}</span>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+          <button style={btn} onClick={onClose}>เลือกเพิ่ม</button>
+          <button style={btnAccent} disabled={cart.length === 0} onClick={onCheckout}>ไปต่อ</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -554,7 +637,7 @@ function OptionPickerModal({ menu, groups, onCancel, onConfirm }) {
   return (
     <div style={overlay} onClick={onCancel}>
       <div style={{ background: "#fff", borderRadius: "16px 16px 0 0", padding: 20, width: "100%", maxWidth: 420, maxHeight: "85vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
-        <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 18, margin: "0 0 14px" }}>{menu.name}</h2>
+        <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 18, margin: "0 0 14px" }}>{menu.name}</h2>
 
         {groups.map((g) => (
           <div key={g.id} style={{ marginBottom: 16 }}>
