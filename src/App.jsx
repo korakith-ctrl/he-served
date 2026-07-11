@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { auth, db } from "./firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { doc, onSnapshot, setDoc } from "firebase/firestore";
+import { ref, onValue, set } from "firebase/database";
 import Login from "./Login.jsx";
 
 const UNITS = { g: "กรัม", ml: "มล.", piece: "ชิ้น" };
@@ -150,16 +150,16 @@ function ShopApp({ uid }) {
   const [tab, setTab] = useState("dashboard");
   const [toast, setToast] = useState(null);
 
-  const docRef = doc(db, "shops", uid);
+  const shopRef = ref(db, "shops/" + uid);
   const isFirstSnapshot = useMemo(() => ({ current: true }), [uid]);
 
   useEffect(() => {
-    const unsub = onSnapshot(docRef, (snap) => {
+    const unsub = onValue(shopRef, (snap) => {
       if (snap.exists()) {
-        setData(snap.data());
+        setData(snap.val());
       } else {
         const seeded = defaultState();
-        setDoc(docRef, seeded).catch((err) => showToast("บันทึกไม่สำเร็จ: " + err.message));
+        set(shopRef, seeded).catch((err) => showToast("บันทึกไม่สำเร็จ: " + err.message));
         setData(seeded);
       }
       isFirstSnapshot.current = false;
@@ -174,7 +174,7 @@ function ShopApp({ uid }) {
   useEffect(() => {
     if (!data || isFirstSnapshot.current) return;
     const t = setTimeout(() => {
-      setDoc(docRef, data).catch((err) => showToast("บันทึกไม่สำเร็จ: " + err.message));
+      set(shopRef, data).catch((err) => showToast("บันทึกไม่สำเร็จ: " + err.message));
     }, 400);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
