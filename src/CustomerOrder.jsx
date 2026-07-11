@@ -115,6 +115,7 @@ const overlay = {
 const centerWrap = {
   minHeight: "100vh", fontFamily: "'Inter', sans-serif", color: COLORS.espresso4,
   display: "flex", justifyContent: "center", padding: "20px 12px",
+  animation: "pageIn .32s cubic-bezier(.22,1,.36,1) both",
 };
 const centerCard = {
   ...GLASS_PANEL, borderRadius: 20, padding: 20, width: "100%", maxWidth: 420, height: "fit-content",
@@ -169,7 +170,74 @@ const GLOBAL_CSS = `
     40% { transform: scale(1.25); }
     100% { transform: scale(1); }
   }
+  @keyframes pageIn {
+    from { opacity: 0; transform: translateY(14px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .corder button:active { transform: scale(0.94); }
 `;
+
+function useAnimatedNumber(value, duration = 260) {
+  const [display, setDisplay] = useState(value);
+  const fromRef = useRef(value);
+  const rafRef = useRef();
+
+  useEffect(() => {
+    const from = fromRef.current;
+    const to = value;
+    if (from === to) {
+      setDisplay(to);
+      return;
+    }
+    const start = performance.now();
+    function tick(now) {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setDisplay(from + (to - from) * eased);
+      if (t < 1) {
+        rafRef.current = requestAnimationFrame(tick);
+      } else {
+        fromRef.current = to;
+      }
+    }
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, duration]);
+
+  return display;
+}
+
+function AnimatedQty({ value }) {
+  return Math.round(useAnimatedNumber(value, 220));
+}
+
+function AnimatedMoney({ value }) {
+  return money(useAnimatedNumber(value, 280));
+}
+
+function useSheetTransition(visible, duration = 300) {
+  const [mounted, setMounted] = useState(visible);
+  const [shown, setShown] = useState(false);
+
+  useEffect(() => {
+    let raf;
+    let timeout;
+    if (visible) {
+      setMounted(true);
+      raf = requestAnimationFrame(() => setShown(true));
+    } else {
+      setShown(false);
+      timeout = setTimeout(() => setMounted(false), duration);
+    }
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timeout);
+    };
+  }, [visible, duration]);
+
+  return { mounted, shown };
+}
 
 function MenuThumb({ imageUrl }) {
   const [failed, setFailed] = useState(false);
@@ -715,16 +783,15 @@ export default function CustomerOrder({ shopUid }) {
           </div>
         </div>
 
-        {showCart && (
-          <CartDrawer
-            cart={cart}
-            total={total}
-            onClose={() => setShowCart(false)}
-            onSetQty={setLineQty}
-            onRemove={removeLine}
-            onCheckout={() => setShowCart(false)}
-          />
-        )}
+        <CartDrawer
+          visible={showCart}
+          cart={cart}
+          total={total}
+          onClose={() => setShowCart(false)}
+          onSetQty={setLineQty}
+          onRemove={removeLine}
+          onCheckout={() => setShowCart(false)}
+        />
       </div>
     );
   }
@@ -748,7 +815,7 @@ export default function CustomerOrder({ shopUid }) {
   }
 
   return (
-    <div className="corder" style={{ height: "100vh", display: "flex", flexDirection: "column", fontFamily: "'Inter', sans-serif", color: COLORS.espresso4 }}>
+    <div className="corder" style={{ height: "100vh", display: "flex", flexDirection: "column", fontFamily: "'Inter', sans-serif", color: COLORS.espresso4, animation: "pageIn .32s cubic-bezier(.22,1,.36,1) both" }}>
       <style>{GLOBAL_CSS}</style>
       <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.44.0/iconfont/tabler-icons.min.css" />
       <GlassBackdrop />
@@ -844,7 +911,7 @@ export default function CustomerOrder({ shopUid }) {
                             width: 28, height: 28, borderRadius: 9, border: "1px solid rgba(255,255,255,0.7)", background: "rgba(255,255,255,0.6)",
                             color: COLORS.espresso5, fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
                           }}>−</button>
-                          <span style={{ minWidth: 16, textAlign: "center", fontWeight: 600, color: COLORS.espresso5 }}>{qty}</span>
+                          <span style={{ minWidth: 16, textAlign: "center", fontWeight: 600, color: COLORS.espresso5 }}><AnimatedQty value={qty} /></span>
                           <button
                             onClick={() => { if (canAddDirectly) { spawnFly(m); setLineQty(singleLine.lineId, singleLine.qty + 1); } else openMenu(m); }}
                             style={{
@@ -869,7 +936,7 @@ export default function CustomerOrder({ shopUid }) {
                               position: "absolute", top: -6, right: -6, background: COLORS.danger, color: "#fff",
                               fontSize: 10, fontWeight: 700, borderRadius: 999, minWidth: 16, height: 16,
                               display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px",
-                            }}>{qty}</span>
+                            }}><AnimatedQty value={qty} /></span>
                           )}
                         </button>
                       )}
@@ -899,9 +966,9 @@ export default function CustomerOrder({ shopUid }) {
               <span style={{
                 position: "absolute", top: -8, right: -8, background: COLORS.sage, color: "#fff", fontSize: 10,
                 fontWeight: 700, borderRadius: 999, minWidth: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center",
-              }}>{cartCount}</span>
+              }}><AnimatedQty value={cartCount} /></span>
             </div>
-            <span style={{ fontSize: 16, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif" }}>{money(total)}</span>
+            <span style={{ fontSize: 16, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif" }}><AnimatedMoney value={total} /></span>
             <i className="ti ti-chevron-up" style={{ fontSize: 15, opacity: 0.6 }} aria-hidden="true"></i>
           </button>
           <button
@@ -913,25 +980,23 @@ export default function CustomerOrder({ shopUid }) {
         </div>
       )}
 
-      {showCart && (
-        <CartDrawer
-          cart={cart}
-          total={total}
-          onClose={() => setShowCart(false)}
-          onSetQty={setLineQty}
-          onRemove={removeLine}
-          onCheckout={() => { setShowCart(false); setError(""); setStep("phone"); }}
-        />
-      )}
+      <CartDrawer
+        visible={showCart}
+        cart={cart}
+        total={total}
+        onClose={() => setShowCart(false)}
+        onSetQty={setLineQty}
+        onRemove={removeLine}
+        onCheckout={() => { setShowCart(false); setError(""); setStep("phone"); }}
+      />
 
-      {pickingMenu && (
-        <OptionPickerModal
-          menu={pickingMenu}
-          groups={groupsForMenu(pickingMenu)}
-          onCancel={() => setPickingMenu(null)}
-          onConfirm={(qty, options) => { spawnFly(pickingMenu); addToCart(pickingMenu, qty, options); setPickingMenu(null); }}
-        />
-      )}
+      <OptionPickerModal
+        visible={!!pickingMenu}
+        menu={pickingMenu}
+        groups={pickingMenu ? groupsForMenu(pickingMenu) : []}
+        onCancel={() => setPickingMenu(null)}
+        onConfirm={(qty, options) => { spawnFly(pickingMenu); addToCart(pickingMenu, qty, options); setPickingMenu(null); }}
+      />
     </div>
   );
 }
@@ -995,10 +1060,15 @@ function SlipUpload({ shopUid, orderId, onVerified }) {
   );
 }
 
-function CartDrawer({ cart, total, onClose, onSetQty, onRemove, onCheckout }) {
+function CartDrawer({ visible, cart, total, onClose, onSetQty, onRemove, onCheckout }) {
+  const { mounted, shown } = useSheetTransition(visible);
+  if (!mounted) return null;
   return (
-    <div style={overlay} onClick={onClose}>
-      <div style={{ ...GLASS_PANEL, borderRadius: "20px 20px 0 0", padding: 20, width: "100%", maxWidth: 420, maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+    <div style={{ ...overlay, opacity: shown ? 1 : 0, transition: "opacity .25s ease" }} onClick={onClose}>
+      <div style={{
+        ...GLASS_PANEL, borderRadius: "20px 20px 0 0", padding: 20, width: "100%", maxWidth: 420, maxHeight: "80vh", overflowY: "auto",
+        transform: shown ? "translateY(0)" : "translateY(100%)", transition: "transform .34s cubic-bezier(.22,1,.36,1)",
+      }} onClick={(e) => e.stopPropagation()}>
         <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 18, margin: "0 0 14px", color: COLORS.espresso5 }}>ตะกร้าของคุณ</h2>
 
         {cart.length === 0 ? (
@@ -1009,11 +1079,11 @@ function CartDrawer({ cart, total, onClose, onSetQty, onRemove, onCheckout }) {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 500, fontSize: 14, color: COLORS.espresso5 }}>{l.name}</div>
                 {l.options.length > 0 && <div style={{ fontSize: 11.5, color: COLORS.espresso2, marginTop: 2 }}>{l.options.map((o) => o.label).join(", ")}</div>}
-                <div style={{ fontSize: 12.5, color: COLORS.sage, fontWeight: 600, marginTop: 4 }}>{money(l.unitPrice * l.qty)}</div>
+                <div style={{ fontSize: 12.5, color: COLORS.sage, fontWeight: 600, marginTop: 4 }}><AnimatedMoney value={l.unitPrice * l.qty} /></div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
                 <button style={{ ...btn, padding: "4px 10px" }} onClick={() => onSetQty(l.lineId, l.qty - 1)}>−</button>
-                <span style={{ minWidth: 18, textAlign: "center" }}>{l.qty}</span>
+                <span style={{ minWidth: 18, textAlign: "center" }}><AnimatedQty value={l.qty} /></span>
                 <button style={{ ...btn, padding: "4px 10px" }} onClick={() => onSetQty(l.lineId, l.qty + 1)}>+</button>
                 <button style={{ ...btn, padding: "4px 8px", color: COLORS.danger, borderColor: COLORS.danger }} onClick={() => onRemove(l.lineId)}>
                   <i className="ti ti-trash" style={{ fontSize: 14 }} aria-hidden="true"></i>
@@ -1024,7 +1094,7 @@ function CartDrawer({ cart, total, onClose, onSetQty, onRemove, onCheckout }) {
         )}
 
         <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 16, marginTop: 14, fontFamily: "'Space Grotesk', sans-serif", color: COLORS.espresso5 }}>
-          <span>รวม</span><span>{money(total)}</span>
+          <span>รวม</span><span><AnimatedMoney value={total} /></span>
         </div>
 
         <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
@@ -1036,35 +1106,53 @@ function CartDrawer({ cart, total, onClose, onSetQty, onRemove, onCheckout }) {
   );
 }
 
-function OptionPickerModal({ menu, groups, onCancel, onConfirm }) {
+function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm }) {
+  const { mounted, shown } = useSheetTransition(visible);
+  const cachedRef = useRef({ menu, groups });
+  if (menu) cachedRef.current = { menu, groups };
+  const { menu: cm, groups: cg } = cachedRef.current;
+
   const [qty, setQty] = useState(1);
   const [selections, setSelections] = useState({});
   const [err, setErr] = useState("");
+
+  useEffect(() => {
+    if (menu) {
+      setQty(1);
+      setSelections({});
+      setErr("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [menu?.id]);
 
   function pick(groupId, choice) {
     setSelections((s) => ({ ...s, [groupId]: choice }));
   }
 
   function confirm() {
-    for (const g of groups) {
-      if (g.required && !selections[g.id]) {
-        setErr(`กรุณาเลือก "${g.name}"`);
+    for (const grp of cg) {
+      if (grp.required && !selections[grp.id]) {
+        setErr(`กรุณาเลือก "${grp.name}"`);
         return;
       }
     }
-    const options = groups
-      .map((g) => selections[g.id])
+    const options = cg
+      .map((grp) => selections[grp.id])
       .filter(Boolean)
       .map((c) => ({ groupId: c.groupId, groupName: c.groupName, choiceId: c.id, label: c.label, priceDelta: c.priceDelta || 0 }));
     onConfirm(qty, options);
   }
 
+  if (!mounted) return null;
   return (
-    <div style={overlay} onClick={onCancel}>
-      <div style={{ ...GLASS_PANEL, borderRadius: "20px 20px 0 0", padding: 20, width: "100%", maxWidth: 420, maxHeight: "85vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
-        <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 18, margin: "0 0 14px" }}>{menu.name}</h2>
+    <div style={{ ...overlay, opacity: shown ? 1 : 0, transition: "opacity .25s ease" }} onClick={onCancel}>
+      <div style={{
+        ...GLASS_PANEL, borderRadius: "20px 20px 0 0", padding: 20, width: "100%", maxWidth: 420, maxHeight: "85vh", overflowY: "auto",
+        transform: shown ? "translateY(0)" : "translateY(100%)", transition: "transform .34s cubic-bezier(.22,1,.36,1)",
+      }} onClick={(e) => e.stopPropagation()}>
+        <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 18, margin: "0 0 14px" }}>{cm?.name}</h2>
 
-        {groups.map((g) => (
+        {cg.map((g) => (
           <div key={g.id} style={{ marginBottom: 16 }}>
             <p style={{ fontSize: 13, fontWeight: 600, margin: "0 0 2px" }}>{g.name}</p>
             <p style={{ fontSize: 11, color: COLORS.espresso2, margin: "0 0 8px" }}>{g.required ? "กรุณาเลือก 1 ข้อ" : "เลือกได้ (ไม่บังคับ)"}</p>
@@ -1095,7 +1183,7 @@ function OptionPickerModal({ menu, groups, onCancel, onConfirm }) {
         <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "6px 0 16px" }}>
           <span style={{ fontSize: 13 }}>จำนวน</span>
           <button style={{ ...btn, padding: "4px 10px" }} onClick={() => setQty((q) => Math.max(1, q - 1))}>−</button>
-          <span style={{ minWidth: 18, textAlign: "center" }}>{qty}</span>
+          <span style={{ minWidth: 18, textAlign: "center" }}><AnimatedQty value={qty} /></span>
           <button style={{ ...btn, padding: "4px 10px" }} onClick={() => setQty((q) => q + 1)}>+</button>
         </div>
 
