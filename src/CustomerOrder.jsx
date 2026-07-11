@@ -30,7 +30,30 @@ const COLORS = {
   sage: "#CE560D", sageDark: "#A8440A", sageLight: "#F7E0CC",
   gold: "#CE560D", goldLight: "#F7E0CC",
   danger: "#B23A2E", line: "#E2D8C7",
+  success: "#2E9E4F", successDark: "#1F7A38", successLight: "#DFF3E3",
+  pending: "#B8860B", pendingLight: "#FCEFD1",
 };
+
+const STATUS_ICON = {
+  pending: { icon: "clock", color: COLORS.pending, bg: COLORS.pendingLight, anim: "statusPulse 1.6s ease-in-out infinite" },
+  paid: { icon: "checks", color: COLORS.espresso4, bg: "rgba(11,74,122,0.14)", anim: "cartBump .5s ease" },
+  preparing: { icon: "coffee", color: COLORS.sage, bg: COLORS.sageLight, anim: "pulseCup 1.3s ease-in-out infinite" },
+  ready: { icon: "check", color: COLORS.success, bg: COLORS.successLight, anim: "successPop .5s cubic-bezier(.34,1.56,.64,1)" },
+  cancelled: { icon: "x", color: COLORS.danger, bg: "rgba(178,58,46,0.14)", anim: "none" },
+};
+
+function OrderStatusIcon({ status, size = 20 }) {
+  const cfg = STATUS_ICON[status] || STATUS_ICON.pending;
+  const boxSize = size + 20;
+  return (
+    <div style={{
+      width: boxSize, height: boxSize, borderRadius: "50%", background: cfg.bg,
+      display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+    }}>
+      <i className={`ti ti-${cfg.icon}`} style={{ fontSize: size, color: cfg.color, animation: cfg.anim, display: "inline-block" }} aria-hidden="true"></i>
+    </div>
+  );
+}
 
 const GLASS_PANEL = {
   background: "rgba(255,255,255,0.42)",
@@ -173,6 +196,10 @@ const GLOBAL_CSS = `
   @keyframes pageIn {
     from { opacity: 0; transform: translateY(14px); }
     to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes statusPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .4; }
   }
   .corder button:active { transform: scale(0.94); }
 `;
@@ -580,14 +607,17 @@ export default function CustomerOrder({ shopUid }) {
           ) : (
             myOrders.map((o) => (
               <button key={o.id} onClick={() => reopenOrder(o)} style={{
-                display: "block", width: "100%", textAlign: "left", background: "rgba(255,255,255,0.55)",
+                display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", background: "rgba(255,255,255,0.55)",
                 border: "1px solid rgba(255,255,255,0.65)", borderRadius: 12, padding: 12, marginBottom: 8, cursor: "pointer",
               }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-                  <span>{new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</span>
-                  <span style={{ fontWeight: 600 }}>{money(o.total)}</span>
+                <OrderStatusIcon status={o.status} size={18} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                    <span>{new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</span>
+                    <span style={{ fontWeight: 600 }}>{money(o.total)}</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: COLORS.espresso2, marginTop: 2 }}>{STATUS_TEXT[o.status] || o.status}</div>
                 </div>
-                <div style={{ fontSize: 12, color: COLORS.espresso2, marginTop: 2 }}>{STATUS_TEXT[o.status] || o.status}</div>
               </button>
             ))
           )}
@@ -606,15 +636,15 @@ export default function CustomerOrder({ shopUid }) {
         <div style={{ ...centerCard, textAlign: "center" }}>
           <div style={{ animation: "successPop .5s cubic-bezier(.34,1.56,.64,1)", margin: "10px auto 4px", width: 84, height: 84 }}>
             <svg viewBox="0 0 52 52" width={84} height={84}>
-              <circle cx="26" cy="26" r="24" fill="none" stroke={COLORS.sage} strokeWidth="3" />
+              <circle cx="26" cy="26" r="24" fill="none" stroke={COLORS.success} strokeWidth="3" />
               <path
-                d="M15 27 L23 35 L38 18" fill="none" stroke={COLORS.sage} strokeWidth="4"
+                d="M15 27 L23 35 L38 18" fill="none" stroke={COLORS.success} strokeWidth="4"
                 strokeLinecap="round" strokeLinejoin="round"
                 style={{ strokeDasharray: 48, strokeDashoffset: 48, animation: "checkDraw .5s .35s ease forwards" }}
               />
             </svg>
           </div>
-          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, margin: "6px 0 4px", color: COLORS.sageDark }}>
+          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, margin: "6px 0 4px", color: COLORS.successDark }}>
             ชำระเงินสำเร็จ
           </h1>
           <p style={{ fontSize: 12, color: COLORS.espresso2, margin: "0 0 4px" }}>เลขที่อ้างอิงออเดอร์</p>
@@ -656,7 +686,18 @@ export default function CustomerOrder({ shopUid }) {
               </div>
             ) : (
               <>
-                {qrDataUrl && <img src={qrDataUrl} alt="PromptPay QR" width={220} height={220} style={{ borderRadius: 10, border: `1px solid ${COLORS.line}` }} />}
+                {qrDataUrl && (
+                  <>
+                    <img src={qrDataUrl} alt="PromptPay QR" width={220} height={220} style={{ borderRadius: 10, border: `1px solid ${COLORS.line}` }} />
+                    <a
+                      href={qrDataUrl}
+                      download={`promptpay-${order.id.slice(-6)}.png`}
+                      style={{ ...btn, display: "inline-flex", alignItems: "center", gap: 6, textDecoration: "none", margin: "10px 0 0" }}
+                    >
+                      <i className="ti ti-download" style={{ fontSize: 14 }} aria-hidden="true"></i>บันทึกรูป QR
+                    </a>
+                  </>
+                )}
                 <p style={{ fontSize: 22, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif", margin: "14px 0 4px" }}>{money(order.total)}</p>
                 <p style={{ fontSize: 12, color: COLORS.espresso2, margin: "0 0 14px" }}>
                   {order.paymentVerified ? "ยืนยันการชำระเงินแล้ว ✅" : `${STATUS_TEXT.pending} (หน้านี้จะอัปเดตอัตโนมัติ)`}
@@ -681,9 +722,9 @@ export default function CustomerOrder({ shopUid }) {
               </>
             )
           ) : (
-            <div style={{ padding: "24px 0" }}>
-              <p style={{ fontSize: 40, margin: 0 }}>{order.status === "ready" ? "✅" : order.status === "cancelled" ? "✖️" : "☕"}</p>
-              <p style={{ fontSize: 16, fontWeight: 600, margin: "10px 0 4px" }}>{STATUS_TEXT[order.status] || order.status}</p>
+            <div style={{ padding: "24px 0", display: "flex", flexDirection: "column", alignItems: "center" }}>
+              <OrderStatusIcon status={order.status} size={38} />
+              <p style={{ fontSize: 16, fontWeight: 600, margin: "12px 0 4px" }}>{STATUS_TEXT[order.status] || order.status}</p>
             </div>
           )}
           {order.pickupDate && (
@@ -817,7 +858,6 @@ export default function CustomerOrder({ shopUid }) {
   return (
     <div className="corder" style={{ height: "100vh", display: "flex", flexDirection: "column", fontFamily: "'Inter', sans-serif", color: COLORS.espresso4, animation: "pageIn .32s cubic-bezier(.22,1,.36,1) both" }}>
       <style>{GLOBAL_CSS}</style>
-      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.44.0/iconfont/tabler-icons.min.css" />
       <GlassBackdrop />
 
       {flyItems.map((f) => (

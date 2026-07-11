@@ -236,7 +236,7 @@ const TABS = [
   { id: "orders", label: "ออเดอร์ลูกค้า", icon: "receipt" },
   { id: "menus", label: "เมนู & สูตร", icon: "cup" },
   { id: "options", label: "ตัวเลือกเสริม", icon: "list-details" },
-  { id: "ingredients", label: "วัตถุดิบ & สต็อก", icon: "boxes" },
+  { id: "ingredients", label: "วัตถุดิบ & สต็อก", icon: "box-multiple" },
   { id: "reports", label: "รายงาน", icon: "chart-line" },
   { id: "settings", label: "ตั้งค่า", icon: "settings" },
 ];
@@ -421,7 +421,6 @@ function ShopApp({ uid }) {
         "--line": "#E4DBC9", "--line-soft": "#EFE9DB",
         "--f-display": "'Fraunces', serif", "--f-body": "'Inter', sans-serif", "--f-mono": "'IBM Plex Mono', monospace",
       }}>
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.44.0/iconfont/tabler-icons.min.css" />
 
         <Header shopName={data.settings.shopName} onSignOut={() => signOut(auth)} />
 
@@ -1128,7 +1127,7 @@ function IngredientsPanel({ data, updateData, showToast }) {
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <SectionTitle icon="boxes" text="วัตถุดิบ & สต็อก" />
+        <SectionTitle icon="box-multiple" text="วัตถุดิบ & สต็อก" />
         <button className="cbtn cbtn-accent" onClick={() => setAdding(!adding)}><Icon name="plus" size={14} /> วัตถุดิบใหม่</button>
       </div>
 
