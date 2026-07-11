@@ -122,7 +122,7 @@ function LandingScreen({ shopName }) {
     }}>
       <style>{GLOBAL_CSS}</style>
       <div style={{ animation: "pulseCup 1.6s ease-in-out infinite", marginBottom: 22 }}>
-        <BrandLogo height={76} />
+        <BrandLogo height={160} />
       </div>
       <p style={{ fontSize: 11, letterSpacing: ".18em", textTransform: "uppercase", color: COLORS.sage, margin: 0, fontWeight: 600 }}>ยินดีต้อนรับสู่</p>
       <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 24, margin: "6px 0 0" }}>{shopName || "ร้านกาแฟ"}</h1>
@@ -149,9 +149,15 @@ export default function CustomerOrder({ shopUid }) {
   const [myOrders, setMyOrders] = useState([]);
   const [activeCategory, setActiveCategory] = useState(null);
   const [showCart, setShowCart] = useState(false);
+  const [splashDone, setSplashDone] = useState(false);
 
   const mainRef = useRef(null);
   const sectionRefs = useRef({});
+
+  useEffect(() => {
+    const t = setTimeout(() => setSplashDone(true), 5000);
+    return () => clearTimeout(t);
+  }, []);
 
   useEffect(() => {
     signInAnonymously(auth)
@@ -211,8 +217,12 @@ export default function CustomerOrder({ shopUid }) {
     return optionGroups.filter((g) => ids.includes(g.id));
   }
 
+  function linesForMenu(menuId) {
+    return cart.filter((l) => l.menuId === menuId);
+  }
+
   function qtyForMenu(menuId) {
-    return cart.filter((l) => l.menuId === menuId).reduce((s, l) => s + l.qty, 0);
+    return linesForMenu(menuId).reduce((s, l) => s + l.qty, 0);
   }
 
   function openMenu(menu) {
@@ -303,7 +313,7 @@ export default function CustomerOrder({ shopUid }) {
     return <div style={centerWrap}><div style={centerCard}>{error}</div></div>;
   }
 
-  if (!authUid || menus === null) {
+  if (!authUid || menus === null || !splashDone) {
     return <LandingScreen shopName={shopName} />;
   }
 
@@ -389,13 +399,13 @@ export default function CustomerOrder({ shopUid }) {
           {cart.map((l) => (
             <div key={l.lineId} style={{ marginBottom: 6 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13.5 }}>
-                <span>{l.name} x{l.qty}</span><span>฿{money(l.unitPrice * l.qty)}</span>
+                <span>{l.name} x{l.qty}</span><span>{money(l.unitPrice * l.qty)}</span>
               </div>
               {l.options.length > 0 && <div style={{ fontSize: 11, color: COLORS.espresso2 }}>{l.options.map((o) => o.label).join(", ")}</div>}
             </div>
           ))}
           <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 600, fontSize: 15, borderTop: `1px dashed ${COLORS.line}`, marginTop: 8, paddingTop: 8 }}>
-            <span>รวม</span><span>฿{money(total)}</span>
+            <span>รวม</span><span>{money(total)}</span>
           </div>
 
           <label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 16 }}>ชื่อ</label>
@@ -477,11 +487,14 @@ export default function CustomerOrder({ shopUid }) {
                 <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 600, color: COLORS.espresso5, margin: "0 0 10px" }}>{cat}</h2>
                 {menus.filter((m) => m.category === cat).map((m) => {
                   const soldOut = m.available === false;
-                  const qty = qtyForMenu(m.id);
+                  const lines = linesForMenu(m.id);
+                  const qty = lines.reduce((s, l) => s + l.qty, 0);
+                  const singleLine = lines.length === 1 ? lines[0] : null;
+                  const canAddDirectly = groupsForMenu(m).length === 0;
                   return (
-                    <div key={m.id} onClick={() => openMenu(m)} style={{
+                    <div key={m.id} onClick={() => !soldOut && !singleLine && openMenu(m)} style={{
                       display: "flex", gap: 12, alignItems: "center", padding: "10px 0", borderBottom: `1px solid ${COLORS.line}`,
-                      opacity: soldOut ? 0.5 : 1, cursor: soldOut ? "default" : "pointer",
+                      opacity: soldOut ? 0.5 : 1, cursor: soldOut || singleLine ? "default" : "pointer",
                     }}>
                       <MenuThumb imageUrl={m.imageUrl} />
                       <div style={{ flex: 1, minWidth: 0 }}>
@@ -490,24 +503,41 @@ export default function CustomerOrder({ shopUid }) {
                           {soldOut ? "หมดวันนี้" : `฿${money(m.priceStore)}`}
                         </div>
                       </div>
-                      <button
-                        disabled={soldOut}
-                        onClick={(e) => { e.stopPropagation(); openMenu(m); }}
-                        style={{
-                          position: "relative", width: 32, height: 32, borderRadius: 9, flexShrink: 0, border: "none",
-                          background: soldOut ? COLORS.line : COLORS.espresso5, color: "#fff", fontSize: 18, lineHeight: 1,
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                        }}
-                      >
-                        +
-                        {qty > 0 && (
-                          <span style={{
-                            position: "absolute", top: -6, right: -6, background: COLORS.danger, color: "#fff",
-                            fontSize: 10, fontWeight: 700, borderRadius: 999, minWidth: 16, height: 16,
-                            display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px",
-                          }}>{qty}</span>
-                        )}
-                      </button>
+                      {singleLine ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                          <button onClick={() => setLineQty(singleLine.lineId, singleLine.qty - 1)} style={{
+                            width: 28, height: 28, borderRadius: 8, border: `1px solid ${COLORS.line}`, background: "#fff",
+                            color: COLORS.espresso5, fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                          }}>−</button>
+                          <span style={{ minWidth: 16, textAlign: "center", fontWeight: 600, color: COLORS.espresso5 }}>{qty}</span>
+                          <button
+                            onClick={() => (canAddDirectly ? setLineQty(singleLine.lineId, singleLine.qty + 1) : openMenu(m))}
+                            style={{
+                              width: 28, height: 28, borderRadius: 8, border: "none", background: COLORS.espresso5,
+                              color: "#fff", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                            }}
+                          >+</button>
+                        </div>
+                      ) : (
+                        <button
+                          disabled={soldOut}
+                          onClick={(e) => { e.stopPropagation(); openMenu(m); }}
+                          style={{
+                            position: "relative", width: 32, height: 32, borderRadius: 9, flexShrink: 0, border: "none",
+                            background: soldOut ? COLORS.line : COLORS.espresso5, color: "#fff", fontSize: 18, lineHeight: 1,
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                          }}
+                        >
+                          +
+                          {qty > 0 && (
+                            <span style={{
+                              position: "absolute", top: -6, right: -6, background: COLORS.danger, color: "#fff",
+                              fontSize: 10, fontWeight: 700, borderRadius: 999, minWidth: 16, height: 16,
+                              display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px",
+                            }}>{qty}</span>
+                          )}
+                        </button>
+                      )}
                     </div>
                   );
                 })}
