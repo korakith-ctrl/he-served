@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, signInAnonymously } from "firebase/auth";
 import { getDatabase, ref, onValue, get, push, set } from "firebase/database";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import QRCode from "qrcode";
 import generatePayload from "promptpay-qr";
 import { firebaseConfig } from "./firebase";
@@ -13,6 +14,7 @@ const customerApp = getApps().some((a) => a.name === "customer-order")
   : initializeApp(firebaseConfig, "customer-order");
 const auth = getAuth(customerApp);
 const db = getDatabase(customerApp);
+const functions = getFunctions(customerApp, "asia-southeast1");
 
 const STATUS_TEXT = {
   pending: "รอร้านยืนยันการรับเงิน...",
@@ -437,7 +439,16 @@ export default function CustomerOrder({ shopUid }) {
               <>
                 {qrDataUrl && <img src={qrDataUrl} alt="PromptPay QR" width={220} height={220} style={{ borderRadius: 10, border: `1px solid ${COLORS.line}` }} />}
                 <p style={{ fontSize: 22, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif", margin: "14px 0 4px" }}>{money(order.total)}</p>
-                <p style={{ fontSize: 12, color: COLORS.espresso2, margin: "0 0 14px" }}>{STATUS_TEXT.pending} (หน้านี้จะอัปเดตอัตโนมัติ)</p>
+                <p style={{ fontSize: 12, color: COLORS.espresso2, margin: "0 0 14px" }}>
+                  {order.paymentVerified ? "ยืนยันการชำระเงินแล้ว ✅" : `${STATUS_TEXT.pending} (หน้านี้จะอัปเดตอัตโนมัติ)`}
+                </p>
+                {!order.paymentVerified && (
+                  <SlipUpload
+                    shopUid={shopUid}
+                    orderId={order.id}
+                    onVerified={() => setOrder((prev) => (prev ? { ...prev, paymentVerified: true } : prev))}
+                  />
+                )}
               </>
             )
           ) : (
@@ -729,6 +740,65 @@ export default function CustomerOrder({ shopUid }) {
           onConfirm={(qty, options) => { addToCart(pickingMenu, qty, options); setPickingMenu(null); }}
         />
       )}
+    </div>
+  );
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+const VERIFY_SLIP_ERROR_TEXT = {
+  "already-exists": "สลิปนี้เคยถูกใช้ยืนยันไปแล้ว",
+  "failed-precondition": "ยอดเงินหรือบัญชีปลายทางในสลิปไม่ตรงกับออเดอร์นี้",
+  "invalid-argument": "อ่านสลิปไม่ได้ กรุณาถ่ายรูปให้ชัดเจนแล้วลองใหม่",
+};
+
+function SlipUpload({ shopUid, orderId, onVerified }) {
+  const [status, setStatus] = useState("idle"); // idle | uploading | error
+  const [errorMsg, setErrorMsg] = useState("");
+  const inputRef = useRef(null);
+
+  async function handleFile(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    setStatus("uploading");
+    setErrorMsg("");
+    try {
+      const dataUrl = await fileToBase64(file);
+      const verifySlip = httpsCallable(functions, "verifySlip");
+      const res = await verifySlip({ shopUid, orderId, imageBase64: dataUrl });
+      if (res.data && (res.data.verified || res.data.alreadyVerified)) {
+        onVerified();
+      } else {
+        setStatus("error");
+        setErrorMsg("ยืนยันสลิปไม่สำเร็จ กรุณาลองใหม่ หรือรอร้านตรวจสอบด้วยตนเอง");
+      }
+    } catch (err) {
+      setStatus("error");
+      setErrorMsg(VERIFY_SLIP_ERROR_TEXT[err.code?.split("/").pop()] || "ตรวจสอบสลิปไม่สำเร็จ กรุณาลองใหม่ หรือรอร้านตรวจสอบด้วยตนเอง");
+    }
+  }
+
+  return (
+    <div style={{ background: COLORS.cream2, border: `1px solid ${COLORS.line}`, borderRadius: 10, padding: "10px 12px", marginBottom: 14, textAlign: "left" }}>
+      <p style={{ fontSize: 12, fontWeight: 600, margin: "0 0 4px" }}>โอนเงินแล้ว? ยืนยันไวขึ้นได้</p>
+      <p style={{ fontSize: 11.5, color: COLORS.espresso2, margin: "0 0 8px" }}>แนบรูปสลิปโอนเงิน ระบบจะเช็คยอดและยืนยันออเดอร์ให้อัตโนมัติ</p>
+      <input ref={inputRef} type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
+      <button
+        style={{ ...btn, width: "100%" }}
+        disabled={status === "uploading"}
+        onClick={() => inputRef.current?.click()}
+      >
+        {status === "uploading" ? "กำลังตรวจสอบสลิป..." : "แนบรูปสลิป"}
+      </button>
+      {status === "error" && <p style={{ fontSize: 11.5, color: COLORS.danger, margin: "6px 0 0" }}>{errorMsg}</p>}
     </div>
   );
 }

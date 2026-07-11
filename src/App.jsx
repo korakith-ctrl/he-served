@@ -656,7 +656,7 @@ function formatPickupDateTH(dateStr) {
   return new Date(y, m - 1, d).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
 }
 
-function OrderMeta({ paymentMethod, pickupDate }) {
+function OrderMeta({ paymentMethod, pickupDate, paymentVerified }) {
   if (!paymentMethod && !pickupDate) return null;
   return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "4px 0" }}>
@@ -668,6 +668,11 @@ function OrderMeta({ paymentMethod, pickupDate }) {
       {pickupDate && (
         <span className="chpill" style={{ background: "var(--cream-2)", color: "var(--espresso-3)" }}>
           <Icon name="calendar" size={11} /> รับ {formatPickupDateTH(pickupDate)}
+        </span>
+      )}
+      {paymentVerified && (
+        <span className="chpill" style={{ background: "var(--sage-light)", color: "var(--sage-dark)" }}>
+          <Icon name="check" size={11} /> ยืนยันสลิปอัตโนมัติแล้ว
         </span>
       )}
     </div>
@@ -725,7 +730,7 @@ function OrdersPanel({ uid, orders, recordSale, showToast }) {
                 <span>{o.customerName ? `${o.customerName} · ${o.customerPhone}` : o.customerPhone}</span>
                 <span>{new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</span>
               </div>
-              <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} />
+              <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} paymentVerified={o.paymentVerified} />
               <OrderItemLines items={o.items} note={o.note} />
               <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 600, fontSize: 14, borderTop: "1px dashed var(--line)", paddingTop: 6, marginBottom: 10 }}>
                 <span>รวม</span><span>฿{money(o.total)}</span>
@@ -748,7 +753,7 @@ function OrdersPanel({ uid, orders, recordSale, showToast }) {
                 <span>{o.customerName ? `${o.customerName} · ${o.customerPhone}` : o.customerPhone}</span>
                 <span className="chpill" style={{ background: "var(--sage-light)", color: "var(--sage-dark)" }}>{ORDER_STATUS_LABEL[o.status]}</span>
               </div>
-              <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} />
+              <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} paymentVerified={o.paymentVerified} />
               <OrderItemLines items={o.items} note={o.note} />
               {o.status === "paid" && <button className="cbtn cbtn-accent" style={{ width: "100%" }} onClick={() => setStatus(o, "preparing")}>เริ่มชง</button>}
               {o.status === "preparing" && <button className="cbtn cbtn-accent" style={{ width: "100%" }} onClick={() => setStatus(o, "ready")}>พร้อมรับแล้ว</button>}
@@ -1428,7 +1433,7 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
         <SectionTitle icon="qrcode" text="รับออเดอร์ลูกค้า & PromptPay" />
         <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>เบอร์พร้อมเพย์ / เลขบัตรประชาชน (สำหรับ gen QR รับเงิน)</label>
         <input className="cfield" value={promptpayId} onChange={(e) => setPromptpayId(e.target.value)} placeholder="0812345678" style={{ marginBottom: 6 }} />
-        <p style={{ fontSize: 11, color: "var(--espresso-2)", margin: "0 0 8px" }}>ใส่แล้วบันทึกก่อน จึงจะใช้หน้าสั่งซื้อลูกค้าได้</p>
+        <p style={{ fontSize: 11, color: "var(--espresso-2)", margin: "0 0 8px" }}>ใส่แล้วบันทึกก่อน จึงจะใช้หน้าสั่งซื้อลูกค้าได้ หน้าจ่ายเงินจะให้ลูกค้าแนบรูปสลิปเพื่อยืนยันยอดอัตโนมัติ</p>
       </div>
 
       <div style={{ marginTop: 6 }}>
