@@ -407,13 +407,12 @@ function MetricCard({ label, value, sub, accent }) {
 }
 
 function ChannelPill({ channel }) {
-  const isDelivery = channel === "delivery";
-  return (
-    <span className="chpill" style={{
-      background: isDelivery ? "var(--gold-light)" : "var(--sage-light)",
-      color: isDelivery ? "#7A5A1E" : "var(--sage-dark)",
-    }}>{CHANNELS[channel]}</span>
-  );
+  const style = channel === "delivery"
+    ? { background: "var(--gold-light)", color: "#7A5A1E" }
+    : channel === "online"
+    ? { background: "var(--cream-2)", color: "var(--espresso-3)" }
+    : { background: "var(--sage-light)", color: "var(--sage-dark)" };
+  return <span className="chpill" style={style}>{CHANNELS[channel]}</span>;
 }
 
 function Dashboard({ data, ingredientsById, setTab, recordSale }) {
@@ -1009,7 +1008,7 @@ function ReportsPanel({ data }) {
   const profit = revenue - cost;
   const gpTotal = filtered.reduce((a, s) => a + s.gpAmount, 0);
 
-  const byChannel = { store: { revenue: 0, profit: 0, cups: 0 }, delivery: { revenue: 0, profit: 0, cups: 0 } };
+  const byChannel = { store: { revenue: 0, profit: 0, cups: 0 }, delivery: { revenue: 0, profit: 0, cups: 0 }, online: { revenue: 0, profit: 0, cups: 0 } };
   const byPlatform = {};
   for (const s of filtered) {
     byChannel[s.channel].revenue += s.netRevenue;
@@ -1048,7 +1047,7 @@ function ReportsPanel({ data }) {
         <MetricCard label="จำนวนแก้วที่ขาย" value={filtered.reduce((a, s) => a + s.qty, 0)} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 20 }}>
         <div style={{ background: "var(--sage-light)", borderRadius: 12, padding: 14 }}>
           <ChannelPill channel="store" />
           <p style={{ margin: "8px 0 0", fontSize: 20, fontWeight: 600, fontFamily: "var(--f-display)" }}>฿{money(byChannel.store.revenue)}</p>
@@ -1058,6 +1057,11 @@ function ReportsPanel({ data }) {
           <ChannelPill channel="delivery" />
           <p style={{ margin: "8px 0 0", fontSize: 20, fontWeight: 600, fontFamily: "var(--f-display)" }}>฿{money(byChannel.delivery.revenue)}</p>
           <p style={{ margin: 0, fontSize: 12, color: "var(--espresso-3)" }}>กำไร ฿{money(byChannel.delivery.profit)} · {byChannel.delivery.cups} แก้ว</p>
+        </div>
+        <div style={{ background: "var(--cream-2)", borderRadius: 12, padding: 14 }}>
+          <ChannelPill channel="online" />
+          <p style={{ margin: "8px 0 0", fontSize: 20, fontWeight: 600, fontFamily: "var(--f-display)" }}>฿{money(byChannel.online.revenue)}</p>
+          <p style={{ margin: 0, fontSize: 12, color: "var(--espresso-3)" }}>กำไร ฿{money(byChannel.online.profit)} · {byChannel.online.cups} แก้ว</p>
         </div>
       </div>
 
