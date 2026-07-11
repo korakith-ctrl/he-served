@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo } from "react";
 import { auth, db } from "./firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { ref, onValue, set } from "firebase/database";
+import { ref, onValue, set, update } from "firebase/database";
+import QRCode from "qrcode";
 import Login from "./Login.jsx";
+import CustomerOrder from "./CustomerOrder.jsx";
 
 const UNITS = { g: "กรัม", ml: "มล.", piece: "ชิ้น" };
 const CATEGORIES = [
@@ -13,9 +15,9 @@ const CATEGORIES = [
   { id: "juice_water", label: "น้ำผลไม้ / น้ำ-น้ำแข็ง" },
   { id: "packaging", label: "บรรจุภัณฑ์" },
 ];
-const CHANNELS = { store: "หน้าร้าน", delivery: "เดลิเวอรี่" };
+const CHANNELS = { store: "หน้าร้าน", delivery: "เดลิเวอรี่", online: "สั่งออนไลน์" };
 
-function uid(prefix) {
+function genId(prefix) {
   return prefix + "_" + Math.random().toString(36).slice(2, 9);
 }
 
@@ -65,7 +67,7 @@ function seedIngredients() {
 
 function seedMenus() {
   const mk = (name, priceStore, priceDelivery, ings) => ({
-    id: uid("menu"), name, priceStore, priceDelivery,
+    id: genId("menu"), name, priceStore, priceDelivery,
     ingredients: ings.map(([ingredientId, qty]) => ({ ingredientId, qty })),
   });
   const pack = [["cup_16", 1], ["lid_98", 1], ["straw_black", 1], ["zipbag_drink", 1], ["sticker", 1]];
@@ -82,10 +84,10 @@ function seedMenus() {
 
 function seedPlatforms() {
   return [
-    { id: uid("plat"), name: "Grab Food", gpPercent: 30 },
-    { id: uid("plat"), name: "LINE MAN", gpPercent: 32 },
-    { id: uid("plat"), name: "foodpanda", gpPercent: 30 },
-    { id: uid("plat"), name: "Shopee Food", gpPercent: 25 },
+    { id: genId("plat"), name: "Grab Food", gpPercent: 30 },
+    { id: genId("plat"), name: "LINE MAN", gpPercent: 32 },
+    { id: genId("plat"), name: "foodpanda", gpPercent: 30 },
+    { id: genId("plat"), name: "Shopee Food", gpPercent: 25 },
   ];
 }
 
@@ -95,7 +97,7 @@ function defaultState() {
     menus: seedMenus(),
     sales: [],
     purchases: [],
-    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms() },
+    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "" },
   };
 }
 
@@ -109,6 +111,7 @@ function normalizeData(raw) {
       overheadPerCup: raw.settings?.overheadPerCup ?? 3.1,
       shopName: raw.settings?.shopName ?? "ร้านกาแฟของฉัน",
       platforms: raw.settings?.platforms || [],
+      promptpayId: raw.settings?.promptpayId || "",
     },
   };
 }
@@ -153,6 +156,7 @@ function Icon({ name, size = 18, style }) {
 const TABS = [
   { id: "dashboard", label: "ภาพรวม", icon: "layout-dashboard" },
   { id: "sell", label: "ขายเครื่องดื่ม", icon: "cash-register" },
+  { id: "orders", label: "ออเดอร์ลูกค้า", icon: "receipt" },
   { id: "menus", label: "เมนู & สูตร", icon: "cup" },
   { id: "ingredients", label: "วัตถุดิบ & สต็อก", icon: "boxes" },
   { id: "reports", label: "รายงาน", icon: "chart-line" },
@@ -245,7 +249,7 @@ function ShopApp({ uid }) {
         if (ing) ing.stockQty = round4(ing.stockQty - line.qty * qty);
       }
       next.sales.push({
-        id: uid("sale"), timestamp: new Date().toISOString(), menuId, menuName: menu.name,
+        id: genId("sale"), timestamp: new Date().toISOString(), menuId, menuName: menu.name,
         channel, qty, unitPrice, grossRevenue, gpAmount, gpPercent, promoDiscount, netRevenue,
         totalCost, profit: netRevenue - totalCost,
         platformName: platform ? platform.name : null,
@@ -304,10 +308,11 @@ function ShopApp({ uid }) {
         <div style={{ padding: 20, minHeight: 320 }}>
           {tab === "dashboard" && <Dashboard data={data} ingredientsById={ingredientsById} setTab={setTab} recordSale={recordSale} />}
           {tab === "sell" && <SellPanel data={data} ingredientsById={ingredientsById} recordSale={recordSale} />}
+          {tab === "orders" && <OrdersPanel uid={uid} recordSale={recordSale} showToast={showToast} />}
           {tab === "menus" && <MenusPanel data={data} ingredientsById={ingredientsById} updateData={updateData} showToast={showToast} />}
           {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "reports" && <ReportsPanel data={data} />}
-          {tab === "settings" && <SettingsPanel data={data} updateData={updateData} showToast={showToast} />}
+          {tab === "settings" && <SettingsPanel data={data} updateData={updateData} showToast={showToast} uid={uid} />}
         </div>
 
         {toast && (
@@ -538,6 +543,87 @@ function SellPanel({ data, ingredientsById, recordSale }) {
   );
 }
 
+function OrdersPanel({ uid, recordSale, showToast }) {
+  const [orders, setOrders] = useState(null);
+
+  useEffect(() => {
+    const unsub = onValue(ref(db, `orders/${uid}`), (snap) => {
+      const val = snap.val() || {};
+      const list = Object.entries(val).map(([id, o]) => ({ id, ...o }));
+      list.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+      setOrders(list);
+    });
+    return () => unsub();
+  }, [uid]);
+
+  function confirmPaid(order) {
+    update(ref(db, `orders/${uid}/${order.id}`), { status: "paid" }).catch((err) => showToast("อัปเดตไม่สำเร็จ: " + err.message));
+    for (const item of order.items) {
+      recordSale(item.menuId, item.qty, "online", {});
+    }
+    showToast(`ยืนยันออเดอร์ ${order.customerPhone} แล้ว บันทึกยอดขายให้อัตโนมัติ`);
+  }
+
+  function cancelOrder(order) {
+    update(ref(db, `orders/${uid}/${order.id}`), { status: "cancelled" }).catch((err) => showToast("อัปเดตไม่สำเร็จ: " + err.message));
+  }
+
+  if (orders === null) return <EmptyNote text="กำลังโหลดออเดอร์..." />;
+
+  const pending = orders.filter((o) => o.status === "pending");
+  const others = orders.filter((o) => o.status !== "pending").slice(0, 20);
+
+  return (
+    <div>
+      <SectionTitle icon="receipt" text={`ออเดอร์รอยืนยัน (${pending.length})`} />
+      {pending.length === 0 ? <EmptyNote text="ยังไม่มีออเดอร์ใหม่" /> : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12, marginBottom: 24 }}>
+          {pending.map((o) => (
+            <div key={o.id} style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "var(--espresso-2)" }}>
+                <span>{o.customerPhone}</span>
+                <span>{new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</span>
+              </div>
+              <div style={{ margin: "8px 0", fontSize: 13 }}>
+                {o.items.map((i) => (
+                  <div key={i.menuId} style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span>{i.name} x{i.qty}</span><span>฿{money(i.unitPrice * i.qty)}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 600, fontSize: 14, borderTop: "1px dashed var(--line)", paddingTop: 6, marginBottom: 10 }}>
+                <span>รวม</span><span>฿{money(o.total)}</span>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button className="cbtn cbtn-accent" style={{ flex: 1 }} onClick={() => confirmPaid(o)}>ยืนยันรับเงินแล้ว</button>
+                <button className="cbtn cbtn-danger" onClick={() => cancelOrder(o)}><Icon name="x" size={13} /></button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <SectionTitle icon="history" text="ประวัติล่าสุด" />
+      {others.length === 0 ? <EmptyNote text="ยังไม่มีประวัติ" /> : (
+        <table className="cdata">
+          <thead><tr><th>เวลา</th><th>เบอร์โทร</th><th>รายการ</th><th>ยอด</th><th>สถานะ</th></tr></thead>
+          <tbody>
+            {others.map((o) => (
+              <tr key={o.id}>
+                <td>{new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</td>
+                <td>{o.customerPhone}</td>
+                <td>{o.items.map((i) => `${i.name} x${i.qty}`).join(", ")}</td>
+                <td>฿{money(o.total)}</td>
+                <td>{o.status === "paid" ? "จ่ายแล้ว" : o.status === "cancelled" ? "ยกเลิก" : o.status}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 function MenusPanel({ data, ingredientsById, updateData, showToast }) {
   const [editing, setEditing] = useState(null);
 
@@ -551,7 +637,7 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
         const idx = next.menus.findIndex((m) => m.id === menu.id);
         next.menus[idx] = menu;
       } else {
-        next.menus.push({ ...menu, id: uid("menu") });
+        next.menus.push({ ...menu, id: genId("menu") });
       }
     });
     setEditing(null);
@@ -692,7 +778,7 @@ function IngredientsPanel({ data, updateData, showToast }) {
       if (!ing) return;
       ing.stockQty = round4(ing.stockQty + addQty);
       if (addQty > 0 && totalPaid > 0) ing.costPerUnit = round4(totalPaid / addQty);
-      next.purchases.push({ id: uid("purchase"), timestamp: new Date().toISOString(), ingredientId: id, qtyAdded: addQty, totalCost: totalPaid });
+      next.purchases.push({ id: genId("purchase"), timestamp: new Date().toISOString(), ingredientId: id, qtyAdded: addQty, totalCost: totalPaid });
     });
     setRestocking(null);
     showToast("เติมสต็อกแล้ว");
@@ -700,7 +786,7 @@ function IngredientsPanel({ data, updateData, showToast }) {
 
   function addIngredient() {
     if (!newIng.name.trim()) return;
-    updateData((next) => { next.ingredients.push({ ...newIng, altGroup: newIng.altGroup || null, id: uid("ing") }); });
+    updateData((next) => { next.ingredients.push({ ...newIng, altGroup: newIng.altGroup || null, id: genId("ing") }); });
     setAdding(false);
     setNewIng(blankIng);
     showToast("เพิ่มวัตถุดิบแล้ว");
@@ -953,16 +1039,18 @@ function ReportsPanel({ data }) {
   );
 }
 
-function SettingsPanel({ data, updateData, showToast }) {
+function SettingsPanel({ data, updateData, showToast, uid }) {
   const [shopName, setShopName] = useState(data.settings.shopName);
   const [overhead, setOverhead] = useState(data.settings.overheadPerCup);
   const [platforms, setPlatforms] = useState(data.settings.platforms);
+  const [promptpayId, setPromptpayId] = useState(data.settings.promptpayId || "");
 
   function save() {
     updateData((next) => {
       next.settings.shopName = shopName;
       next.settings.overheadPerCup = Number(overhead);
       next.settings.platforms = platforms;
+      next.settings.promptpayId = promptpayId.trim();
     });
     showToast("บันทึกการตั้งค่าแล้ว");
   }
@@ -971,7 +1059,7 @@ function SettingsPanel({ data, updateData, showToast }) {
     setPlatforms((p) => p.map((x, i) => (i === idx ? { ...x, ...patch } : x)));
   }
   function addPlatform() {
-    setPlatforms((p) => [...p, { id: uid("plat"), name: "แพลตฟอร์มใหม่", gpPercent: 30 }]);
+    setPlatforms((p) => [...p, { id: genId("plat"), name: "แพลตฟอร์มใหม่", gpPercent: 30 }]);
   }
   function removePlatform(idx) {
     setPlatforms((p) => p.filter((_, i) => i !== idx));
@@ -997,8 +1085,17 @@ function SettingsPanel({ data, updateData, showToast }) {
       <button className="cbtn" onClick={addPlatform}><Icon name="plus" size={13} /> เพิ่มแพลตฟอร์ม</button>
 
       <div style={{ marginTop: 18 }}>
+        <SectionTitle icon="qrcode" text="รับออเดอร์ลูกค้า & PromptPay" />
+        <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>เบอร์พร้อมเพย์ / เลขบัตรประชาชน (สำหรับ gen QR รับเงิน)</label>
+        <input className="cfield" value={promptpayId} onChange={(e) => setPromptpayId(e.target.value)} placeholder="0812345678" style={{ marginBottom: 6 }} />
+        <p style={{ fontSize: 11, color: "var(--espresso-2)", margin: "0 0 8px" }}>ใส่แล้วบันทึกก่อน จึงจะใช้หน้าสั่งซื้อลูกค้าได้</p>
+      </div>
+
+      <div style={{ marginTop: 6 }}>
         <button className="cbtn cbtn-accent" onClick={save}>บันทึกการตั้งค่า</button>
       </div>
+
+      {uid && <OrderLinkCard uid={uid} />}
 
       <p style={{ fontSize: 11.5, color: "var(--espresso-2)", marginTop: 20, lineHeight: 1.6 }}>
         ข้อมูลทั้งหมด (วัตถุดิบ เมนู ยอดขาย) ถูกบันทึกไว้อัตโนมัติ และจะยังอยู่เมื่อกลับมาเปิดใหม่ นมสด (รวม) ใช้แทนแบรนด์เฉพาะ — ตัดสต็อกจากยอดรวมนมสด ยกเว้นตอนขายเลือก "นม Oat" ซึ่งจะตัดจากสต็อกนม Oat แยกต่างหาก แต่ละแพลตฟอร์มเดลิเวอรี่หัก GP ตาม % ที่ตั้งไว้ด้านบน
@@ -1007,13 +1104,43 @@ function SettingsPanel({ data, updateData, showToast }) {
   );
 }
 
+function OrderLinkCard({ uid }) {
+  const [dataUrl, setDataUrl] = useState(null);
+  const orderUrl = `${window.location.origin}/order/${uid}`;
+
+  useEffect(() => {
+    let cancelled = false;
+    QRCode.toDataURL(orderUrl, { width: 220, margin: 1 }).then((url) => {
+      if (!cancelled) setDataUrl(url);
+    });
+    return () => { cancelled = true; };
+  }, [orderUrl]);
+
+  return (
+    <div style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 16, marginTop: 18 }}>
+      <SectionTitle icon="link" text="ลิงก์สั่งซื้อสำหรับลูกค้า" />
+      <p style={{ fontSize: 12, color: "var(--espresso-2)", margin: "0 0 10px" }}>ปริ้น QR นี้ติดหน้าร้าน ลูกค้าสแกนแล้วสั่ง+จ่ายได้เอง</p>
+      {dataUrl && <img src={dataUrl} alt="QR ลิงก์สั่งซื้อ" width={160} height={160} style={{ borderRadius: 8, border: "1px solid var(--line)" }} />}
+      <p style={{ fontFamily: "var(--f-mono)", fontSize: 11.5, color: "var(--espresso-3)", wordBreak: "break-all", marginTop: 10 }}>{orderUrl}</p>
+    </div>
+  );
+}
+
 export default function App() {
   const [user, setUser] = useState(undefined);
 
+  const orderMatch = window.location.pathname.match(/^\/order\/([^/]+)/);
+
   useEffect(() => {
+    if (orderMatch) return;
     const unsub = onAuthStateChanged(auth, (u) => setUser(u));
     return () => unsub();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  if (orderMatch) {
+    return <CustomerOrder shopUid={orderMatch[1]} />;
+  }
 
   if (user === undefined) {
     return (

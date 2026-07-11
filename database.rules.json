@@ -3,7 +3,23 @@
     "shops": {
       "$uid": {
         ".read": "auth != null && auth.uid === $uid",
-        ".write": "auth != null && auth.uid === $uid"
+        ".write": "auth != null && auth.uid === $uid",
+        "menus": {
+          ".read": "auth != null"
+        },
+        "settings": {
+          "shopName": { ".read": "auth != null" },
+          "promptpayId": { ".read": "auth != null" }
+        }
+      }
+    },
+    "orders": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        "$orderId": {
+          ".read": "auth != null && (auth.uid === $uid || data.child('customerUid').val() === auth.uid)",
+          ".write": "auth != null && (auth.uid === $uid || (!data.exists() && newData.child('customerUid').val() === auth.uid))"
+        }
       }
     }
   }
