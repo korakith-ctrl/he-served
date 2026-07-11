@@ -159,6 +159,16 @@ const GLOBAL_CSS = `
   @keyframes blobFloat1 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(6%,-8%) scale(1.1); } }
   @keyframes blobFloat2 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-8%,6%) scale(1.06); } }
   @keyframes blobFloat3 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(5%,5%) scale(1.12); } }
+  @keyframes flyToCart {
+    0% { transform: translate(0,0) scale(1); opacity: 1; }
+    50% { transform: translate(calc(var(--dx) * 0.6), calc(var(--dy) * 0.5 - 50px)) scale(0.7); opacity: 1; }
+    100% { transform: translate(var(--dx), var(--dy)) scale(0.15); opacity: 0; }
+  }
+  @keyframes cartBump {
+    0% { transform: scale(1); }
+    40% { transform: scale(1.25); }
+    100% { transform: scale(1); }
+  }
 `;
 
 function MenuThumb({ imageUrl }) {
@@ -232,6 +242,11 @@ export default function CustomerOrder({ shopUid }) {
   const [slipTestMode, setSlipTestMode] = useState(false);
   const [bannerImageUrl, setBannerImageUrl] = useState("");
   const [cart, setCart] = useState([]);
+  const [flyItems, setFlyItems] = useState([]);
+  const [cartBump, setCartBump] = useState(false);
+  const menuThumbRefs = useRef({});
+  const cartIconRef = useRef(null);
+  const prevCartCountRef = useRef(0);
   const [pickingMenu, setPickingMenu] = useState(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -359,10 +374,25 @@ export default function CustomerOrder({ shopUid }) {
     return linesForMenu(menuId).reduce((s, l) => s + l.qty, 0);
   }
 
+  function spawnFly(menu) {
+    const startEl = menuThumbRefs.current[menu.id];
+    const startRect = startEl && startEl.getBoundingClientRect();
+    if (!startRect) return;
+    const cartRect = cartIconRef.current && cartIconRef.current.getBoundingClientRect();
+    const startX = startRect.left + startRect.width / 2;
+    const startY = startRect.top + startRect.height / 2;
+    const endX = cartRect ? cartRect.left + cartRect.width / 2 : 40;
+    const endY = cartRect ? cartRect.top + cartRect.height / 2 : window.innerHeight - 40;
+    const id = Math.random().toString(36).slice(2);
+    setFlyItems((list) => [...list, { id, imageUrl: menu.imageUrl, startX, startY, dx: endX - startX, dy: endY - startY }]);
+    setTimeout(() => setFlyItems((list) => list.filter((f) => f.id !== id)), 650);
+  }
+
   function openMenu(menu) {
     if (menu.available === false) return;
     const groups = groupsForMenu(menu);
     if (groups.length === 0) {
+      spawnFly(menu);
       const existing = cart.find((l) => l.menuId === menu.id && l.options.length === 0);
       if (existing) setLineQty(existing.lineId, existing.qty + 1);
       else addToCart(menu, 1, []);
@@ -387,6 +417,16 @@ export default function CustomerOrder({ shopUid }) {
 
   const total = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0);
   const cartCount = cart.reduce((s, l) => s + l.qty, 0);
+
+  useEffect(() => {
+    if (cartCount > prevCartCountRef.current) {
+      setCartBump(true);
+      const t = setTimeout(() => setCartBump(false), 320);
+      prevCartCountRef.current = cartCount;
+      return () => clearTimeout(t);
+    }
+    prevCartCountRef.current = cartCount;
+  }, [cartCount]);
 
   async function checkout() {
     setError("");
@@ -713,6 +753,20 @@ export default function CustomerOrder({ shopUid }) {
       <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.44.0/iconfont/tabler-icons.min.css" />
       <GlassBackdrop />
 
+      {flyItems.map((f) => (
+        <div
+          key={f.id}
+          style={{
+            position: "fixed", left: f.startX - 20, top: f.startY - 20, width: 40, height: 40,
+            borderRadius: "50%", overflow: "hidden", zIndex: 999, pointerEvents: "none",
+            boxShadow: "0 4px 14px rgba(43,29,20,0.3)", border: "2px solid #fff",
+            background: f.imageUrl ? `url(${f.imageUrl}) center/cover` : `linear-gradient(135deg, ${COLORS.sage}, ${COLORS.espresso5})`,
+            "--dx": `${f.dx}px`, "--dy": `${f.dy}px`,
+            animation: "flyToCart .65s cubic-bezier(.3,.8,.4,1) forwards",
+          }}
+        />
+      ))}
+
       <div style={{ ...GLASS_PANEL, margin: "10px 10px 0", borderRadius: 18, padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <BrandLogo height={34} />
@@ -775,7 +829,9 @@ export default function CustomerOrder({ shopUid }) {
                       ...GLASS_PANEL, display: "flex", gap: 12, alignItems: "center", padding: "10px 12px", borderRadius: 14, marginBottom: 8,
                       opacity: soldOut ? 0.5 : 1, cursor: soldOut || singleLine ? "default" : "pointer",
                     }}>
-                      <MenuThumb imageUrl={m.imageUrl} />
+                      <div ref={(el) => { menuThumbRefs.current[m.id] = el; }}>
+                        <MenuThumb imageUrl={m.imageUrl} />
+                      </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 500, fontSize: 14, color: COLORS.espresso5 }}>{m.name}</div>
                         <div style={{ fontSize: 13, color: soldOut ? COLORS.danger : COLORS.gold, fontWeight: 600, marginTop: 3 }}>
@@ -790,7 +846,7 @@ export default function CustomerOrder({ shopUid }) {
                           }}>−</button>
                           <span style={{ minWidth: 16, textAlign: "center", fontWeight: 600, color: COLORS.espresso5 }}>{qty}</span>
                           <button
-                            onClick={() => (canAddDirectly ? setLineQty(singleLine.lineId, singleLine.qty + 1) : openMenu(m))}
+                            onClick={() => { if (canAddDirectly) { spawnFly(m); setLineQty(singleLine.lineId, singleLine.qty + 1); } else openMenu(m); }}
                             style={{
                               width: 28, height: 28, borderRadius: 8, border: "none", background: COLORS.espresso5,
                               color: "#fff", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
@@ -838,7 +894,7 @@ export default function CustomerOrder({ shopUid }) {
             onClick={() => setShowCart(true)}
             style={{ display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", color: "#fff", padding: 0 }}
           >
-            <div style={{ position: "relative" }}>
+            <div ref={cartIconRef} style={{ position: "relative", animation: cartBump ? "cartBump .32s ease" : "none" }}>
               <i className="ti ti-shopping-bag" style={{ fontSize: 22 }} aria-hidden="true"></i>
               <span style={{
                 position: "absolute", top: -8, right: -8, background: COLORS.sage, color: "#fff", fontSize: 10,
@@ -873,7 +929,7 @@ export default function CustomerOrder({ shopUid }) {
           menu={pickingMenu}
           groups={groupsForMenu(pickingMenu)}
           onCancel={() => setPickingMenu(null)}
-          onConfirm={(qty, options) => { addToCart(pickingMenu, qty, options); setPickingMenu(null); }}
+          onConfirm={(qty, options) => { spawnFly(pickingMenu); addToCart(pickingMenu, qty, options); setPickingMenu(null); }}
         />
       )}
     </div>
