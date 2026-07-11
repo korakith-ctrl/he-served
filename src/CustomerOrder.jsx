@@ -227,7 +227,11 @@ export default function CustomerOrder({ shopUid }) {
     const unsub2 = onValue(ref(db, `shops/${shopUid}/settings/shopName`), (snap) => setShopName(snap.val() || "ร้านกาแฟ"));
     const unsub3 = onValue(ref(db, `shops/${shopUid}/settings/promptpayId`), (snap) => setPromptpayId(snap.val() || ""));
     const unsub4 = onValue(ref(db, `shops/${shopUid}/optionGroups`), (snap) => setOptionGroups(snap.val() || []));
-    const unsub5 = onValue(ref(db, `shops/${shopUid}/settings/acceptingOrders`), (snap) => setAcceptingOrders(snap.val() !== false));
+    const unsub5 = onValue(
+      ref(db, `shops/${shopUid}/settings/acceptingOrders`),
+      (snap) => setAcceptingOrders(snap.val() !== false),
+      (err) => console.error("อ่านสถานะเปิด/ปิดร้านไม่ได้ (เช็คว่า publish database.rules.json ล่าสุดหรือยัง):", err.message)
+    );
     return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); };
   }, [authUid, shopUid]);
 
