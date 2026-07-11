@@ -331,7 +331,7 @@ function ShopApp({ uid }) {
 
   if (!data) {
     return (
-      <div style={{ padding: "3rem", textAlign: "center", color: "#5C4A3B", fontFamily: "sans-serif" }}>
+      <div style={{ padding: "3rem", textAlign: "center", color: "#0B4A7A", fontFamily: "sans-serif" }}>
         กำลังโหลดข้อมูลร้าน...
       </div>
     );
@@ -380,65 +380,86 @@ function ShopApp({ uid }) {
 
   return (
     <div style={{
-      fontFamily: "var(--f-body)", color: "var(--espresso-4)", background: "var(--cream)",
-      borderRadius: 16, overflow: "hidden", border: "1px solid var(--line)", maxWidth: 980, margin: "0 auto", position: "relative",
+      fontFamily: "var(--f-body)", color: "var(--espresso-4)",
+      borderRadius: 20, overflow: "hidden", border: "1px solid rgba(255,255,255,0.55)", maxWidth: 980, margin: "0 auto", position: "relative",
+      boxShadow: "0 20px 60px rgba(6,51,96,0.12)",
     }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
         .coffeeapp * { box-sizing: border-box; }
         .coffeeapp button { font-family: inherit; cursor: pointer; }
         .coffeeapp input, .coffeeapp select { font-family: inherit; }
-        .cbtn { border: 1px solid var(--line); background: var(--surface); color: var(--espresso-4); border-radius: 9px; padding: 8px 14px; font-size: 13px; font-weight: 500; transition: transform .08s ease, background .15s ease; }
-        .cbtn:hover { background: var(--cream-2); }
-        .cbtn:active { transform: scale(0.97); }
-        .cbtn-accent { background: var(--sage); color: #fff; border-color: var(--sage); }
+        .cbtn {
+          border: 1px solid rgba(255,255,255,0.6); background: rgba(255,255,255,0.5);
+          backdrop-filter: blur(14px) saturate(180%); -webkit-backdrop-filter: blur(14px) saturate(180%);
+          color: var(--espresso-4); border-radius: 11px; padding: 8px 14px; font-size: 13px; font-weight: 500;
+          transition: transform .08s ease, background .15s ease;
+        }
+        .cbtn:hover { background: rgba(255,255,255,0.75); }
+        .cbtn:active { transform: scale(0.94); }
+        .cbtn-accent { background: var(--sage); color: #fff; border-color: var(--sage); backdrop-filter: none; -webkit-backdrop-filter: none; }
         .cbtn-accent:hover { background: var(--sage-dark); }
-        .cbtn-danger { color: var(--danger); border-color: var(--danger-line); background: var(--danger-light); }
+        .cbtn-danger { color: var(--danger); border-color: var(--danger-line); background: var(--danger-light); backdrop-filter: none; -webkit-backdrop-filter: none; }
         .cbtn-danger:hover { background: var(--danger-line); }
-        .cbtn-edit { color: var(--info-dark); border-color: var(--info); background: var(--info-light); }
+        .cbtn-edit { color: var(--info-dark); border-color: var(--info); background: var(--info-light); backdrop-filter: none; -webkit-backdrop-filter: none; }
         .cbtn-edit:hover { background: var(--info); color: #fff; }
-        .cfield { border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font-size: 13px; background: var(--surface); color: var(--espresso-4); width: 100%; }
+        .cfield {
+          border: 1px solid rgba(255,255,255,0.65); background: rgba(255,255,255,0.55);
+          border-radius: 10px; padding: 7px 10px; font-size: 13px; color: var(--espresso-4); width: 100%;
+        }
         .cfield:focus { outline: 2px solid var(--sage); outline-offset: 1px; }
-        .ctab { border: none; background: transparent; color: var(--espresso-2); padding: 10px 14px; font-size: 13px; font-weight: 500; border-radius: 9px 9px 0 0; display: flex; align-items: center; gap: 6px; }
-        .ctab.active { background: var(--cream); color: var(--espresso-5); }
+        .ctab { border: none; background: transparent; color: var(--espresso-2); padding: 10px 14px; font-size: 13px; font-weight: 500; border-radius: 11px 11px 0 0; display: flex; align-items: center; gap: 6px; transition: background .15s ease, color .15s ease; }
+        .ctab.active { background: rgba(255,255,255,0.6); color: var(--espresso-5); }
+        .glass-card { background: rgba(255,255,255,0.5); backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); border: 1px solid rgba(255,255,255,0.6); box-shadow: inset 0 1px 0 rgba(255,255,255,0.6), 0 8px 24px rgba(6,51,96,0.08); }
         table.cdata { width: 100%; border-collapse: collapse; font-size: 13px; }
         table.cdata th { text-align: left; font-weight: 500; color: var(--espresso-2); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; padding: 6px 8px; border-bottom: 1px solid var(--line); }
         table.cdata td { padding: 8px; border-bottom: 1px solid var(--line-soft); }
         .chpill { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 500; }
         @keyframes paidFlash {
-          0% { box-shadow: 0 0 0 0 rgba(110,130,86,0); background: var(--surface); }
+          0% { box-shadow: 0 0 0 0 rgba(206,86,13,0); background: var(--surface); }
           15% { box-shadow: 0 0 0 4px var(--sage); background: var(--sage-light); }
-          100% { box-shadow: 0 0 0 0 rgba(110,130,86,0); background: var(--surface); }
+          100% { box-shadow: 0 0 0 0 rgba(206,86,13,0); background: var(--surface); }
         }
+        @keyframes adminBlobFloat1 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(6%,-8%) scale(1.1); } }
+        @keyframes adminBlobFloat2 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-8%,6%) scale(1.06); } }
+        @keyframes adminBlobFloat3 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(5%,5%) scale(1.12); } }
       `}</style>
       <div className="coffeeapp" style={{
-        "--cream": "#FAF6EE", "--cream-2": "#F1EBDD", "--surface": "#FFFFFF",
-        "--espresso-5": "#2B1D14", "--espresso-4": "#3E2C20", "--espresso-3": "#5C4A3B", "--espresso-2": "#8A7A6B",
-        "--sage": "#6E8256", "--sage-dark": "#54663F", "--sage-light": "#E4EAD9",
-        "--gold": "#C79A45", "--gold-dark": "#9C7530", "--gold-light": "#F6EBD3",
+        "--cream": "#F5F0EA", "--cream-2": "#EDE3D2", "--surface": "rgba(255,255,255,0.55)",
+        "--espresso-5": "#063360", "--espresso-4": "#0B4A7A", "--espresso-3": "#3A5570", "--espresso-2": "#7189A3",
+        "--sage": "#CE560D", "--sage-dark": "#A8440A", "--sage-light": "#F7E0CC",
+        "--gold": "#CE560D", "--gold-dark": "#A8440A", "--gold-light": "#F7E0CC",
         "--info": "#3D6E8C", "--info-dark": "#2C5069", "--info-light": "#DCE9F0",
-        "--danger": "#A33A3A", "--danger-line": "#D9B8B8", "--danger-light": "#F6E7E7",
-        "--line": "#E4DBC9", "--line-soft": "#EFE9DB",
+        "--danger": "#B23A2E", "--danger-line": "#E0BDB6", "--danger-light": "#F7E7E3",
+        "--line": "#E2D8C7", "--line-soft": "#EFE6DB",
         "--f-display": "'Fraunces', serif", "--f-body": "'Inter', sans-serif", "--f-mono": "'IBM Plex Mono', monospace",
+        position: "relative",
       }}>
+        <div style={{ position: "fixed", inset: 0, zIndex: -1, overflow: "hidden", background: "linear-gradient(160deg, #F7F1E7, #ECE1CE)" }}>
+          <div style={{ position: "absolute", top: "-10%", left: "-10%", width: "55%", height: "45%", borderRadius: "50%", background: "#0B4A7A", opacity: 0.3, filter: "blur(80px)", animation: "adminBlobFloat1 18s ease-in-out infinite" }} />
+          <div style={{ position: "absolute", top: "-5%", right: "-12%", width: "45%", height: "40%", borderRadius: "50%", background: "#CE560D", opacity: 0.25, filter: "blur(80px)", animation: "adminBlobFloat2 20s ease-in-out infinite" }} />
+          <div style={{ position: "absolute", bottom: "-15%", left: "20%", width: "60%", height: "50%", borderRadius: "50%", background: "#A66F42", opacity: 0.22, filter: "blur(90px)", animation: "adminBlobFloat3 22s ease-in-out infinite" }} />
+        </div>
 
-        <Header shopName={data.settings.shopName} onSignOut={() => signOut(auth)} />
+        <div className="glass-card" style={{ margin: "14px 14px 0", borderRadius: 18, overflow: "hidden" }}>
+          <Header shopName={data.settings.shopName} onSignOut={() => signOut(auth)} />
 
-        <div style={{ display: "flex", gap: 2, padding: "0 20px", borderBottom: "1px solid var(--line)", overflowX: "auto" }}>
-          {TABS.map((t) => {
-            const pendingCount = t.id === "orders" ? orders.filter((o) => o.status === "pending").length : 0;
-            return (
-              <button key={t.id} className={"ctab" + (tab === t.id ? " active" : "")} onClick={() => setTab(t.id)} style={{ position: "relative" }}>
-                <Icon name={t.icon} size={16} /> {t.label}
-                {pendingCount > 0 && (
-                  <span style={{
-                    background: "var(--danger)", color: "#fff", fontSize: 10, fontWeight: 600, lineHeight: 1,
-                    borderRadius: 999, padding: "3px 6px", marginLeft: 2,
-                  }}>{pendingCount}</span>
-                )}
-              </button>
-            );
-          })}
+          <div style={{ display: "flex", justifyContent: "center", gap: 2, padding: "0 16px", borderTop: "1px solid var(--line)", overflowX: "auto" }}>
+            {TABS.map((t) => {
+              const pendingCount = t.id === "orders" ? orders.filter((o) => o.status === "pending").length : 0;
+              return (
+                <button key={t.id} className={"ctab" + (tab === t.id ? " active" : "")} onClick={() => setTab(t.id)} style={{ position: "relative" }}>
+                  <Icon name={t.icon} size={16} /> {t.label}
+                  {pendingCount > 0 && (
+                    <span style={{
+                      background: "var(--danger)", color: "#fff", fontSize: 10, fontWeight: 600, lineHeight: 1,
+                      borderRadius: 999, padding: "3px 6px", marginLeft: 2,
+                    }}>{pendingCount}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <div style={{ padding: 20, minHeight: 320 }}>
@@ -494,7 +515,7 @@ function MetricCard({ label, value, sub, accent }) {
 
 function ChannelPill({ channel }) {
   const style = channel === "delivery"
-    ? { background: "var(--gold-light)", color: "#7A5A1E" }
+    ? { background: "var(--gold-light)", color: "var(--gold-dark)" }
     : channel === "online"
     ? { background: "var(--cream-2)", color: "var(--espresso-3)" }
     : { background: "var(--sage-light)", color: "var(--sage-dark)" };
@@ -1624,7 +1645,7 @@ export default function App() {
 
   if (user === undefined) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "sans-serif", color: "#5C4A3B" }}>
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "sans-serif", color: "#0B4A7A" }}>
         กำลังโหลด...
       </div>
     );
