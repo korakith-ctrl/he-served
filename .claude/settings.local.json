@@ -1,7 +1,20 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npx vite *)"
+      "Bash(npx vite *)",
+      "Bash(git fetch *)",
+      "Bash(npm run *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(git mv *)",
+      "Bash(mv firestore.rules database.rules.json)",
+      "Skill(run)",
+      "Skill(run:*)",
+      "Bash(node -e \"require.resolve\\('playwright'\\)\")",
+      "Bash(npx --yes playwright --version)",
+      "Bash(timeout 15 bash -c 'until curl -sf http://localhost:5174 >/dev/null; do sleep 1; done')",
+      "Bash(npx --yes playwright install chromium --with-deps)"
     ]
   }
 }

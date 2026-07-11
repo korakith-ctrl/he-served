@@ -82,6 +82,25 @@ const GLOBAL_CSS = `
   .corder { scrollbar-width: none; }
   @keyframes pulseCup { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.08); opacity: .75; } }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes logoReveal {
+    0% { opacity: 0; transform: scale(0.55); filter: blur(14px); }
+    55% { opacity: 1; transform: scale(1.06); filter: blur(0); }
+    75% { transform: scale(0.98); }
+    100% { opacity: 1; transform: scale(1); filter: blur(0); }
+  }
+  @keyframes logoBreathe {
+    0%, 100% { transform: translateY(0) scale(1); }
+    50% { transform: translateY(-8px) scale(1.025); }
+  }
+  @keyframes ringRipple {
+    0% { transform: scale(0.55); opacity: 0; }
+    18% { opacity: .55; }
+    100% { transform: scale(1.9); opacity: 0; }
+  }
+  @keyframes haloSpin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
 `;
 
 function MenuThumb({ imageUrl }) {
@@ -113,20 +132,34 @@ function BrandLogo({ height = 64 }) {
   return <img src="/logo.png" alt="Zone 2 Reserve Bar" onError={() => setFailed(true)} style={{ height, width: "auto", display: "block" }} />;
 }
 
-function LandingScreen({ shopName }) {
+function LandingScreen() {
+  const ringBase = {
+    position: "absolute", inset: 0, borderRadius: "50%",
+    animation: "ringRipple 2.6s cubic-bezier(0.2, 0.6, 0.35, 1) infinite",
+  };
   return (
     <div className="corder" style={{
-      minHeight: "100vh", background: COLORS.cream,
-      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-      fontFamily: "'Inter', sans-serif", color: COLORS.espresso5, textAlign: "center", padding: 24,
+      minHeight: "100vh", background: COLORS.cream, overflow: "hidden",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontFamily: "'Inter', sans-serif",
     }}>
       <style>{GLOBAL_CSS}</style>
-      <div style={{ animation: "pulseCup 1.6s ease-in-out infinite", marginBottom: 22 }}>
-        <BrandLogo height={160} />
+      <div style={{ position: "relative", width: 340, height: 340, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{
+          position: "absolute", inset: -60, borderRadius: "50%",
+          background: `conic-gradient(from 0deg, transparent 0deg, ${COLORS.sage}22 60deg, transparent 120deg, ${COLORS.espresso5}18 240deg, transparent 300deg)`,
+          animation: "haloSpin 9s linear infinite", filter: "blur(2px)",
+        }} />
+        <div style={{ ...ringBase, border: `1.5px solid ${COLORS.espresso5}` }} />
+        <div style={{ ...ringBase, border: `1.5px solid ${COLORS.sage}`, animationDelay: "0.9s" }} />
+        <div style={{ ...ringBase, border: `1px solid ${COLORS.espresso5}`, animationDelay: "1.8s" }} />
+        <div style={{
+          position: "relative", zIndex: 1,
+          animation: "logoReveal 1.4s cubic-bezier(0.22, 1, 0.36, 1) both, logoBreathe 3.2s ease-in-out 1.4s infinite",
+        }}>
+          <BrandLogo height={330} />
+        </div>
       </div>
-      <p style={{ fontSize: 11, letterSpacing: ".18em", textTransform: "uppercase", color: COLORS.sage, margin: 0, fontWeight: 600 }}>ยินดีต้อนรับสู่</p>
-      <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 24, margin: "6px 0 0" }}>{shopName || "ร้านกาแฟ"}</h1>
-      <p style={{ fontSize: 12.5, color: COLORS.espresso2, marginTop: 22 }}>กำลังโหลดเมนู...</p>
     </div>
   );
 }
@@ -141,6 +174,7 @@ export default function CustomerOrder({ shopUid }) {
   const [pickingMenu, setPickingMenu] = useState(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [note, setNote] = useState("");
   const [step, setStep] = useState("menu");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -267,6 +301,7 @@ export default function CustomerOrder({ shopUid }) {
         customerUid: authUid,
         customerName: name.trim(),
         customerPhone: phone.trim(),
+        note: note.trim(),
         items: cart.map(({ lineId, ...rest }) => rest),
         total,
         status: "pending",
@@ -314,7 +349,7 @@ export default function CustomerOrder({ shopUid }) {
   }
 
   if (!authUid || menus === null || !splashDone) {
-    return <LandingScreen shopName={shopName} />;
+    return <LandingScreen />;
   }
 
   if (step === "myorders") {
@@ -334,7 +369,7 @@ export default function CustomerOrder({ shopUid }) {
               }}>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
                   <span>{new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</span>
-                  <span style={{ fontWeight: 600 }}>฿{money(o.total)}</span>
+                  <span style={{ fontWeight: 600 }}>{money(o.total)}</span>
                 </div>
                 <div style={{ fontSize: 12, color: COLORS.espresso2, marginTop: 2 }}>{STATUS_TEXT[o.status] || o.status}</div>
               </button>
@@ -359,7 +394,7 @@ export default function CustomerOrder({ shopUid }) {
           {showQr ? (
             <>
               {qrDataUrl && <img src={qrDataUrl} alt="PromptPay QR" width={220} height={220} style={{ borderRadius: 10, border: `1px solid ${COLORS.line}` }} />}
-              <p style={{ fontSize: 22, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif", margin: "14px 0 4px" }}>฿{money(order.total)}</p>
+              <p style={{ fontSize: 22, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif", margin: "14px 0 4px" }}>{money(order.total)}</p>
               <p style={{ fontSize: 12, color: COLORS.espresso2, margin: "0 0 14px" }}>{STATUS_TEXT.pending} (หน้านี้จะอัปเดตอัตโนมัติ)</p>
             </>
           ) : (
@@ -372,7 +407,7 @@ export default function CustomerOrder({ shopUid }) {
             {order.items.map((i, idx) => (
               <div key={idx} style={{ fontSize: 12.5, marginBottom: 6 }}>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span>{i.name} x{i.qty}</span><span>฿{money(i.unitPrice * i.qty)}</span>
+                  <span>{i.name} x{i.qty}</span><span>{money(i.unitPrice * i.qty)}</span>
                 </div>
                 {i.options?.length > 0 && (
                   <div style={{ color: COLORS.espresso2, fontSize: 11 }}>{i.options.map((o) => o.label).join(", ")}</div>
@@ -413,6 +448,14 @@ export default function CustomerOrder({ shopUid }) {
 
           <label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>เบอร์โทรศัพท์</label>
           <input style={field} type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="08xxxxxxxx" />
+
+          <label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>โน้ตถึงร้าน (ถ้ามี)</label>
+          <textarea
+            style={{ ...field, resize: "vertical", minHeight: 60, fontFamily: "inherit" }}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="เช่น หวานน้อย ไม่ใส่หลอด แยกน้ำแข็ง"
+          />
 
           {error && <p style={{ fontSize: 12, color: COLORS.danger, margin: "10px 0 0" }}>{error}</p>}
 
@@ -500,7 +543,7 @@ export default function CustomerOrder({ shopUid }) {
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 500, fontSize: 14, color: COLORS.espresso5 }}>{m.name}</div>
                         <div style={{ fontSize: 13, color: soldOut ? COLORS.danger : COLORS.gold, fontWeight: 600, marginTop: 3 }}>
-                          {soldOut ? "หมดวันนี้" : `฿${money(m.priceStore)}`}
+                          {soldOut ? "หมดวันนี้" : money(m.priceStore)}
                         </div>
                       </div>
                       {singleLine ? (
@@ -565,7 +608,7 @@ export default function CustomerOrder({ shopUid }) {
                 fontWeight: 700, borderRadius: 999, minWidth: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center",
               }}>{cartCount}</span>
             </div>
-            <span style={{ fontSize: 16, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif" }}>฿{money(total)}</span>
+            <span style={{ fontSize: 16, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif" }}>{money(total)}</span>
             <i className="ti ti-chevron-up" style={{ fontSize: 15, opacity: 0.6 }} aria-hidden="true"></i>
           </button>
           <button
@@ -614,7 +657,7 @@ function CartDrawer({ cart, total, onClose, onSetQty, onRemove, onCheckout }) {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 500, fontSize: 14, color: COLORS.espresso5 }}>{l.name}</div>
                 {l.options.length > 0 && <div style={{ fontSize: 11.5, color: COLORS.espresso2, marginTop: 2 }}>{l.options.map((o) => o.label).join(", ")}</div>}
-                <div style={{ fontSize: 12.5, color: COLORS.sage, fontWeight: 600, marginTop: 4 }}>฿{money(l.unitPrice * l.qty)}</div>
+                <div style={{ fontSize: 12.5, color: COLORS.sage, fontWeight: 600, marginTop: 4 }}>{money(l.unitPrice * l.qty)}</div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
                 <button style={{ ...btn, padding: "4px 10px" }} onClick={() => onSetQty(l.lineId, l.qty - 1)}>−</button>
@@ -629,7 +672,7 @@ function CartDrawer({ cart, total, onClose, onSetQty, onRemove, onCheckout }) {
         )}
 
         <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 16, marginTop: 14, fontFamily: "'Space Grotesk', sans-serif", color: COLORS.espresso5 }}>
-          <span>รวม</span><span>฿{money(total)}</span>
+          <span>รวม</span><span>{money(total)}</span>
         </div>
 
         <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
@@ -690,7 +733,7 @@ function OptionPickerModal({ menu, groups, onCancel, onConfirm }) {
                     <div style={{ fontWeight: 500 }}>{c.label}</div>
                     {c.note && <div style={{ fontSize: 11, color: COLORS.espresso2 }}>{c.note}</div>}
                   </span>
-                  <span style={{ fontSize: 12.5, whiteSpace: "nowrap", marginLeft: 8 }}>{c.priceDelta ? `+฿${c.priceDelta}` : "฿0"}</span>
+                  <span style={{ fontSize: 12.5, whiteSpace: "nowrap", marginLeft: 8 }}>{c.priceDelta ? `+${c.priceDelta}` : "0"}</span>
                 </button>
               );
             })}

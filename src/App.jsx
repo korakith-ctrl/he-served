@@ -648,7 +648,7 @@ function SellPanel({ data, ingredientsById, recordSale }) {
 
 const ORDER_STATUS_LABEL = { pending: "รอยืนยัน", paid: "จ่ายแล้ว", preparing: "กำลังทำ", ready: "พร้อมรับ", cancelled: "ยกเลิก" };
 
-function OrderItemLines({ items }) {
+function OrderItemLines({ items, note }) {
   return (
     <div style={{ margin: "8px 0", fontSize: 13 }}>
       {items.map((i, idx) => (
@@ -661,6 +661,11 @@ function OrderItemLines({ items }) {
           )}
         </div>
       ))}
+      {note && (
+        <div style={{ marginTop: 6, background: "var(--gold-light)", border: "1px solid var(--gold)", borderRadius: 8, padding: "6px 9px", fontSize: 12 }}>
+          <Icon name="message-2" size={12} style={{ marginRight: 4 }} />{note}
+        </div>
+      )}
     </div>
   );
 }
@@ -694,7 +699,7 @@ function OrdersPanel({ uid, orders, recordSale, showToast }) {
                 <span>{o.customerName ? `${o.customerName} · ${o.customerPhone}` : o.customerPhone}</span>
                 <span>{new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</span>
               </div>
-              <OrderItemLines items={o.items} />
+              <OrderItemLines items={o.items} note={o.note} />
               <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 600, fontSize: 14, borderTop: "1px dashed var(--line)", paddingTop: 6, marginBottom: 10 }}>
                 <span>รวม</span><span>฿{money(o.total)}</span>
               </div>
@@ -716,7 +721,7 @@ function OrdersPanel({ uid, orders, recordSale, showToast }) {
                 <span>{o.customerName ? `${o.customerName} · ${o.customerPhone}` : o.customerPhone}</span>
                 <span className="chpill" style={{ background: "var(--sage-light)", color: "var(--sage-dark)" }}>{ORDER_STATUS_LABEL[o.status]}</span>
               </div>
-              <OrderItemLines items={o.items} />
+              <OrderItemLines items={o.items} note={o.note} />
               {o.status === "paid" && <button className="cbtn cbtn-accent" style={{ width: "100%" }} onClick={() => setStatus(o, "preparing")}>เริ่มชง</button>}
               {o.status === "preparing" && <button className="cbtn cbtn-accent" style={{ width: "100%" }} onClick={() => setStatus(o, "ready")}>พร้อมรับแล้ว</button>}
             </div>
