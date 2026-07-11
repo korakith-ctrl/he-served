@@ -246,6 +246,7 @@ function ShopApp({ uid }) {
   const [orders, setOrders] = useState([]);
   const prevPendingCount = useRef(0);
   const isFirstOrdersSnapshot = useRef(true);
+  const autoRecordedRef = useRef(new Set());
 
   const shopRef = ref(db, "shops/" + uid);
   const isFirstSnapshot = useMemo(() => ({ current: true }), [uid]);
@@ -283,6 +284,27 @@ function ShopApp({ uid }) {
     return () => unsub();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid]);
+
+  useEffect(() => {
+    if (!data) return;
+    for (const o of orders) {
+      if (
+        o.status === "paid" &&
+        o.paymentVerifiedBy === "slipok-auto" &&
+        !o.saleRecorded &&
+        !autoRecordedRef.current.has(o.id)
+      ) {
+        autoRecordedRef.current.add(o.id);
+        for (const item of o.items) {
+          const upcharge = (item.options || []).reduce((s, x) => s + (x.priceDelta || 0), 0);
+          recordSale(item.menuId, item.qty, "online", { upcharge, milkLabel: (item.options || []).map((x) => x.label).join(", ") || null });
+        }
+        update(ref(db, `orders/${uid}/${o.id}`), { saleRecorded: true }).catch(() => {});
+        showToast(`สลิปยืนยันอัตโนมัติ: ออเดอร์ ${o.customerName || o.customerPhone} ชำระเงินแล้ว`);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders, data]);
 
   useEffect(() => {
     if (!data || isFirstSnapshot.current) return;
@@ -383,7 +405,8 @@ function ShopApp({ uid }) {
         "--cream": "#FAF6EE", "--cream-2": "#F1EBDD", "--surface": "#FFFFFF",
         "--espresso-5": "#2B1D14", "--espresso-4": "#3E2C20", "--espresso-3": "#5C4A3B", "--espresso-2": "#8A7A6B",
         "--sage": "#6E8256", "--sage-dark": "#54663F", "--sage-light": "#E4EAD9",
-        "--gold": "#C79A45", "--gold-light": "#F6EBD3",
+        "--gold": "#C79A45", "--gold-dark": "#9C7530", "--gold-light": "#F6EBD3",
+        "--info": "#3D6E8C", "--info-dark": "#2C5069", "--info-light": "#DCE9F0",
         "--danger": "#A33A3A", "--danger-line": "#D9B8B8", "--danger-light": "#F6E7E7",
         "--line": "#E4DBC9", "--line-soft": "#EFE9DB",
         "--f-display": "'Fraunces', serif", "--f-body": "'Inter', sans-serif", "--f-mono": "'IBM Plex Mono', monospace",
@@ -648,7 +671,23 @@ function SellPanel({ data, ingredientsById, recordSale }) {
 }
 
 const ORDER_STATUS_LABEL = { pending: "รอยืนยัน", paid: "จ่ายแล้ว", preparing: "กำลังทำ", ready: "พร้อมรับ", cancelled: "ยกเลิก" };
+const ORDER_STATUS_STYLE = {
+  pending: { bg: "var(--gold-light)", color: "var(--gold-dark)" },
+  paid: { bg: "var(--info-light)", color: "var(--info-dark)" },
+  preparing: { bg: "var(--sage-light)", color: "var(--sage-dark)" },
+  ready: { bg: "var(--sage-dark)", color: "#fff" },
+  cancelled: { bg: "var(--danger-light)", color: "var(--danger)" },
+};
 const PAYMENT_METHOD_LABEL = { cash: "เงินสด", promptpay: "พร้อมเพย์" };
+
+function StatusBadge({ status }) {
+  const style = ORDER_STATUS_STYLE[status] || { bg: "var(--cream-2)", color: "var(--espresso-3)" };
+  return (
+    <span className="chpill" style={{ background: style.bg, color: style.color, fontWeight: 600 }}>
+      {ORDER_STATUS_LABEL[status] || status}
+    </span>
+  );
+}
 
 function formatPickupDateTH(dateStr) {
   if (!dateStr) return "";
@@ -728,7 +767,10 @@ function OrdersPanel({ uid, orders, recordSale, showToast }) {
             <div key={o.id} style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "var(--espresso-2)" }}>
                 <span>{o.customerName ? `${o.customerName} · ${o.customerPhone}` : o.customerPhone}</span>
-                <span>{new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</span>
+                <StatusBadge status={o.status} />
+              </div>
+              <div style={{ fontSize: 11, color: "var(--espresso-2)", marginTop: 2 }}>
+                {new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}
               </div>
               <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} paymentVerified={o.paymentVerified} />
               <OrderItemLines items={o.items} note={o.note} />
@@ -751,7 +793,7 @@ function OrdersPanel({ uid, orders, recordSale, showToast }) {
             <div key={o.id} style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "var(--espresso-2)" }}>
                 <span>{o.customerName ? `${o.customerName} · ${o.customerPhone}` : o.customerPhone}</span>
-                <span className="chpill" style={{ background: "var(--sage-light)", color: "var(--sage-dark)" }}>{ORDER_STATUS_LABEL[o.status]}</span>
+                <StatusBadge status={o.status} />
               </div>
               <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} paymentVerified={o.paymentVerified} />
               <OrderItemLines items={o.items} note={o.note} />
@@ -775,7 +817,7 @@ function OrdersPanel({ uid, orders, recordSale, showToast }) {
                 <td>{formatPickupDateTH(o.pickupDate)}</td>
                 <td>{PAYMENT_METHOD_LABEL[o.paymentMethod] || "-"}</td>
                 <td>฿{money(o.total)}</td>
-                <td>{ORDER_STATUS_LABEL[o.status] || o.status}</td>
+                <td><StatusBadge status={o.status} /></td>
               </tr>
             ))}
           </tbody>

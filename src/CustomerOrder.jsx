@@ -122,6 +122,15 @@ const GLOBAL_CSS = `
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
   }
+  @keyframes successPop {
+    0% { transform: scale(0.4); opacity: 0; }
+    60% { transform: scale(1.12); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  @keyframes checkDraw {
+    from { stroke-dashoffset: 48; }
+    to { stroke-dashoffset: 0; }
+  }
 `;
 
 function MenuThumb({ imageUrl }) {
@@ -203,6 +212,7 @@ export default function CustomerOrder({ shopUid }) {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [order, setOrder] = useState(null);
+  const [successCountdown, setSuccessCountdown] = useState(5);
   const [qrDataUrl, setQrDataUrl] = useState(null);
   const [myOrders, setMyOrders] = useState([]);
   const [activeCategory, setActiveCategory] = useState(null);
@@ -245,6 +255,35 @@ export default function CustomerOrder({ shopUid }) {
     return () => unsub();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order?.id]);
+
+  useEffect(() => {
+    if (step !== "success") return;
+    setSuccessCountdown(5);
+    const interval = setInterval(() => {
+      setSuccessCountdown((c) => (c <= 1 ? 0 : c - 1));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [step]);
+
+  useEffect(() => {
+    if (step === "success" && successCountdown === 0) {
+      resetOrderFlow();
+      openMyOrders();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, successCountdown]);
+
+  function resetOrderFlow() {
+    setCart([]);
+    setName("");
+    setPhone("");
+    setNote("");
+    setPaymentMethod("promptpay");
+    setPickupDate(addDays(1));
+    setOrder(null);
+    setQrDataUrl(null);
+    setError("");
+  }
 
   const categories = useMemo(() => {
     if (!menus) return [];
@@ -417,6 +456,43 @@ export default function CustomerOrder({ shopUid }) {
     );
   }
 
+  if (step === "success" && order) {
+    const shortCode = order.id.slice(-6).toUpperCase();
+    return (
+      <div className="corder" style={centerWrap}>
+        <style>{GLOBAL_CSS}</style>
+        <div style={{ ...centerCard, textAlign: "center" }}>
+          <div style={{ animation: "successPop .5s cubic-bezier(.34,1.56,.64,1)", margin: "10px auto 4px", width: 84, height: 84 }}>
+            <svg viewBox="0 0 52 52" width={84} height={84}>
+              <circle cx="26" cy="26" r="24" fill="none" stroke={COLORS.sage} strokeWidth="3" />
+              <path
+                d="M15 27 L23 35 L38 18" fill="none" stroke={COLORS.sage} strokeWidth="4"
+                strokeLinecap="round" strokeLinejoin="round"
+                style={{ strokeDasharray: 48, strokeDashoffset: 48, animation: "checkDraw .5s .35s ease forwards" }}
+              />
+            </svg>
+          </div>
+          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, margin: "6px 0 4px", color: COLORS.sageDark }}>
+            ชำระเงินสำเร็จ
+          </h1>
+          <p style={{ fontSize: 12, color: COLORS.espresso2, margin: "0 0 4px" }}>เลขที่อ้างอิงออเดอร์</p>
+          <p style={{ fontSize: 24, fontWeight: 700, fontFamily: "'Space Grotesk', sans-serif", letterSpacing: ".04em", margin: "0 0 18px", color: COLORS.espresso5 }}>
+            #{shortCode}
+          </p>
+          <p style={{ fontSize: 12, color: COLORS.espresso2, margin: 0 }}>
+            กลับไปหน้าออเดอร์ของฉันใน {successCountdown} วินาที...
+          </p>
+          <button
+            style={{ ...btn, marginTop: 14, width: "100%" }}
+            onClick={() => { resetOrderFlow(); openMyOrders(); }}
+          >
+            ไปที่ออเดอร์ของฉันตอนนี้
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (step === "pay" && order) {
     const isPending = order.status === "pending";
     const isCash = order.paymentMethod === "cash";
@@ -446,7 +522,10 @@ export default function CustomerOrder({ shopUid }) {
                   <SlipUpload
                     shopUid={shopUid}
                     orderId={order.id}
-                    onVerified={() => setOrder((prev) => (prev ? { ...prev, paymentVerified: true } : prev))}
+                    onVerified={() => {
+                      setOrder((prev) => (prev ? { ...prev, paymentVerified: true } : prev));
+                      setStep("success");
+                    }}
                   />
                 )}
               </>
@@ -475,7 +554,7 @@ export default function CustomerOrder({ shopUid }) {
               </div>
             ))}
           </div>
-          <button style={{ ...btn, marginTop: 14, width: "100%" }} onClick={() => { setOrder(null); setStep("menu"); }}>กลับไปหน้าเมนู</button>
+          <button style={{ ...btn, marginTop: 14, width: "100%" }} onClick={() => { resetOrderFlow(); setStep("menu"); }}>กลับไปหน้าเมนู</button>
         </div>
       </div>
     );

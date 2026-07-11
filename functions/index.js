@@ -56,6 +56,7 @@ exports.verifySlip = onCall({ region: REGION, secrets: [SLIPOK_API_KEY] }, async
   }
 
   await orderRef.update({
+    status: "paid",
     paymentVerified: true,
     paymentVerifiedAt: Date.now(),
     paymentVerifiedBy: "slipok-auto",
