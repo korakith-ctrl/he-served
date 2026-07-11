@@ -144,7 +144,7 @@ function defaultState() {
     menus,
     sales: [],
     purchases: [],
-    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "" },
+    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true },
     optionGroups,
   };
 }
@@ -163,6 +163,7 @@ function normalizeData(raw) {
       shopName: raw.settings?.shopName ?? "ร้านกาแฟของฉัน",
       platforms: raw.settings?.platforms || [],
       promptpayId: raw.settings?.promptpayId || "",
+      acceptingOrders: raw.settings?.acceptingOrders ?? true,
     },
     optionGroups: (raw.optionGroups || []).map((g) => ({ ...g, choices: g.choices || [] })),
   };
@@ -1345,9 +1346,39 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
     setPlatforms((p) => p.filter((_, i) => i !== idx));
   }
 
+  function toggleAcceptingOrders() {
+    updateData((next) => {
+      next.settings.acceptingOrders = !next.settings.acceptingOrders;
+    });
+    showToast(data.settings.acceptingOrders ? "ปิดรับออเดอร์ลูกค้าแล้ว" : "เปิดรับออเดอร์ลูกค้าแล้ว");
+  }
+
   return (
     <div style={{ maxWidth: 420 }}>
       <SectionTitle icon="settings" text="ตั้งค่าร้าน" />
+
+      <div style={{
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        background: data.settings.acceptingOrders ? "var(--sage-light)" : "var(--danger-light)",
+        border: `1px solid ${data.settings.acceptingOrders ? "var(--sage)" : "var(--danger-line)"}`,
+        borderRadius: 12, padding: "12px 14px", marginBottom: 18,
+      }}>
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 13.5, color: data.settings.acceptingOrders ? "var(--sage-dark)" : "var(--danger)" }}>
+            {data.settings.acceptingOrders ? "เปิดรับออเดอร์ลูกค้าอยู่" : "ปิดรับออเดอร์ลูกค้าชั่วคราว"}
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--espresso-2)", marginTop: 2 }}>
+            {data.settings.acceptingOrders ? "ลูกค้าสั่งผ่านหน้าเว็บได้ตามปกติ" : "ลูกค้าจะเห็นข้อความว่าร้านปิดรับออเดอร์"}
+          </div>
+        </div>
+        <button
+          className={data.settings.acceptingOrders ? "cbtn cbtn-danger" : "cbtn cbtn-accent"}
+          onClick={toggleAcceptingOrders}
+        >
+          {data.settings.acceptingOrders ? "ปิดรับออเดอร์" : "เปิดรับออเดอร์"}
+        </button>
+      </div>
+
       <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ชื่อร้าน</label>
       <input className="cfield" value={shopName} onChange={(e) => setShopName(e.target.value)} style={{ marginBottom: 12 }} />
       <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ต้นทุนแฝงต่อแก้ว (ค่าไฟ+ค่าเสื่อมอุปกรณ์, บาท)</label>

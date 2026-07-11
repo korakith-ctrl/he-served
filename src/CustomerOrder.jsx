@@ -170,6 +170,7 @@ export default function CustomerOrder({ shopUid }) {
   const [menus, setMenus] = useState(null);
   const [optionGroups, setOptionGroups] = useState([]);
   const [promptpayId, setPromptpayId] = useState("");
+  const [acceptingOrders, setAcceptingOrders] = useState(true);
   const [cart, setCart] = useState([]);
   const [pickingMenu, setPickingMenu] = useState(null);
   const [name, setName] = useState("");
@@ -205,7 +206,8 @@ export default function CustomerOrder({ shopUid }) {
     const unsub2 = onValue(ref(db, `shops/${shopUid}/settings/shopName`), (snap) => setShopName(snap.val() || "ร้านกาแฟ"));
     const unsub3 = onValue(ref(db, `shops/${shopUid}/settings/promptpayId`), (snap) => setPromptpayId(snap.val() || ""));
     const unsub4 = onValue(ref(db, `shops/${shopUid}/optionGroups`), (snap) => setOptionGroups(snap.val() || []));
-    return () => { unsub1(); unsub2(); unsub3(); unsub4(); };
+    const unsub5 = onValue(ref(db, `shops/${shopUid}/settings/acceptingOrders`), (snap) => setAcceptingOrders(snap.val() !== false));
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); };
   }, [authUid, shopUid]);
 
   useEffect(() => {
@@ -477,6 +479,23 @@ export default function CustomerOrder({ shopUid }) {
             onCheckout={() => setShowCart(false)}
           />
         )}
+      </div>
+    );
+  }
+
+  if (!acceptingOrders) {
+    return (
+      <div className="corder" style={centerWrap}>
+        <style>{GLOBAL_CSS}</style>
+        <div style={{ ...centerCard, textAlign: "center" }}>
+          <div style={{ marginBottom: 14 }}><BrandLogo height={54} /></div>
+          <p style={{ fontSize: 34, margin: "0 0 10px" }}>🔒</p>
+          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 19, margin: "0 0 8px", color: COLORS.espresso5 }}>ร้านปิดรับออเดอร์ชั่วคราว</h1>
+          <p style={{ fontSize: 13, color: COLORS.espresso2 }}>ขออภัย ตอนนี้ร้านยังไม่เปิดรับออเดอร์ผ่านหน้านี้ กรุณาลองใหม่อีกครั้งภายหลัง</p>
+          {loadMyOrderIds(shopUid).length > 0 && (
+            <button style={{ ...btn, marginTop: 16 }} onClick={openMyOrders}>ดูออเดอร์ของฉัน</button>
+          )}
+        </div>
       </div>
     );
   }

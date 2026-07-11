@@ -12,7 +12,8 @@
         },
         "settings": {
           "shopName": { ".read": "auth != null" },
-          "promptpayId": { ".read": "auth != null" }
+          "promptpayId": { ".read": "auth != null" },
+          "acceptingOrders": { ".read": "auth != null" }
         }
       }
     },
@@ -21,7 +22,7 @@
         ".read": "auth != null && auth.uid === $uid",
         "$orderId": {
           ".read": "auth != null && (auth.uid === $uid || data.child('customerUid').val() === auth.uid)",
-          ".write": "auth != null && (auth.uid === $uid || (!data.exists() && newData.child('customerUid').val() === auth.uid))"
+          ".write": "auth != null && (auth.uid === $uid || (!data.exists() && newData.child('customerUid').val() === auth.uid && root.child('shops/' + $uid + '/settings/acceptingOrders').val() !== false))"
         }
       }
     }
