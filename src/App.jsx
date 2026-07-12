@@ -146,6 +146,7 @@ function defaultState() {
     purchases: [],
     settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true, slipTestMode: false, bannerImageUrl: "" },
     optionGroups,
+    promotions: [],
   };
 }
 
@@ -168,7 +169,17 @@ function normalizeData(raw) {
       bannerImageUrl: raw.settings?.bannerImageUrl || "",
     },
     optionGroups: (raw.optionGroups || []).map((g) => ({ ...g, choices: g.choices || [] })),
+    promotions: (raw.promotions || []).map((p) => ({ ...p, menuIds: p.menuIds || [], active: p.active ?? true })),
   };
+}
+
+function computePromoPricing(promo, menusById) {
+  const items = (promo.menuIds || []).map((id) => menusById[id]).filter(Boolean);
+  const originalTotal = items.reduce((s, m) => s + m.priceStore, 0);
+  const promoTotal = promo.discountType === "percent"
+    ? originalTotal * (1 - (Number(promo.discountValue) || 0) / 100)
+    : Number(promo.discountValue) || 0;
+  return { items, originalTotal, promoTotal: Math.max(0, Math.round(promoTotal * 100) / 100) };
 }
 
 function resolveLines(menu, substitutions) {
@@ -235,6 +246,7 @@ const TABS = [
   { id: "sell", label: "ขายเครื่องดื่ม", icon: "cash-register" },
   { id: "orders", label: "ออเดอร์ลูกค้า", icon: "receipt" },
   { id: "menus", label: "เมนู & สูตร", icon: "cup" },
+  { id: "promotions", label: "โปรโมชั่น", icon: "discount" },
   { id: "options", label: "ตัวเลือกเสริม", icon: "list-details" },
   { id: "ingredients", label: "วัตถุดิบ & สต็อก", icon: "box-multiple" },
   { id: "reports", label: "รายงาน", icon: "chart-line" },
@@ -478,6 +490,7 @@ function ShopApp({ uid }) {
           {tab === "sell" && <SellPanel data={data} ingredientsById={ingredientsById} recordSale={recordSale} />}
           {tab === "orders" && <OrdersPanel uid={uid} orders={orders} recordSale={recordSale} showToast={showToast} />}
           {tab === "menus" && <MenusPanel data={data} ingredientsById={ingredientsById} updateData={updateData} showToast={showToast} />}
+          {tab === "promotions" && <PromotionsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "reports" && <ReportsPanel data={data} />}
           {tab === "options" && <OptionGroupsPanel data={data} updateData={updateData} showToast={showToast} />}
@@ -1091,6 +1104,174 @@ function MenuEditor({ menu, ingredients, optionGroups, categories, onSave, onCan
 
       <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
         <button className="cbtn cbtn-accent" onClick={() => onSave(form)}>บันทึกเมนู</button>
+        <button className="cbtn" onClick={onCancel}>ยกเลิก</button>
+      </div>
+    </div>
+  );
+}
+
+function PromotionsPanel({ data, updateData, showToast }) {
+  const [editing, setEditing] = useState(null);
+
+  const menusById = useMemo(() => {
+    const m = {};
+    for (const x of data.menus) m[x.id] = x;
+    return m;
+  }, [data.menus]);
+
+  function newPromo() {
+    setEditing({ id: null, name: "", menuIds: [], discountType: "percent", discountValue: 10, active: true });
+  }
+
+  function savePromo(promo) {
+    if (promo.menuIds.length === 0) { showToast("กรุณาเลือกเมนูอย่างน้อย 1 รายการ"); return; }
+    updateData((next) => {
+      if (!next.promotions) next.promotions = [];
+      if (promo.id) {
+        const idx = next.promotions.findIndex((p) => p.id === promo.id);
+        next.promotions[idx] = promo;
+      } else {
+        next.promotions.push({ ...promo, id: genId("promo") });
+      }
+    });
+    setEditing(null);
+    showToast("บันทึกโปรโมชั่นแล้ว");
+  }
+
+  function toggleActive(promo) {
+    updateData((next) => {
+      const p = next.promotions.find((x) => x.id === promo.id);
+      if (p) p.active = !p.active;
+    });
+  }
+
+  function deletePromo(id) {
+    updateData((next) => { next.promotions = next.promotions.filter((p) => p.id !== id); });
+    showToast("ลบโปรโมชั่นแล้ว");
+  }
+
+  if (editing) {
+    return <PromoEditor promo={editing} menus={data.menus} onSave={savePromo} onCancel={() => setEditing(null)} />;
+  }
+
+  const promotions = data.promotions || [];
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <SectionTitle icon="discount" text="โปรโมชั่น" />
+        <button className="cbtn cbtn-accent" onClick={newPromo}><Icon name="plus" size={14} /> เพิ่มโปรโมชั่น</button>
+      </div>
+      <p style={{ fontSize: 11.5, color: "var(--espresso-2)", margin: "-6px 0 14px" }}>
+        โปรโมชั่นที่เปิดใช้งานจะแสดงในหมวด "ดีลพิเศษ" อันดับแรกสุดของหน้าลูกค้า พร้อมราคาปกติขีดฆ่าและราคาโปรสีแดง เลือกเมนูเดียวเพื่อทำโปรลดราคา หรือเลือกหลายเมนูเพื่อจับคู่เป็นเซ็ตคอมโบ
+      </p>
+      {promotions.length === 0 ? <EmptyNote text='ยังไม่มีโปรโมชั่น กด "เพิ่มโปรโมชั่น" เพื่อเริ่ม' /> : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
+          {promotions.map((promo) => {
+            const { items, originalTotal, promoTotal } = computePromoPricing(promo, menusById);
+            const isBundle = promo.menuIds.length > 1;
+            return (
+              <div key={promo.id} style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14, opacity: promo.active === false ? 0.55 : 1 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 15, color: "var(--espresso-5)" }}>
+                      {promo.name || items.map((m) => m.name).join(" + ")}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--espresso-2)", marginTop: 2 }}>
+                      {isBundle ? `เซ็ตคอมโบ ${items.length} รายการ` : "โปรเมนูเดี่ยว"} · {promo.discountType === "percent" ? `ลด ${promo.discountValue}%` : `ราคาพิเศษ ฿${money(promo.discountValue)}`}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                    <button className="cbtn" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => toggleActive(promo)}>{promo.active === false ? "เปิดใช้งาน" : "ปิดใช้งาน"}</button>
+                    <button className="cbtn cbtn-edit" style={{ padding: "4px 8px" }} onClick={() => setEditing(promo)} title="แก้ไขโปรโมชั่น"><Icon name="edit" size={13} /></button>
+                    <button className="cbtn cbtn-danger" style={{ padding: "4px 8px" }} onClick={() => deletePromo(promo.id)} title="ลบโปรโมชั่น"><Icon name="trash" size={13} /></button>
+                  </div>
+                </div>
+                <div style={{ borderTop: "1px dashed var(--line)", margin: "8px 0", paddingTop: 8, fontSize: 12 }}>
+                  {items.map((m) => (
+                    <div key={m.id} style={{ display: "flex", justifyContent: "space-between", color: "var(--espresso-3)" }}>
+                      <span>{m.name}</span><span>฿{money(m.priceStore)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 4 }}>
+                  <span style={{ fontSize: 13, color: "var(--espresso-2)", textDecoration: "line-through" }}>฿{money(originalTotal)}</span>
+                  <span style={{ fontSize: 17, fontWeight: 700, color: "var(--danger)" }}>฿{money(promoTotal)}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PromoEditor({ promo, menus, onSave, onCancel }) {
+  const [form, setForm] = useState({ ...promo, menuIds: promo.menuIds || [] });
+  const menusById = useMemo(() => {
+    const m = {};
+    for (const x of menus) m[x.id] = x;
+    return m;
+  }, [menus]);
+
+  function toggleMenu(id) {
+    setForm((f) => {
+      const has = f.menuIds.includes(id);
+      return { ...f, menuIds: has ? f.menuIds.filter((x) => x !== id) : [...f.menuIds, id] };
+    });
+  }
+
+  const { items, originalTotal, promoTotal } = computePromoPricing(form, menusById);
+
+  return (
+    <div style={{ maxWidth: 480 }}>
+      <SectionTitle icon="discount" text={promo.id ? "แก้ไขโปรโมชั่น" : "โปรโมชั่นใหม่"} />
+
+      <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ชื่อโปรโมชั่น (ถ้าเว้นว่างจะใช้ชื่อเมนูต่อกัน)</label>
+      <input className="cfield" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="เช่น คู่หูสุดคุ้ม" style={{ marginBottom: 12 }} />
+
+      <p style={{ fontSize: 12, color: "var(--espresso-2)", margin: "0 0 6px" }}>เลือกเมนูที่ต้องการทำโปร (เลือกมากกว่า 1 รายการเพื่อจับคู่เป็นเซ็ตคอมโบ)</p>
+      <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 10, padding: 8, marginBottom: 14 }}>
+        {menus.map((m) => (
+          <label key={m.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, padding: "5px 4px" }}>
+            <input type="checkbox" checked={form.menuIds.includes(m.id)} onChange={() => toggleMenu(m.id)} />
+            {m.name} <span style={{ color: "var(--espresso-2)", fontSize: 11.5 }}>฿{money(m.priceStore)}</span>
+          </label>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 6 }}>
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>รูปแบบส่วนลด</label>
+          <select className="cfield" value={form.discountType} onChange={(e) => setForm({ ...form, discountType: e.target.value })}>
+            <option value="percent">ลดเป็น % จากราคารวม</option>
+            <option value="fixed">กำหนดราคาขายตายตัว</option>
+          </select>
+        </div>
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>{form.discountType === "percent" ? "เปอร์เซ็นต์ส่วนลด (%)" : "ราคาขาย (บาท)"}</label>
+          <input className="cfield" type="number" value={form.discountValue} onChange={(e) => setForm({ ...form, discountValue: Number(e.target.value) })} />
+        </div>
+      </div>
+
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "10px 0 14px" }}>
+        <input type="checkbox" checked={form.active !== false} onChange={(e) => setForm({ ...form, active: e.target.checked })} />
+        เปิดใช้งานโปรโมชั่นนี้
+      </label>
+
+      {form.menuIds.length > 0 && (
+        <div style={{ background: "var(--sage-light)", borderRadius: 10, padding: "10px 12px", marginBottom: 16 }}>
+          <div style={{ fontSize: 11.5, color: "var(--espresso-3)", marginBottom: 4 }}>ตัวอย่างราคาที่ลูกค้าจะเห็น</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+            <span style={{ fontSize: 13, color: "var(--espresso-2)", textDecoration: "line-through" }}>฿{money(originalTotal)}</span>
+            <span style={{ fontSize: 18, fontWeight: 700, color: "var(--danger)" }}>฿{money(promoTotal)}</span>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className="cbtn cbtn-accent" onClick={() => onSave(form)}>บันทึกโปรโมชั่น</button>
         <button className="cbtn" onClick={onCancel}>ยกเลิก</button>
       </div>
     </div>

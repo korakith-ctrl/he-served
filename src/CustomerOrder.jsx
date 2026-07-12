@@ -81,6 +81,36 @@ function genLineId() {
   return "line_" + Math.random().toString(36).slice(2, 9);
 }
 
+const HOT_DEAL_CATEGORY = "ดีลพิเศษ 🔥";
+
+function singlePromoPrice(promo, menu) {
+  if (!menu) return 0;
+  const val = promo.discountType === "percent"
+    ? menu.priceStore * (1 - (Number(promo.discountValue) || 0) / 100)
+    : Number(promo.discountValue) || 0;
+  return Math.max(0, Math.round(val * 100) / 100);
+}
+
+function splitBundlePrices(promo, menusById) {
+  const items = (promo.menuIds || []).map((id) => menusById[id]).filter(Boolean);
+  const originalTotal = items.reduce((s, m) => s + m.priceStore, 0);
+  const promoTotal = promo.discountType === "percent"
+    ? originalTotal * (1 - (Number(promo.discountValue) || 0) / 100)
+    : Number(promo.discountValue) || 0;
+  const clampedTotal = Math.max(0, Math.round(promoTotal * 100) / 100);
+  let allocated = 0;
+  return items.map((m, idx) => {
+    let price;
+    if (idx === items.length - 1) {
+      price = clampedTotal - allocated;
+    } else {
+      price = originalTotal > 0 ? Math.round((m.priceStore / originalTotal) * clampedTotal * 100) / 100 : 0;
+      allocated += price;
+    }
+    return { menuId: m.id, name: m.name, imageUrl: m.imageUrl, unitPrice: Math.max(0, Math.round(price * 100) / 100) };
+  });
+}
+
 function localDateStr(d) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -332,6 +362,7 @@ export default function CustomerOrder({ shopUid }) {
   const [shopName, setShopName] = useState("");
   const [menus, setMenus] = useState(null);
   const [optionGroups, setOptionGroups] = useState([]);
+  const [promotions, setPromotions] = useState([]);
   const [promptpayId, setPromptpayId] = useState("");
   const [acceptingOrders, setAcceptingOrders] = useState(true);
   const [slipTestMode, setSlipTestMode] = useState(false);
@@ -343,6 +374,7 @@ export default function CustomerOrder({ shopUid }) {
   const cartIconRef = useRef(null);
   const prevCartCountRef = useRef(0);
   const [pickingMenu, setPickingMenu] = useState(null);
+  const [pickingPromo, setPickingPromo] = useState(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [note, setNote] = useState("");
@@ -386,7 +418,8 @@ export default function CustomerOrder({ shopUid }) {
     );
     const unsub6 = onValue(ref(db, `shops/${shopUid}/settings/slipTestMode`), (snap) => setSlipTestMode(snap.val() === true));
     const unsub7 = onValue(ref(db, `shops/${shopUid}/settings/bannerImageUrl`), (snap) => setBannerImageUrl(snap.val() || ""));
-    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); unsub7(); };
+    const unsub8 = onValue(ref(db, `shops/${shopUid}/promotions`), (snap) => setPromotions(snap.val() || []));
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); unsub7(); unsub8(); };
   }, [authUid, shopUid]);
 
   useEffect(() => {
@@ -427,12 +460,25 @@ export default function CustomerOrder({ shopUid }) {
     setError("");
   }
 
+  const menusById = useMemo(() => {
+    const m = {};
+    (menus || []).forEach((x) => { m[x.id] = x; });
+    return m;
+  }, [menus]);
+
+  const activePromotions = useMemo(() => {
+    return (promotions || []).filter((p) =>
+      p.active !== false && p.menuIds && p.menuIds.length > 0 &&
+      p.menuIds.every((id) => menusById[id] && menusById[id].available !== false)
+    );
+  }, [promotions, menusById]);
+
   const categories = useMemo(() => {
     if (!menus) return [];
     const seen = [];
     for (const m of menus) if (!seen.includes(m.category)) seen.push(m.category);
-    return seen;
-  }, [menus]);
+    return activePromotions.length > 0 ? [HOT_DEAL_CATEGORY, ...seen] : seen;
+  }, [menus, activePromotions]);
 
   useEffect(() => {
     if (categories.length > 0 && !activeCategory) setActiveCategory(categories[0]);
@@ -461,16 +507,16 @@ export default function CustomerOrder({ shopUid }) {
     return optionGroups.filter((g) => ids.includes(g.id));
   }
 
-  function linesForMenu(menuId) {
-    return cart.filter((l) => l.menuId === menuId);
+  function linesForMenu(menuId, promoId = null) {
+    return cart.filter((l) => l.menuId === menuId && (l.promoId || null) === promoId);
   }
 
-  function qtyForMenu(menuId) {
-    return linesForMenu(menuId).reduce((s, l) => s + l.qty, 0);
+  function qtyForMenu(menuId, promoId = null) {
+    return linesForMenu(menuId, promoId).reduce((s, l) => s + l.qty, 0);
   }
 
-  function spawnFly(menu) {
-    const startEl = menuThumbRefs.current[menu.id];
+  function spawnFly(refKey, imageUrl) {
+    const startEl = menuThumbRefs.current[refKey];
     const startRect = startEl && startEl.getBoundingClientRect();
     if (!startRect) return;
     const cartRect = cartIconRef.current && cartIconRef.current.getBoundingClientRect();
@@ -479,26 +525,60 @@ export default function CustomerOrder({ shopUid }) {
     const endX = cartRect ? cartRect.left + cartRect.width / 2 : 40;
     const endY = cartRect ? cartRect.top + cartRect.height / 2 : window.innerHeight - 40;
     const id = Math.random().toString(36).slice(2);
-    setFlyItems((list) => [...list, { id, imageUrl: menu.imageUrl, startX, startY, dx: endX - startX, dy: endY - startY }]);
+    setFlyItems((list) => [...list, { id, imageUrl, startX, startY, dx: endX - startX, dy: endY - startY }]);
     setTimeout(() => setFlyItems((list) => list.filter((f) => f.id !== id)), 650);
   }
 
-  function openMenu(menu) {
+  function openMenu(menu, promo) {
     if (menu.available === false) return;
     const groups = groupsForMenu(menu);
+    const priceOverride = promo ? singlePromoPrice(promo, menu) : undefined;
+    const promoId = promo ? promo.id : null;
+    const refKey = promo ? "promo_" + menu.id : menu.id;
     if (groups.length === 0) {
-      spawnFly(menu);
-      const existing = cart.find((l) => l.menuId === menu.id && l.options.length === 0);
+      spawnFly(refKey, menu.imageUrl);
+      const existing = cart.find((l) => l.menuId === menu.id && l.options.length === 0 && (l.promoId || null) === promoId);
       if (existing) setLineQty(existing.lineId, existing.qty + 1);
-      else addToCart(menu, 1, []);
+      else addToCart(menu, 1, [], priceOverride, promoId);
       return;
     }
     setPickingMenu(menu);
+    setPickingPromo(promo || null);
   }
 
-  function addToCart(menu, qty, options) {
-    const unitPrice = menu.priceStore + options.reduce((s, o) => s + (o.priceDelta || 0), 0);
-    setCart((c) => [...c, { lineId: genLineId(), menuId: menu.id, name: menu.name, unitPrice, qty, options }]);
+  function addToCart(menu, qty, options, priceOverride, promoId) {
+    const base = priceOverride !== undefined ? priceOverride : menu.priceStore;
+    const unitPrice = base + options.reduce((s, o) => s + (o.priceDelta || 0), 0);
+    setCart((c) => [...c, { lineId: genLineId(), menuId: menu.id, name: menu.name, unitPrice, qty, options, promoId: promoId || null }]);
+  }
+
+  function bundleQtyInCart(promo) {
+    const first = promo.menuIds[0];
+    const line = cart.find((l) => l.menuId === first && l.promoId === promo.id);
+    return line ? line.qty : 0;
+  }
+
+  function setBundleQty(promo, qty) {
+    if (qty <= 0) {
+      setCart((c) => c.filter((l) => l.promoId !== promo.id));
+      return;
+    }
+    const prices = splitBundlePrices(promo, menusById);
+    setCart((c) => {
+      const others = c.filter((l) => l.promoId !== promo.id);
+      const newLines = prices.map((p) => {
+        const existing = c.find((l) => l.promoId === promo.id && l.menuId === p.menuId);
+        return {
+          lineId: existing ? existing.lineId : genLineId(),
+          menuId: p.menuId, name: p.name, unitPrice: p.unitPrice, qty, options: [], promoId: promo.id,
+        };
+      });
+      return [...others, ...newLines];
+    });
+  }
+
+  function addBundle(promo) {
+    setBundleQty(promo, bundleQtyInCart(promo) + 1);
   }
 
   function removeLine(lineId) {
@@ -925,7 +1005,107 @@ export default function CustomerOrder({ shopUid }) {
             {categories.map((cat) => (
               <section key={cat} data-category={cat} ref={(el) => { sectionRefs.current[cat] = el; }} style={{ padding: "16px 6px 0" }}>
                 <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 600, color: COLORS.espresso5, margin: "0 0 10px" }}>{cat}</h2>
-                {menus.filter((m) => m.category === cat).map((m) => {
+                {cat === HOT_DEAL_CATEGORY ? activePromotions.map((promo) => {
+                  const isBundle = promo.menuIds.length > 1;
+                  if (isBundle) {
+                    const prices = splitBundlePrices(promo, menusById);
+                    const originalTotal = promo.menuIds.reduce((s, id) => s + (menusById[id]?.priceStore || 0), 0);
+                    const promoTotal = prices.reduce((s, p) => s + p.unitPrice, 0);
+                    const qty = bundleQtyInCart(promo);
+                    const displayName = promo.name || prices.map((p) => p.name).join(" + ");
+                    const thumbImg = menusById[promo.menuIds[0]]?.imageUrl;
+                    return (
+                      <div key={promo.id} style={{ ...GLASS_PANEL, display: "flex", gap: 12, alignItems: "center", padding: "10px 12px", borderRadius: 14, marginBottom: 8 }}>
+                        <MenuThumb imageUrl={thumbImg} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 500, fontSize: 14, color: COLORS.espresso5 }}>{displayName}</div>
+                          <div style={{ fontSize: 11.5, color: COLORS.espresso2, margin: "2px 0" }}>{prices.map((p) => p.name).join(" + ")}</div>
+                          <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 3 }}>
+                            <span style={{ fontSize: 12, color: COLORS.espresso2, textDecoration: "line-through" }}>{money(originalTotal)}</span>
+                            <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.danger }}>{money(promoTotal)}</span>
+                          </div>
+                        </div>
+                        {qty > 0 ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                            <button onClick={() => setBundleQty(promo, qty - 1)} style={{
+                              width: 28, height: 28, borderRadius: 9, border: "1px solid rgba(255,255,255,0.7)", background: "rgba(255,255,255,0.6)",
+                              color: COLORS.espresso5, fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                            }}>−</button>
+                            <span style={{ minWidth: 16, textAlign: "center", fontWeight: 600, color: COLORS.espresso5 }}><AnimatedQty value={qty} /></span>
+                            <button onClick={() => setBundleQty(promo, qty + 1)} style={{
+                              width: 28, height: 28, borderRadius: 8, border: "none", background: COLORS.espresso5,
+                              color: "#fff", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                            }}>+</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => addBundle(promo)} style={{
+                            width: 32, height: 32, borderRadius: 9, flexShrink: 0, border: "none",
+                            background: COLORS.espresso5, color: "#fff", fontSize: 18, lineHeight: 1,
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                          }}>+</button>
+                        )}
+                      </div>
+                    );
+                  }
+                  const menu = menusById[promo.menuIds[0]];
+                  if (!menu) return null;
+                  const promoPrice = singlePromoPrice(promo, menu);
+                  const lines = linesForMenu(menu.id, promo.id);
+                  const qty = lines.reduce((s, l) => s + l.qty, 0);
+                  const singleLine = lines.length === 1 ? lines[0] : null;
+                  const canAddDirectly = groupsForMenu(menu).length === 0;
+                  return (
+                    <div key={promo.id} onClick={() => !singleLine && openMenu(menu, promo)} style={{
+                      ...GLASS_PANEL, display: "flex", gap: 12, alignItems: "center", padding: "10px 12px", borderRadius: 14, marginBottom: 8,
+                      cursor: singleLine ? "default" : "pointer",
+                    }}>
+                      <div ref={(el) => { menuThumbRefs.current["promo_" + menu.id] = el; }}>
+                        <MenuThumb imageUrl={menu.imageUrl} />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 500, fontSize: 14, color: COLORS.espresso5 }}>{promo.name || menu.name}</div>
+                        <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 3 }}>
+                          <span style={{ fontSize: 12, color: COLORS.espresso2, textDecoration: "line-through" }}>{money(menu.priceStore)}</span>
+                          <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.danger }}>{money(promoPrice)}</span>
+                        </div>
+                      </div>
+                      {singleLine ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                          <button onClick={() => setLineQty(singleLine.lineId, singleLine.qty - 1)} style={{
+                            width: 28, height: 28, borderRadius: 9, border: "1px solid rgba(255,255,255,0.7)", background: "rgba(255,255,255,0.6)",
+                            color: COLORS.espresso5, fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                          }}>−</button>
+                          <span style={{ minWidth: 16, textAlign: "center", fontWeight: 600, color: COLORS.espresso5 }}><AnimatedQty value={qty} /></span>
+                          <button
+                            onClick={() => { if (canAddDirectly) { spawnFly("promo_" + menu.id, menu.imageUrl); setLineQty(singleLine.lineId, singleLine.qty + 1); } else openMenu(menu, promo); }}
+                            style={{
+                              width: 28, height: 28, borderRadius: 8, border: "none", background: COLORS.espresso5,
+                              color: "#fff", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                            }}
+                          >+</button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); openMenu(menu, promo); }}
+                          style={{
+                            position: "relative", width: 32, height: 32, borderRadius: 9, flexShrink: 0, border: "none",
+                            background: COLORS.espresso5, color: "#fff", fontSize: 18, lineHeight: 1,
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                          }}
+                        >
+                          +
+                          {qty > 0 && (
+                            <span style={{
+                              position: "absolute", top: -6, right: -6, background: COLORS.danger, color: "#fff",
+                              fontSize: 10, fontWeight: 700, borderRadius: 999, minWidth: 16, height: 16,
+                              display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px",
+                            }}><AnimatedQty value={qty} /></span>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  );
+                }) : menus.filter((m) => m.category === cat).map((m) => {
                   const soldOut = m.available === false;
                   const lines = linesForMenu(m.id);
                   const qty = lines.reduce((s, l) => s + l.qty, 0);
@@ -953,7 +1133,7 @@ export default function CustomerOrder({ shopUid }) {
                           }}>−</button>
                           <span style={{ minWidth: 16, textAlign: "center", fontWeight: 600, color: COLORS.espresso5 }}><AnimatedQty value={qty} /></span>
                           <button
-                            onClick={() => { if (canAddDirectly) { spawnFly(m); setLineQty(singleLine.lineId, singleLine.qty + 1); } else openMenu(m); }}
+                            onClick={() => { if (canAddDirectly) { spawnFly(m.id, m.imageUrl); setLineQty(singleLine.lineId, singleLine.qty + 1); } else openMenu(m); }}
                             style={{
                               width: 28, height: 28, borderRadius: 8, border: "none", background: COLORS.espresso5,
                               color: "#fff", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
@@ -1034,8 +1214,15 @@ export default function CustomerOrder({ shopUid }) {
         visible={!!pickingMenu}
         menu={pickingMenu}
         groups={pickingMenu ? groupsForMenu(pickingMenu) : []}
-        onCancel={() => setPickingMenu(null)}
-        onConfirm={(qty, options) => { spawnFly(pickingMenu); addToCart(pickingMenu, qty, options); setPickingMenu(null); }}
+        onCancel={() => { setPickingMenu(null); setPickingPromo(null); }}
+        onConfirm={(qty, options) => {
+          const refKey = pickingPromo ? "promo_" + pickingMenu.id : pickingMenu.id;
+          spawnFly(refKey, pickingMenu.imageUrl);
+          const priceOverride = pickingPromo ? singlePromoPrice(pickingPromo, pickingMenu) : undefined;
+          addToCart(pickingMenu, qty, options, priceOverride, pickingPromo ? pickingPromo.id : null);
+          setPickingMenu(null);
+          setPickingPromo(null);
+        }}
       />
     </div>
   );
@@ -1117,9 +1304,12 @@ function CartDrawer({ visible, cart, total, onClose, onSetQty, onRemove, onCheck
           cart.map((l) => (
             <div key={l.lineId} style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, padding: "10px 0", borderBottom: `1px solid ${COLORS.line}` }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 500, fontSize: 14, color: COLORS.espresso5 }}>{l.name}</div>
+                <div style={{ fontWeight: 500, fontSize: 14, color: COLORS.espresso5, display: "flex", alignItems: "center", gap: 6 }}>
+                  {l.name}
+                  {l.promoId && <span style={{ fontSize: 9.5, fontWeight: 700, color: "#fff", background: COLORS.danger, borderRadius: 999, padding: "1px 6px" }}>โปร</span>}
+                </div>
                 {l.options.length > 0 && <div style={{ fontSize: 11.5, color: COLORS.espresso2, marginTop: 2 }}>{l.options.map((o) => o.label).join(", ")}</div>}
-                <div style={{ fontSize: 12.5, color: COLORS.sage, fontWeight: 600, marginTop: 4 }}><AnimatedMoney value={l.unitPrice * l.qty} /></div>
+                <div style={{ fontSize: 12.5, color: l.promoId ? COLORS.danger : COLORS.sage, fontWeight: 600, marginTop: 4 }}><AnimatedMoney value={l.unitPrice * l.qty} /></div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
                 <button style={{ ...btn, padding: "4px 10px" }} onClick={() => onSetQty(l.lineId, l.qty - 1)}>−</button>

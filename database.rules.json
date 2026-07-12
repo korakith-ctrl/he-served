@@ -10,6 +10,9 @@
         "optionGroups": {
           ".read": "auth != null"
         },
+        "promotions": {
+          ".read": "auth != null"
+        },
         "settings": {
           "shopName": { ".read": "auth != null" },
           "promptpayId": { ".read": "auth != null" },
