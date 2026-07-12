@@ -502,7 +502,7 @@ function ShopApp({ uid, user }) {
   const pendingOrderCount = orders.filter((o) => o.status === "pending").length;
 
   return (
-    <div style={{ fontFamily: "var(--f-body)", color: "var(--espresso-4)", minHeight: "100vh" }}>
+    <div style={{ minHeight: "100vh" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
         .coffeeapp * { box-sizing: border-box; }
@@ -546,6 +546,7 @@ function ShopApp({ uid, user }) {
         "--danger": "#B23A2E", "--danger-line": "#E7CAC5", "--danger-light": "#FAEEEC",
         "--line": "#E4E8E5", "--line-soft": "#EEF1EF",
         "--f-display": "'Fraunces', serif", "--f-body": "'Manrope', 'Inter', sans-serif", "--f-mono": "'IBM Plex Mono', monospace",
+        fontFamily: "var(--f-body)", color: "var(--espresso-4)",
         display: "flex", background: "var(--cream)", minHeight: "100vh",
       }}>
         <aside className="admin-sidebar" style={{
