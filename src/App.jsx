@@ -1206,29 +1206,29 @@ function formatPickupDateTH(dateStr) {
   return new Date(y, m - 1, d).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
 }
 
-function OrderMeta({ paymentMethod, pickupDate, paymentVerified, paymentVerifiedBy }) {
+function OrderMeta({ paymentMethod, pickupDate, paymentVerified, paymentVerifiedBy, compact }) {
   if (!paymentMethod && !pickupDate) return null;
   const isTestSlip = paymentVerifiedBy === "slipok-test-mode";
   return (
-    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "6px 0" }}>
+    <div style={{ display: "flex", gap: compact ? 4 : 6, flexWrap: "wrap", margin: compact ? "3px 0" : "6px 0" }}>
       {paymentMethod && (
-        <span className="chpill" style={{ background: "var(--cream-2)", color: "var(--espresso-3)", fontWeight: 600 }}>
-          {CASH_LIKE_PAYMENT_METHODS.has(paymentMethod) ? <Icon name="cash" size={11} /> : <Icon name="qrcode" size={11} />} {PAYMENT_METHOD_LABEL[paymentMethod] || paymentMethod}
+        <span className="chpill" style={{ background: "var(--cream-2)", color: "var(--espresso-3)", fontWeight: 600, ...(compact ? { padding: "1px 6px", fontSize: 9.5 } : {}) }}>
+          {CASH_LIKE_PAYMENT_METHODS.has(paymentMethod) ? <Icon name="cash" size={10} /> : <Icon name="qrcode" size={10} />} {PAYMENT_METHOD_LABEL[paymentMethod] || paymentMethod}
         </span>
       )}
       {pickupDate && (
-        <span className="chpill" style={{ background: "var(--cream-2)", color: "var(--espresso-3)", fontWeight: 600 }}>
-          <Icon name="calendar" size={11} /> รับ {formatPickupDateTH(pickupDate)}
+        <span className="chpill" style={{ background: "var(--cream-2)", color: "var(--espresso-3)", fontWeight: 600, ...(compact ? { padding: "1px 6px", fontSize: 9.5 } : {}) }}>
+          <Icon name="calendar" size={10} /> รับ {formatPickupDateTH(pickupDate)}
         </span>
       )}
       {paymentVerified && !isTestSlip && (
-        <span className="chpill" style={{ background: "rgba(22,163,74,0.16)", color: "#15803D", fontWeight: 700 }}>
-          <Icon name="check" size={11} /> สลิปตรง
+        <span className="chpill" style={{ background: "rgba(22,163,74,0.16)", color: "#15803D", fontWeight: 700, ...(compact ? { padding: "1px 6px", fontSize: 9.5 } : {}) }}>
+          <Icon name="check" size={10} /> สลิปตรง
         </span>
       )}
       {paymentVerified && isTestSlip && (
-        <span className="chpill" style={{ background: "rgba(245,158,11,0.16)", color: "#B45309", fontWeight: 700 }}>
-          <Icon name="flask" size={11} /> สลิปทดสอบ
+        <span className="chpill" style={{ background: "rgba(245,158,11,0.16)", color: "#B45309", fontWeight: 700, ...(compact ? { padding: "1px 6px", fontSize: 9.5 } : {}) }}>
+          <Icon name="flask" size={10} /> สลิปทดสอบ
         </span>
       )}
     </div>
@@ -1467,7 +1467,7 @@ function OrdersPanel({ uid, orders, recordSale, showToast, data, ingredientsById
                         {new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}
                       </div>
                     )}
-                    {!compact && <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} paymentVerified={o.paymentVerified} paymentVerifiedBy={o.paymentVerifiedBy} />}
+                    <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} paymentVerified={o.paymentVerified} paymentVerifiedBy={o.paymentVerifiedBy} compact={compact} />
                     <OrderItemLines
                       items={o.items} note={o.note} compact={compact}
                       onEditItem={col.id === "pending" ? (idx) => setEditingItem({ order: o, itemIdx: idx }) : undefined}
