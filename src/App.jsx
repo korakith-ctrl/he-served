@@ -827,7 +827,7 @@ function ShopApp({ uid, user }) {
             </div>
           </div>
 
-          {tab === "dashboard" && <Dashboard data={data} ingredientsById={ingredientsById} setTab={setTab} recordSale={recordSale} createInstoreOrder={createInstoreOrder} />}
+          {tab === "dashboard" && <Dashboard data={data} setTab={setTab} />}
           {tab === "sell" && <SellPanel data={data} ingredientsById={ingredientsById} recordSale={recordSale} createInstoreOrder={createInstoreOrder} />}
           {tab === "orders" && <OrdersPanel uid={uid} orders={orders} recordSale={recordSale} showToast={showToast} data={data} ingredientsById={ingredientsById} />}
           {tab === "menus" && <MenusPanel data={data} ingredientsById={ingredientsById} updateData={updateData} showToast={showToast} />}
@@ -982,13 +982,7 @@ function DashTrendChart({ days }) {
   );
 }
 
-function Dashboard({ data, ingredientsById, setTab, recordSale, createInstoreOrder }) {
-  // ขายด่วนต้องขึ้นบอร์ด Kanban เหมือนกับที่ SellPanel ทำ ไม่งั้นออเดอร์ "หายไปเลย" มีแต่ยอดขายแต่ไม่มีการ์ดให้ติดตาม
-  function quickSell(m) {
-    recordSale(m.id, 1, "store", {});
-    createInstoreOrder([{ menuId: m.id, menuName: m.name, unitPrice: m.priceStore, qty: 1, channel: "store", options: [], promo: 0 }], "");
-  }
-
+function Dashboard({ data, setTab }) {
   const today = todayStr();
   const todaySales = data.sales.filter((s) => s.timestamp.slice(0, 10) === today);
   const revenue = todaySales.reduce((a, s) => a + s.netRevenue, 0);
@@ -1025,17 +1019,6 @@ function Dashboard({ data, ingredientsById, setTab, recordSale, createInstoreOrd
         @media (max-width: 900px) { .dash-main-grid { grid-template-columns: minmax(0, 1fr); } }
         .dash-col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
         .dash-card { background: #fff; border: 1px solid ${DASH.border}; border-radius: 16px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,.05); }
-        .dash-qs-btn {
-          display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; min-height: 64px;
-          padding: 12px 14px; border-radius: 14px; border: 1px solid ${DASH.border}; background: #fff; cursor: pointer;
-          transition: border-color 200ms ease, box-shadow 200ms ease, transform 200ms ease;
-        }
-        .dash-qs-btn:hover { border-color: ${DASH.primary}; box-shadow: 0 6px 16px rgba(37,99,235,.12); transform: translateY(-1px); }
-        .dash-qs-btn:active { transform: scale(0.98); }
-        .dash-qs-name { font-size: 13.5px; font-weight: 600; color: #1F2937; }
-        .dash-qs-row { display: flex; align-items: center; justify-content: space-between; width: 100%; }
-        .dash-qs-price { font-size: 13px; font-weight: 700; color: ${DASH.primary}; }
-        .dash-qs-plus { display: flex; align-items: center; gap: 2px; font-size: 11px; font-weight: 700; color: ${DASH.gray}; background: ${DASH.neutralSoft}; border-radius: 999px; padding: 2px 7px; }
         .dash-link-btn { display: inline-flex; align-items: center; gap: 4px; border: none; background: none; color: ${DASH.primary}; font-size: 12.5px; font-weight: 700; cursor: pointer; padding: 6px 0; min-height: 44px; }
         .dash-link-btn:hover { color: ${DASH.primaryDark}; }
       `}</style>
@@ -1049,21 +1032,6 @@ function Dashboard({ data, ingredientsById, setTab, recordSale, createInstoreOrd
 
       <div className="dash-main-grid">
         <div className="dash-col">
-          <div className="dash-card">
-            <DashSectionHeader icon="bolt" text="ขายด่วน" hint='สำหรับขายแบบละเอียด (เลือกช่องทาง/ตัวเลือกเสริม) ไปที่แท็บ "ขายเครื่องดื่ม"' />
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10 }}>
-              {data.menus.map((m) => (
-                <button key={m.id} className="dash-qs-btn" onClick={() => quickSell(m)}>
-                  <span className="dash-qs-name">{m.name}</span>
-                  <span className="dash-qs-row">
-                    <span className="dash-qs-price">฿{money(m.priceStore)}</span>
-                    <span className="dash-qs-plus"><Icon name="plus" size={10} />1</span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-
           <div className="dash-card">
             <DashSectionHeader icon="chart-bar" text="ยอดขายสุทธิ 7 วันล่าสุด" />
             <DashTrendChart days={trendDays} />
