@@ -17,6 +17,17 @@ const CATEGORIES = [
 ];
 const CHANNELS = { store: "หน้าร้าน", delivery: "เดลิเวอรี่", online: "สั่งออนไลน์" };
 
+const GLASS = {
+  background: "rgba(255,255,255,0.6)",
+  backdropFilter: "blur(20px) saturate(160%)",
+  WebkitBackdropFilter: "blur(20px) saturate(160%)",
+  border: "1px solid rgba(255,255,255,0.7)",
+  boxShadow: "0 8px 28px rgba(31,42,68,0.10)",
+};
+function glass(extra) {
+  return { ...GLASS, ...extra };
+}
+
 function genId(prefix) {
   return prefix + "_" + Math.random().toString(36).slice(2, 9);
 }
@@ -536,6 +547,11 @@ function ShopApp({ uid, user }) {
         .sidebar-toggle { border: none; background: var(--cream-2); color: var(--espresso-3); width: 26px; height: 26px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background .15s ease, color .15s ease; }
         .sidebar-toggle:hover { background: var(--sage-light); color: var(--sage-dark); }
         .admin-sidebar { transition: width .18s ease; }
+        @keyframes pulseBadge {
+          0%, 100% { box-shadow: 0 4px 14px rgba(178,58,46,0.35); }
+          50% { box-shadow: 0 4px 20px rgba(178,58,46,0.6); }
+        }
+        .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
       `}</style>
       <div className="coffeeapp" style={{
         "--cream": "#F4F6F4", "--cream-2": "#EBEFEA", "--surface": "#FFFFFF",
@@ -547,12 +563,13 @@ function ShopApp({ uid, user }) {
         "--line": "#E4E8E5", "--line-soft": "#EEF1EF",
         "--f-display": "'Fraunces', serif", "--f-body": "'Manrope', 'Inter', sans-serif", "--f-mono": "'IBM Plex Mono', monospace",
         fontFamily: "var(--f-body)", color: "var(--espresso-4)",
-        display: "flex", background: "var(--cream)", minHeight: "100vh",
+        display: "flex", minHeight: "100vh",
+        background: "radial-gradient(circle at 12% 8%, #FDEBDD 0%, transparent 42%), radial-gradient(circle at 90% 12%, #DCEAE3 0%, transparent 45%), radial-gradient(circle at 50% 100%, #E4EEF5 0%, transparent 55%), var(--cream)",
       }}>
         <aside className="admin-sidebar" style={{
-          width: sidebarCollapsed ? 68 : 236, flexShrink: 0, background: "#fff", borderRight: "1px solid var(--line)",
+          width: sidebarCollapsed ? 68 : 236, flexShrink: 0, ...glass({ borderRadius: 0, borderRight: "1px solid rgba(255,255,255,0.7)", borderTop: "none", borderBottom: "none", borderLeft: "none" }),
           display: "flex", flexDirection: "column", padding: sidebarCollapsed ? "18px 10px" : "18px 14px",
-          position: "sticky", top: 0, height: "100vh", overflow: "hidden",
+          position: "sticky", top: 0, height: "100vh", overflow: "hidden", zIndex: 5,
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 4px 18px", justifyContent: sidebarCollapsed ? "center" : "space-between" }}>
             {!sidebarCollapsed && (
@@ -654,11 +671,29 @@ function ShopApp({ uid, user }) {
           </button>
         </aside>
 
-        <main style={{ flex: 1, minWidth: 0, padding: "22px 28px 60px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 22 }}>
+        <main style={{ flex: 1, minWidth: 0, padding: "20px 28px 60px" }}>
+          <div style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 14, marginBottom: 22,
+            ...glass({ borderRadius: 20, padding: "16px 22px" }),
+          }}>
             <div>
               <p style={{ margin: 0, fontSize: 11.5, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--espresso-2)" }}>{data.settings.shopName}</p>
-              <h1 style={{ margin: "2px 0 0", fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 24, color: "var(--espresso-5)" }}>{activeTabInfo?.label}</h1>
+              <h1 style={{ margin: "2px 0 0", fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 27, color: "var(--espresso-5)" }}>{activeTabInfo?.label}</h1>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              {pendingOrderCount > 0 && (
+                <button
+                  onClick={() => setTab("orders")}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6, background: "var(--danger)", color: "#fff",
+                    padding: "8px 16px", borderRadius: 999, fontWeight: 700, fontSize: 13, border: "none",
+                    boxShadow: "0 4px 14px rgba(178,58,46,0.35)", animation: "pulseBadge 1.6s ease infinite",
+                  }}
+                >
+                  <Icon name="bell-ringing" size={15} /> {pendingOrderCount} ออเดอร์รอยืนยัน
+                </button>
+              )}
+              <HeaderClock />
             </div>
           </div>
 
@@ -686,9 +721,9 @@ function ShopApp({ uid, user }) {
 
 function MetricCard({ label, value, sub, accent }) {
   return (
-    <div style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: "14px 16px" }}>
+    <div style={glass({ borderRadius: 16, padding: "16px 18px" })}>
       <p style={{ margin: 0, fontSize: 12, color: "var(--espresso-2)" }}>{label}</p>
-      <p style={{ margin: "4px 0 0", fontFamily: "var(--f-display)", fontSize: 24, fontWeight: 600, color: accent || "var(--espresso-5)" }}>{value}</p>
+      <p style={{ margin: "4px 0 0", fontFamily: "var(--f-body)", fontSize: 26, fontWeight: 700, color: accent || "var(--espresso-5)" }}>{value}</p>
       {sub && <p style={{ margin: "2px 0 0", fontSize: 11.5, color: "var(--espresso-2)" }}>{sub}</p>}
     </div>
   );
@@ -769,6 +804,27 @@ function Dashboard({ data, ingredientsById, setTab, recordSale }) {
   );
 }
 
+function HeaderClock() {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 30000);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <div style={{
+      display: "flex", flexDirection: "column", alignItems: "flex-end", lineHeight: 1.25,
+      padding: "6px 14px", borderRadius: 12, background: "rgba(255,255,255,0.55)", border: "1px solid rgba(255,255,255,0.7)",
+    }}>
+      <span style={{ fontSize: 15, fontWeight: 700, color: "var(--espresso-5)" }}>
+        {now.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })}
+      </span>
+      <span style={{ fontSize: 10.5, color: "var(--espresso-2)" }}>
+        {now.toLocaleDateString("th-TH", { weekday: "short", day: "numeric", month: "short" })}
+      </span>
+    </div>
+  );
+}
+
 function SectionTitle({ icon, text }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, color: "var(--espresso-3)" }}>
@@ -821,7 +877,7 @@ function SellPanel({ data, ingredientsById, recordSale }) {
           const unitPrice = basePrice + upcharge;
 
           return (
-            <div key={menu.id} style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14 }}>
+            <div key={menu.id} style={glass({ borderRadius: 12, padding: 14 })}>
               <div style={{ fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 16, color: "var(--espresso-5)" }}>{menu.name}</div>
               <div style={{ fontSize: 12, color: "var(--espresso-2)", margin: "3px 0 10px" }}>
                 ต้นทุนวัตถุดิบ ฿{money(ingredientCost)} · ราคาขาย ฿{money(unitPrice)}
@@ -881,20 +937,26 @@ function SellPanel({ data, ingredientsById, recordSale }) {
   );
 }
 
-const ORDER_STATUS_LABEL = { pending: "รอยืนยัน", paid: "จ่ายแล้ว", preparing: "กำลังทำ", ready: "พร้อมรับ", cancelled: "ยกเลิก" };
-const ORDER_STATUS_STYLE = {
-  pending: { bg: "var(--gold-light)", color: "var(--gold-dark)" },
-  paid: { bg: "var(--info-light)", color: "var(--info-dark)" },
-  preparing: { bg: "var(--sage-light)", color: "var(--sage-dark)" },
-  ready: { bg: "var(--sage-dark)", color: "#fff" },
-  cancelled: { bg: "var(--danger-light)", color: "var(--danger)" },
+const ORDER_STATUS_LABEL = { pending: "รอตรวจ", paid: "จ่ายแล้ว", preparing: "กำลังทำ", ready: "พร้อมรับ", cancelled: "ยกเลิก" };
+// สีนำ ข้อความรอง — ให้บาริสต้ามองจากระยะไกลแล้วรู้สถานะทันทีจากสี ไม่ต้องเพ่งอ่านตัวหนังสือ
+const STATUS_COLORS = {
+  pending: { dot: "#F59E0B", bg: "rgba(245,158,11,0.16)", color: "#B45309" },
+  paid: { dot: "#16A34A", bg: "rgba(22,163,74,0.16)", color: "#15803D" },
+  preparing: { dot: "#2563EB", bg: "rgba(37,99,235,0.16)", color: "#1D4ED8" },
+  ready: { dot: "#16A34A", bg: "#16A34A", color: "#fff", solid: true },
+  cancelled: { dot: "#DC2626", bg: "rgba(220,38,38,0.16)", color: "#B91C1C" },
 };
 const PAYMENT_METHOD_LABEL = { cash: "เงินสด", promptpay: "พร้อมเพย์" };
 
-function StatusBadge({ status }) {
-  const style = ORDER_STATUS_STYLE[status] || { bg: "var(--cream-2)", color: "var(--espresso-3)" };
+function StatusBadge({ status, big }) {
+  const c = STATUS_COLORS[status] || { dot: "#8B98A5", bg: "var(--cream-2)", color: "var(--espresso-3)" };
   return (
-    <span className="chpill" style={{ background: style.bg, color: style.color, fontWeight: 600 }}>
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 6, background: c.bg, color: c.color,
+      fontWeight: 700, fontSize: big ? 13.5 : 12, padding: big ? "6px 13px" : "4px 10px", borderRadius: 999,
+      whiteSpace: "nowrap",
+    }}>
+      {!c.solid && <span className="status-dot" style={{ background: c.dot }} />}
       {ORDER_STATUS_LABEL[status] || status}
     </span>
   );
@@ -910,25 +972,25 @@ function OrderMeta({ paymentMethod, pickupDate, paymentVerified, paymentVerified
   if (!paymentMethod && !pickupDate) return null;
   const isTestSlip = paymentVerifiedBy === "slipok-test-mode";
   return (
-    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "4px 0" }}>
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "6px 0" }}>
       {paymentMethod && (
-        <span className="chpill" style={{ background: "var(--cream-2)", color: "var(--espresso-3)" }}>
+        <span className="chpill" style={{ background: "var(--cream-2)", color: "var(--espresso-3)", fontWeight: 600 }}>
           {paymentMethod === "cash" ? <Icon name="cash" size={11} /> : <Icon name="qrcode" size={11} />} {PAYMENT_METHOD_LABEL[paymentMethod] || paymentMethod}
         </span>
       )}
       {pickupDate && (
-        <span className="chpill" style={{ background: "var(--cream-2)", color: "var(--espresso-3)" }}>
+        <span className="chpill" style={{ background: "var(--cream-2)", color: "var(--espresso-3)", fontWeight: 600 }}>
           <Icon name="calendar" size={11} /> รับ {formatPickupDateTH(pickupDate)}
         </span>
       )}
       {paymentVerified && !isTestSlip && (
-        <span className="chpill" style={{ background: "var(--sage-light)", color: "var(--sage-dark)" }}>
-          <Icon name="check" size={11} /> ยืนยันสลิปอัตโนมัติแล้ว
+        <span className="chpill" style={{ background: "rgba(22,163,74,0.16)", color: "#15803D", fontWeight: 700 }}>
+          <Icon name="check" size={11} /> สลิปตรง
         </span>
       )}
       {paymentVerified && isTestSlip && (
-        <span className="chpill" style={{ background: "var(--gold-light)", color: "var(--gold-dark)" }}>
-          <Icon name="flask" size={11} /> สลิปทดสอบ (ไม่นับยอดขาย)
+        <span className="chpill" style={{ background: "rgba(245,158,11,0.16)", color: "#B45309", fontWeight: 700 }}>
+          <Icon name="flask" size={11} /> สลิปทดสอบ
         </span>
       )}
     </div>
@@ -937,20 +999,21 @@ function OrderMeta({ paymentMethod, pickupDate, paymentVerified, paymentVerified
 
 function OrderItemLines({ items, note }) {
   return (
-    <div style={{ margin: "8px 0", fontSize: 13 }}>
+    <div style={{ margin: "10px 0" }}>
       {items.map((i, idx) => (
-        <div key={idx} style={{ marginBottom: 4 }}>
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span>{i.name} x{i.qty}</span><span>฿{money(i.unitPrice * i.qty)}</span>
+        <div key={idx} style={{ marginBottom: 9, paddingBottom: 9, borderBottom: idx < items.length - 1 ? "1px dashed var(--line-soft)" : "none" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
+            <span style={{ fontSize: 16, fontWeight: 700, color: "var(--espresso-5)", lineHeight: 1.3 }}>{i.name} <span style={{ color: "var(--sage-dark)" }}>x{i.qty}</span></span>
+            <span style={{ fontSize: 15, fontWeight: 700, fontFamily: "var(--f-body)", textAlign: "right", whiteSpace: "nowrap" }}>฿{money(i.unitPrice * i.qty)}</span>
           </div>
           {i.options?.length > 0 && (
-            <div style={{ fontSize: 11, color: "var(--espresso-2)" }}>{i.options.map((o) => o.label).join(", ")}</div>
+            <div style={{ fontSize: 13, color: "var(--espresso-3)", marginTop: 3, lineHeight: 1.5 }}>{i.options.map((o) => o.label).join(", ")}</div>
           )}
         </div>
       ))}
       {note && (
-        <div style={{ marginTop: 6, background: "var(--gold-light)", border: "1px solid var(--gold)", borderRadius: 8, padding: "6px 9px", fontSize: 12 }}>
-          <Icon name="message-2" size={12} style={{ marginRight: 4 }} />{note}
+        <div style={{ marginTop: 6, background: "rgba(245,158,11,0.14)", border: "1px solid rgba(245,158,11,0.4)", borderRadius: 8, padding: "7px 10px", fontSize: 13, fontWeight: 600, color: "#92400E" }}>
+          <Icon name="message-2" size={13} style={{ marginRight: 4 }} />{note}
         </div>
       )}
     </div>
@@ -1003,23 +1066,26 @@ function OrdersPanel({ uid, orders, recordSale, showToast, data, ingredientsById
     <div>
       <SectionTitle icon="receipt" text={`ออเดอร์รอยืนยัน (${pending.length})`} />
       {pending.length === 0 ? <EmptyNote text="ยังไม่มีออเดอร์ใหม่" /> : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12, marginBottom: 24 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(310px, 1fr))", gap: 14, marginBottom: 24 }}>
           {pending.map((o) => (
-            <div key={o.id} style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "var(--espresso-2)" }}>
+            <div key={o.id} style={glass({
+              borderRadius: 16, padding: 16,
+              borderLeft: `5px solid ${STATUS_COLORS[o.status]?.dot || "var(--line)"}`,
+            })}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 14, fontWeight: 700, color: "var(--espresso-4)" }}>
                 <span>{o.customerName ? `${o.customerName} · ${o.customerPhone}` : o.customerPhone}</span>
-                <StatusBadge status={o.status} />
+                <StatusBadge status={o.status} big />
               </div>
-              <div style={{ fontSize: 11, color: "var(--espresso-2)", marginTop: 2 }}>
+              <div style={{ fontSize: 11.5, color: "var(--espresso-2)", marginTop: 2 }}>
                 {new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}
               </div>
               <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} paymentVerified={o.paymentVerified} paymentVerifiedBy={o.paymentVerifiedBy} />
               <OrderItemLines items={o.items} note={o.note} />
-              <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 600, fontSize: 14, borderTop: "1px dashed var(--line)", paddingTop: 6, marginBottom: 10 }}>
-                <span>รวม</span><span>฿{money(o.total)}</span>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontWeight: 700, fontSize: 17, fontFamily: "var(--f-body)", borderTop: "1px dashed var(--line)", paddingTop: 8, marginBottom: 10 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "var(--espresso-3)" }}>รวม</span><span>฿{money(o.total)}</span>
               </div>
               <div style={{ display: "flex", gap: 6 }}>
-                <button className="cbtn cbtn-accent" style={{ flex: 1 }} onClick={() => confirmPaid(o)}>ยืนยันรับเงินแล้ว</button>
+                <button className="cbtn cbtn-accent" style={{ flex: 1, fontSize: 14, padding: "10px 14px" }} onClick={() => confirmPaid(o)}>ยืนยันรับเงินแล้ว</button>
                 <button className="cbtn cbtn-danger" onClick={() => setStatus(o, "cancelled")} title="ยกเลิกออเดอร์"><Icon name="x" size={13} /></button>
               </div>
             </div>
@@ -1029,23 +1095,24 @@ function OrdersPanel({ uid, orders, recordSale, showToast, data, ingredientsById
 
       <SectionTitle icon="cup" text={`กำลังทำ (${inProgress.length})`} />
       {inProgress.length === 0 ? <EmptyNote text="ไม่มีออเดอร์ที่กำลังทำอยู่" /> : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12, marginBottom: 24 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(310px, 1fr))", gap: 14, marginBottom: 24 }}>
           {inProgress.map((o) => (
             <div
               key={o.id}
-              style={{
-                background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14,
+              style={glass({
+                borderRadius: 16, padding: 16,
+                borderLeft: `5px solid ${STATUS_COLORS[o.status]?.dot || "var(--line)"}`,
                 animation: justPaidIds.has(o.id) ? "paidFlash 1.8s ease" : undefined,
-              }}
+              })}
             >
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "var(--espresso-2)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 14, fontWeight: 700, color: "var(--espresso-4)" }}>
                 <span>{o.customerName ? `${o.customerName} · ${o.customerPhone}` : o.customerPhone}</span>
-                <StatusBadge status={o.status} />
+                <StatusBadge status={o.status} big />
               </div>
               <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} paymentVerified={o.paymentVerified} paymentVerifiedBy={o.paymentVerifiedBy} />
               <OrderItemLines items={o.items} note={o.note} />
-              {o.status === "paid" && <button className="cbtn cbtn-accent" style={{ width: "100%" }} onClick={() => setStatus(o, "preparing")}>เริ่มชง</button>}
-              {o.status === "preparing" && <button className="cbtn cbtn-accent" style={{ width: "100%" }} onClick={() => setStatus(o, "ready")}>พร้อมรับแล้ว</button>}
+              {o.status === "paid" && <button className="cbtn cbtn-accent" style={{ width: "100%", fontSize: 14, padding: "10px 14px" }} onClick={() => setStatus(o, "preparing")}>เริ่มชง</button>}
+              {o.status === "preparing" && <button className="cbtn cbtn-accent" style={{ width: "100%", fontSize: 14, padding: "10px 14px" }} onClick={() => setStatus(o, "ready")}>พร้อมรับแล้ว</button>}
             </div>
           ))}
         </div>
@@ -1149,7 +1216,7 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
       </div>
 
       {categories.length > 1 && (
-        <div style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 12, marginBottom: 18 }}>
+        <div style={glass({ borderRadius: 12, padding: 12, marginBottom: 18 })}>
           <p style={{ fontSize: 11.5, fontWeight: 600, color: "var(--espresso-3)", margin: "0 0 8px", textTransform: "uppercase", letterSpacing: ".03em" }}>ลำดับหมวดหมู่ที่แสดงหน้าลูกค้า</p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {categories.map((cat, idx) => (
@@ -1174,7 +1241,7 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
                 const totalCost = ingredientCost + data.settings.overheadPerCup;
                 const marginStore = menu.priceStore > 0 ? ((menu.priceStore - totalCost) / menu.priceStore) * 100 : 0;
                 return (
-                  <div key={menu.id} style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14, fontFamily: "var(--f-mono)", opacity: menu.available ? 1 : 0.6 }}>
+                  <div key={menu.id} style={glass({ borderRadius: 12, padding: 14, fontFamily: "var(--f-mono)", opacity: menu.available ? 1 : 0.6 })}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                         {menu.imageUrl && <img src={menu.imageUrl} alt="" width={32} height={32} style={{ borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />}
@@ -1453,7 +1520,7 @@ function PromotionsPanel({ data, updateData, showToast }) {
               );
             }
             return (
-              <div key={promo.id} style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14, opacity: promo.active === false || promoWin === "expired" ? 0.55 : 1 }}>
+              <div key={promo.id} style={glass({ borderRadius: 12, padding: 14, opacity: promo.active === false || promoWin === "expired" ? 0.55 : 1 })}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 15, color: "var(--espresso-5)" }}>
@@ -1780,7 +1847,7 @@ function DefaultPackagingSection({ data, updateData }) {
   if (packagingIngredients.length === 0) return null;
 
   return (
-    <div style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14, marginTop: 8 }}>
+    <div style={glass({ borderRadius: 12, padding: 14, marginTop: 8 })}>
       <SectionTitle icon="box" text="บรรจุภัณฑ์เริ่มต้นสำหรับเมนูใหม่" />
       <p style={{ fontSize: 11.5, color: "var(--espresso-2)", margin: "-6px 0 12px" }}>
         ตั้งไว้ครั้งเดียว ระบบจะใส่รายการเหล่านี้ให้อัตโนมัติทุกครั้งที่กด "เพิ่มเมนู" ใหม่ (แก้ไขเพิ่ม/ลบต่อเมนูได้ตามปกติภายหลัง)
@@ -1801,7 +1868,7 @@ function DefaultPackagingSection({ data, updateData }) {
 
 function IngredientForm({ value, onChange, onSubmit, submitLabel }) {
   return (
-    <div style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14, marginBottom: 14, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "end" }}>
+    <div style={glass({ borderRadius: 12, padding: 14, marginBottom: 14, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "end" })}>
       <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>ชื่อ</label><input className="cfield" value={value.name} onChange={(e) => onChange({ ...value, name: e.target.value })} /></div>
       <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>หมวด</label>
         <select className="cfield" value={value.category} onChange={(e) => onChange({ ...value, category: e.target.value })}>
@@ -1918,19 +1985,19 @@ function ReportsPanel({ data }) {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 20 }}>
-        <div style={{ background: "var(--sage-light)", borderRadius: 12, padding: 14 }}>
+        <div style={glass({ background: "rgba(251,235,221,0.55)", borderRadius: 14, padding: 14 })}>
           <ChannelPill channel="store" />
-          <p style={{ margin: "8px 0 0", fontSize: 20, fontWeight: 600, fontFamily: "var(--f-display)" }}>฿{money(byChannel.store.revenue)}</p>
+          <p style={{ margin: "8px 0 0", fontSize: 20, fontWeight: 700, fontFamily: "var(--f-body)" }}>฿{money(byChannel.store.revenue)}</p>
           <p style={{ margin: 0, fontSize: 12, color: "var(--espresso-3)" }}>กำไร ฿{money(byChannel.store.profit)} · {byChannel.store.cups} แก้ว</p>
         </div>
-        <div style={{ background: "var(--gold-light)", borderRadius: 12, padding: 14 }}>
+        <div style={glass({ background: "rgba(251,235,221,0.4)", borderRadius: 14, padding: 14 })}>
           <ChannelPill channel="delivery" />
-          <p style={{ margin: "8px 0 0", fontSize: 20, fontWeight: 600, fontFamily: "var(--f-display)" }}>฿{money(byChannel.delivery.revenue)}</p>
+          <p style={{ margin: "8px 0 0", fontSize: 20, fontWeight: 700, fontFamily: "var(--f-body)" }}>฿{money(byChannel.delivery.revenue)}</p>
           <p style={{ margin: 0, fontSize: 12, color: "var(--espresso-3)" }}>กำไร ฿{money(byChannel.delivery.profit)} · {byChannel.delivery.cups} แก้ว</p>
         </div>
-        <div style={{ background: "var(--cream-2)", borderRadius: 12, padding: 14 }}>
+        <div style={glass({ background: "rgba(235,239,234,0.5)", borderRadius: 14, padding: 14 })}>
           <ChannelPill channel="online" />
-          <p style={{ margin: "8px 0 0", fontSize: 20, fontWeight: 600, fontFamily: "var(--f-display)" }}>฿{money(byChannel.online.revenue)}</p>
+          <p style={{ margin: "8px 0 0", fontSize: 20, fontWeight: 700, fontFamily: "var(--f-body)" }}>฿{money(byChannel.online.revenue)}</p>
           <p style={{ margin: 0, fontSize: 12, color: "var(--espresso-3)" }}>กำไร ฿{money(byChannel.online.profit)} · {byChannel.online.cups} แก้ว</p>
         </div>
       </div>
@@ -2055,7 +2122,7 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
       {data.optionGroups.length === 0 && <EmptyNote text={'ยังไม่มีกลุ่มตัวเลือก กด "เพิ่มกลุ่มตัวเลือก" เพื่อเริ่ม'} />}
 
       {data.optionGroups.map((g) => (
-        <div key={g.id} style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14, marginBottom: 12 }}>
+        <div key={g.id} style={glass({ borderRadius: 12, padding: 14, marginBottom: 12 })}>
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
             <input className="cfield" value={g.name} onChange={(e) => patchGroup(g.id, { name: e.target.value })} style={{ flex: 1 }} />
             <label style={{ fontSize: 12, color: "var(--espresso-2)", display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>
@@ -2301,7 +2368,7 @@ function OrderLinkCard({ uid }) {
   }, [orderUrl]);
 
   return (
-    <div style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 16, marginTop: 18 }}>
+    <div style={glass({ borderRadius: 12, padding: 16, marginTop: 18 })}>
       <SectionTitle icon="link" text="ลิงก์สั่งซื้อสำหรับลูกค้า" />
       <p style={{ fontSize: 12, color: "var(--espresso-2)", margin: "0 0 10px" }}>ปริ้น QR นี้ติดหน้าร้าน ลูกค้าสแกนแล้วสั่ง+จ่ายได้เอง</p>
       {dataUrl && <img src={dataUrl} alt="QR ลิงก์สั่งซื้อ" width={160} height={160} style={{ borderRadius: 8, border: "1px solid var(--line)" }} />}
