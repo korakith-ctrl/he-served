@@ -163,7 +163,7 @@ function defaultState() {
 
 function normalizeData(raw) {
   return {
-    ingredients: raw.ingredients || [],
+    ingredients: (raw.ingredients || []).map((i) => ({ ...i, components: i.components || [] })),
     menus: (raw.menus || []).map((m) => ({
       ...m, ingredients: m.ingredients || [], optionGroupIds: m.optionGroupIds || [],
       available: m.available ?? true, category: m.category || "อื่นๆ", imageUrl: m.imageUrl || "",
@@ -232,18 +232,42 @@ function formatPromoDateTime(ms) {
   return new Date(ms).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" });
 }
 
-function resolveLines(menu, adjustments) {
-  return menu.ingredients.map((line) => {
+// วัตถุดิบ "ผสม" (เช่น mix milk = นมข้นหวาน:นมจืด 2:1) ไม่มีสต็อกของตัวเอง — กระจายปริมาณลงวัตถุดิบจริง
+// ตามสัดส่วน components แบบ recursive เผื่ออนาคตมีวัตถุดิบผสมซ้อนวัตถุดิบผสมอีกที (limit ความลึกกันลูปวนตั้งค่าพลาด)
+function expandIngredientLine(ingredientId, qty, ingredientsById, depth) {
+  const ing = ingredientsById[ingredientId];
+  if (!ing || !ing.components || ing.components.length === 0 || depth > 5) {
+    return [{ ingredientId, qty }];
+  }
+  const totalRatio = ing.components.reduce((s, c) => s + (Number(c.ratio) || 0), 0) || 1;
+  return ing.components.flatMap((c) =>
+    expandIngredientLine(c.ingredientId, round4(qty * ((Number(c.ratio) || 0) / totalRatio)), ingredientsById, depth + 1)
+  );
+}
+
+function expandLines(lines, ingredientsById) {
+  const merged = {};
+  for (const line of lines) {
+    for (const leaf of expandIngredientLine(line.ingredientId, line.qty, ingredientsById, 0)) {
+      merged[leaf.ingredientId] = round4((merged[leaf.ingredientId] || 0) + leaf.qty);
+    }
+  }
+  return Object.entries(merged).map(([ingredientId, qty]) => ({ ingredientId, qty }));
+}
+
+function resolveLines(menu, adjustments, ingredientsById) {
+  const lines = menu.ingredients.map((line) => {
     const adj = adjustments[line.ingredientId];
     if (!adj) return line;
     const ingredientId = adj.ingredientId || line.ingredientId;
     const qtyPercent = adj.qtyPercent != null ? adj.qtyPercent : 100;
     return { ...line, ingredientId, qty: round4(line.qty * (qtyPercent / 100)) };
   });
+  return expandLines(lines, ingredientsById);
 }
 
 function calcRecipeCost(menu, ingredientsById, adjustments) {
-  const lines = resolveLines(menu, adjustments || {});
+  const lines = resolveLines(menu, adjustments || {}, ingredientsById);
   let cost = 0;
   const breakdown = [];
   for (const line of lines) {
@@ -572,7 +596,7 @@ function ShopApp({ uid, user }) {
     if (!menu) return;
     const substitutions = opts.substitutions || {};
     const { ingredientCost } = calcRecipeCost(menu, ingredientsById, substitutions);
-    const lines = resolveLines(menu, substitutions);
+    const lines = resolveLines(menu, substitutions, ingredientsById);
     const overhead = data.settings.overheadPerCup;
     const basePrice = channel === "delivery" ? menu.priceDelivery : menu.priceStore;
     const unitPrice = basePrice + (opts.upcharge || 0);
@@ -944,7 +968,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
     for (const line of cart) {
       const m = data.menus.find((x) => x.id === line.menuId);
       if (!m) continue;
-      for (const l of resolveLines(m, line.substitutions)) {
+      for (const l of resolveLines(m, line.substitutions, ingredientsById)) {
         usage[l.ingredientId] = (usage[l.ingredientId] || 0) + l.qty * line.qty;
       }
     }
@@ -953,7 +977,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
 
   function stockOk(menu, substitutions, qty) {
     const cartUsage = cartIngredientUsage();
-    const lines = resolveLines(menu, substitutions);
+    const lines = resolveLines(menu, substitutions, ingredientsById);
     for (const line of lines) {
       const ing = ingredientsById[line.ingredientId];
       const reserved = cartUsage[line.ingredientId] || 0;
@@ -2206,13 +2230,36 @@ function PromoEditor({ promo, menus, onSave, onCancel }) {
   );
 }
 
+// ต้นทุน/หน่วยของวัตถุดิบผสม = ค่าเฉลี่ยถ่วงน้ำหนักจากสัดส่วนวัตถุดิบจริงที่ประกอบขึ้น ไว้แสดงผลเฉยๆ ไม่ได้เก็บ/ตัดสต็อกจากค่านี้ตรงๆ
+function compositeCostPerUnit(ing, ingredientsById) {
+  const totalRatio = ing.components.reduce((s, c) => s + (Number(c.ratio) || 0), 0) || 1;
+  return round4(ing.components.reduce((s, c) => {
+    const comp = ingredientsById[c.ingredientId];
+    return s + (comp ? comp.costPerUnit * ((Number(c.ratio) || 0) / totalRatio) : 0);
+  }, 0));
+}
+
+function compositionLabel(ing, ingredientsById) {
+  const totalRatio = ing.components.reduce((s, c) => s + (Number(c.ratio) || 0), 0) || 1;
+  return ing.components.map((c) => {
+    const comp = ingredientsById[c.ingredientId];
+    const pct = round4(((Number(c.ratio) || 0) / totalRatio) * 100);
+    return `${comp ? comp.name : "?"} ${pct}%`;
+  }).join(" + ");
+}
+
 function IngredientsPanel({ data, updateData, showToast }) {
   const [restocking, setRestocking] = useState(null);
   const [adjusting, setAdjusting] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [adding, setAdding] = useState(false);
-  const blankIng = { name: "", category: "coffee", unit: "g", costPerUnit: 0, stockQty: 0, lowStockThreshold: 100, altGroup: "", altUpcharge: 0 };
+  const blankIng = { name: "", category: "coffee", unit: "g", costPerUnit: 0, stockQty: 0, lowStockThreshold: 100, altGroup: "", altUpcharge: 0, components: [] };
   const [newIng, setNewIng] = useState(blankIng);
+  const ingredientsById = useMemo(() => {
+    const m = {};
+    for (const i of data.ingredients) m[i.id] = i;
+    return m;
+  }, [data.ingredients]);
 
   function doRestock(id, addQty, totalPaid) {
     updateData((next) => {
@@ -2238,13 +2285,18 @@ function IngredientsPanel({ data, updateData, showToast }) {
 
   function addIngredient() {
     if (!newIng.name.trim()) return;
-    updateData((next) => { next.ingredients.push({ ...newIng, altGroup: newIng.altGroup || null, id: genId("ing") }); });
+    const components = (newIng.components || []).filter((c) => c.ingredientId);
+    if ((newIng.components || []).length > 0 && components.length === 0) { showToast("กรุณาเลือกวัตถุดิบในสูตรผสมให้ครบ"); return; }
+    updateData((next) => { next.ingredients.push({ ...newIng, altGroup: newIng.altGroup || null, components, id: genId("ing") }); });
     setAdding(false);
     setNewIng(blankIng);
     showToast("เพิ่มวัตถุดิบแล้ว");
   }
 
   function saveEdit(ing) {
+    const components = (ing.components || []).filter((c) => c.ingredientId);
+    if ((ing.components || []).length > 0 && components.length === 0) { showToast("กรุณาเลือกวัตถุดิบในสูตรผสมให้ครบ"); return; }
+    ing = { ...ing, components };
     updateData((next) => {
       const idx = next.ingredients.findIndex((i) => i.id === ing.id);
       next.ingredients[idx] = { ...ing, altGroup: ing.altGroup || null };
@@ -2264,7 +2316,7 @@ function IngredientsPanel({ data, updateData, showToast }) {
         <button className="cbtn cbtn-accent" onClick={() => setAdding(!adding)}><Icon name="plus" size={14} /> วัตถุดิบใหม่</button>
       </div>
 
-      {adding && <IngredientForm value={newIng} onChange={setNewIng} onSubmit={addIngredient} submitLabel="บันทึก" />}
+      {adding && <IngredientForm value={newIng} onChange={setNewIng} onSubmit={addIngredient} submitLabel="บันทึก" allIngredients={data.ingredients} />}
 
       {CATEGORIES.map((cat) => {
         const items = data.ingredients.filter((i) => i.category === cat.id);
@@ -2276,22 +2328,40 @@ function IngredientsPanel({ data, updateData, showToast }) {
               <table className="cdata">
                 <thead><tr><th>รายการ</th><th>สต็อก</th><th>ต้นทุน/หน่วย</th><th>กลุ่มทางเลือก</th><th></th></tr></thead>
                 <tbody>
-                  {items.map((ing) => (
+                  {items.map((ing) => {
+                    const isMix = ing.components && ing.components.length > 0;
+                    return (
                     <tr key={ing.id}>
-                      <td>{ing.name}</td>
-                      <td style={{ whiteSpace: "nowrap", color: ing.stockQty <= ing.lowStockThreshold ? "var(--danger)" : "var(--espresso-4)", fontWeight: ing.stockQty <= ing.lowStockThreshold ? 600 : 400 }}>
-                        {ing.stockQty} {UNITS[ing.unit]}
+                      <td>
+                        {ing.name}
+                        {isMix && (
+                          <div style={{ fontSize: 10.5, color: "var(--espresso-2)", marginTop: 1 }}>
+                            <Icon name="flask" size={10} /> ผสม: {compositionLabel(ing, ingredientsById)}
+                          </div>
+                        )}
                       </td>
-                      <td style={{ whiteSpace: "nowrap" }}>฿{money(ing.costPerUnit)}/{UNITS[ing.unit]}</td>
+                      {isMix ? (
+                        <td style={{ whiteSpace: "nowrap", color: "var(--espresso-2)", fontSize: 12 }}>ตัดตามสัดส่วน (ไม่มีสต็อกของตัวเอง)</td>
+                      ) : (
+                        <td style={{ whiteSpace: "nowrap", color: ing.stockQty <= ing.lowStockThreshold ? "var(--danger)" : "var(--espresso-4)", fontWeight: ing.stockQty <= ing.lowStockThreshold ? 600 : 400 }}>
+                          {ing.stockQty} {UNITS[ing.unit]}
+                        </td>
+                      )}
+                      <td style={{ whiteSpace: "nowrap" }}>฿{money(isMix ? compositeCostPerUnit(ing, ingredientsById) : ing.costPerUnit)}/{UNITS[ing.unit]}</td>
                       <td>{ing.altGroup ? `${ing.altGroup}${ing.altUpcharge ? ` (+฿${ing.altUpcharge})` : ""}` : "—"}</td>
                       <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                        <button className="cbtn" style={{ padding: "4px 8px", marginRight: 4 }} onClick={() => setRestocking(ing.id)}>เติมสต็อก</button>
-                        <button className="cbtn" style={{ padding: "4px 8px", marginRight: 4 }} onClick={() => setAdjusting(ing.id)} title="ปรับปรุงสต็อกให้ตรงกับที่นับได้จริง (Cycle Count)"><Icon name="adjustments" size={12} /> ปรับสต็อก</button>
+                        {!isMix && (
+                          <>
+                            <button className="cbtn" style={{ padding: "4px 8px", marginRight: 4 }} onClick={() => setRestocking(ing.id)}>เติมสต็อก</button>
+                            <button className="cbtn" style={{ padding: "4px 8px", marginRight: 4 }} onClick={() => setAdjusting(ing.id)} title="ปรับปรุงสต็อกให้ตรงกับที่นับได้จริง (Cycle Count)"><Icon name="adjustments" size={12} /> ปรับสต็อก</button>
+                          </>
+                        )}
                         <button className="cbtn cbtn-edit" style={{ padding: "4px 8px", marginRight: 4 }} onClick={() => setEditingId(ing.id)} title="แก้ไขวัตถุดิบ"><Icon name="edit" size={12} /></button>
                         <button className="cbtn cbtn-danger" style={{ padding: "4px 8px" }} onClick={() => deleteIngredient(ing.id)} title="ลบวัตถุดิบ"><Icon name="trash" size={12} /></button>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -2308,7 +2378,7 @@ function IngredientsPanel({ data, updateData, showToast }) {
         <StockAdjustModal ingredient={data.ingredients.find((i) => i.id === adjusting)} onClose={() => setAdjusting(null)} onConfirm={doAdjustStock} />
       )}
       {editingId && (
-        <EditIngredientModal ingredient={data.ingredients.find((i) => i.id === editingId)} onClose={() => setEditingId(null)} onSave={saveEdit} />
+        <EditIngredientModal ingredient={data.ingredients.find((i) => i.id === editingId)} onClose={() => setEditingId(null)} onSave={saveEdit} allIngredients={data.ingredients} />
       )}
     </div>
   );
@@ -2356,38 +2426,85 @@ function DefaultPackagingSection({ data, updateData }) {
   );
 }
 
-function IngredientForm({ value, onChange, onSubmit, submitLabel }) {
+function IngredientForm({ value, onChange, onSubmit, submitLabel, allIngredients }) {
+  const isMix = value.components && value.components.length > 0;
+  const pickable = (allIngredients || []).filter((i) => i.id !== value.id && (!i.components || i.components.length === 0));
+
+  function toggleMix(on) {
+    onChange({ ...value, components: on ? [{ ingredientId: "", ratio: 1 }] : [] });
+  }
+  function setComponent(idx, patch) {
+    const components = value.components.map((c, i) => (i === idx ? { ...c, ...patch } : c));
+    onChange({ ...value, components });
+  }
+  function addComponent() {
+    onChange({ ...value, components: [...value.components, { ingredientId: "", ratio: 1 }] });
+  }
+  function removeComponent(idx) {
+    onChange({ ...value, components: value.components.filter((_, i) => i !== idx) });
+  }
+
   return (
-    <div style={glass({ borderRadius: 12, padding: 14, marginBottom: 14, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "end" })}>
-      <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>ชื่อ</label><input className="cfield" value={value.name} onChange={(e) => onChange({ ...value, name: e.target.value })} /></div>
-      <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>หมวด</label>
-        <select className="cfield" value={value.category} onChange={(e) => onChange({ ...value, category: e.target.value })}>
-          {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-        </select>
+    <div style={glass({ borderRadius: 12, padding: 14, marginBottom: 14 })}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "end" }}>
+        <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>ชื่อ</label><input className="cfield" value={value.name} onChange={(e) => onChange({ ...value, name: e.target.value })} /></div>
+        <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>หมวด</label>
+          <select className="cfield" value={value.category} onChange={(e) => onChange({ ...value, category: e.target.value })}>
+            {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+          </select>
+        </div>
+        <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>หน่วย</label>
+          <select className="cfield" value={value.unit} onChange={(e) => onChange({ ...value, unit: e.target.value })}>
+            {Object.entries(UNITS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </div>
+        {!isMix && (
+          <>
+            <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>ต้นทุน/หน่วย</label><input className="cfield" type="number" value={value.costPerUnit} onChange={(e) => onChange({ ...value, costPerUnit: Number(e.target.value) })} style={{ width: 90 }} /></div>
+            <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>สต็อก</label><input className="cfield" type="number" value={value.stockQty} onChange={(e) => onChange({ ...value, stockQty: Number(e.target.value) })} style={{ width: 90 }} /></div>
+            <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>แจ้งเตือนต่ำกว่า</label><input className="cfield" type="number" value={value.lowStockThreshold} onChange={(e) => onChange({ ...value, lowStockThreshold: Number(e.target.value) })} style={{ width: 90 }} /></div>
+          </>
+        )}
+        <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>กลุ่มทางเลือก (เช่น milk)</label><input className="cfield" value={value.altGroup || ""} onChange={(e) => onChange({ ...value, altGroup: e.target.value })} style={{ width: 100 }} placeholder="ไม่มี" /></div>
+        <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>ส่วนต่างราคา (บาท)</label><input className="cfield" type="number" value={value.altUpcharge} onChange={(e) => onChange({ ...value, altUpcharge: Number(e.target.value) })} style={{ width: 90 }} /></div>
+        <button className="cbtn cbtn-accent" onClick={onSubmit}>{submitLabel}</button>
       </div>
-      <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>หน่วย</label>
-        <select className="cfield" value={value.unit} onChange={(e) => onChange({ ...value, unit: e.target.value })}>
-          {Object.entries(UNITS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-      </div>
-      <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>ต้นทุน/หน่วย</label><input className="cfield" type="number" value={value.costPerUnit} onChange={(e) => onChange({ ...value, costPerUnit: Number(e.target.value) })} style={{ width: 90 }} /></div>
-      <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>สต็อก</label><input className="cfield" type="number" value={value.stockQty} onChange={(e) => onChange({ ...value, stockQty: Number(e.target.value) })} style={{ width: 90 }} /></div>
-      <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>แจ้งเตือนต่ำกว่า</label><input className="cfield" type="number" value={value.lowStockThreshold} onChange={(e) => onChange({ ...value, lowStockThreshold: Number(e.target.value) })} style={{ width: 90 }} /></div>
-      <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>กลุ่มทางเลือก (เช่น milk)</label><input className="cfield" value={value.altGroup || ""} onChange={(e) => onChange({ ...value, altGroup: e.target.value })} style={{ width: 100 }} placeholder="ไม่มี" /></div>
-      <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>ส่วนต่างราคา (บาท)</label><input className="cfield" type="number" value={value.altUpcharge} onChange={(e) => onChange({ ...value, altUpcharge: Number(e.target.value) })} style={{ width: 90 }} /></div>
-      <button className="cbtn cbtn-accent" onClick={onSubmit}>{submitLabel}</button>
+
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--espresso-3)", marginTop: 12 }}>
+        <input type="checkbox" checked={isMix} onChange={(e) => toggleMix(e.target.checked)} />
+        วัตถุดิบนี้เป็น "ของผสม" จากวัตถุดิบอื่นตามสัดส่วน (เช่น mix milk = นมข้นหวาน + นมจืด)
+      </label>
+
+      {isMix && (
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed var(--line)" }}>
+          <p style={{ fontSize: 11, color: "var(--espresso-2)", margin: "0 0 6px" }}>
+            ระบบจะตัดสต็อกวัตถุดิบจริงแต่ละตัวตามสัดส่วนที่ตั้งไว้ (ใส่เป็นตัวเลขสัดส่วน เช่น 2 กับ 1 = 2:1 ไม่ต้องรวมเป็น 100)
+          </p>
+          {value.components.map((c, idx) => (
+            <div key={idx} style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
+              <select className="cfield" value={c.ingredientId} onChange={(e) => setComponent(idx, { ingredientId: e.target.value })} style={{ flex: 1 }}>
+                <option value="">— เลือกวัตถุดิบ —</option>
+                {pickable.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+              </select>
+              <input className="cfield" type="number" value={c.ratio} onChange={(e) => setComponent(idx, { ratio: Number(e.target.value) })} style={{ width: 70 }} placeholder="สัดส่วน" />
+              <button className="cbtn cbtn-danger" style={{ padding: "4px 8px" }} onClick={() => removeComponent(idx)}><Icon name="x" size={12} /></button>
+            </div>
+          ))}
+          <button className="cbtn" style={{ fontSize: 11.5, padding: "4px 8px" }} onClick={addComponent}><Icon name="plus" size={11} /> เพิ่มวัตถุดิบในสูตรผสม</button>
+        </div>
+      )}
     </div>
   );
 }
 
-function EditIngredientModal({ ingredient, onClose, onSave }) {
+function EditIngredientModal({ ingredient, onClose, onSave, allIngredients }) {
   const [form, setForm] = useState(ingredient);
   if (!ingredient) return null;
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(43,29,20,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
-      <div style={{ background: "var(--surface)", borderRadius: 14, padding: 20, width: 340 }}>
+      <div style={{ background: "var(--surface)", borderRadius: 14, padding: 20, width: 380 }}>
         <p style={{ fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 17, margin: "0 0 12px" }}>แก้ไข: {ingredient.name}</p>
-        <IngredientForm value={form} onChange={setForm} onSubmit={() => onSave(form)} submitLabel="บันทึกการแก้ไข" />
+        <IngredientForm value={form} onChange={setForm} onSubmit={() => onSave(form)} submitLabel="บันทึกการแก้ไข" allIngredients={allIngredients} />
         <button className="cbtn" onClick={onClose}>ปิด</button>
       </div>
     </div>
