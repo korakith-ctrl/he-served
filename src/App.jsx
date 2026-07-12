@@ -554,7 +554,7 @@ function ShopApp({ uid, user }) {
           const upcharge = (item.options || []).reduce((s, x) => s + (x.priceDelta || 0), 0);
           const itemMenu = data.menus.find((m) => m.id === item.menuId);
           const substitutions = itemMenu ? resolveIngredientAdjustmentsFromOptions(itemMenu, item.options, ingredientsById) : {};
-          recordSale(item.menuId, item.qty, "online", { upcharge, substitutions, milkLabel: (item.options || []).map((x) => x.label).join(", ") || null });
+          recordSale(item.menuId, item.qty, "online", { upcharge, substitutions, milkLabel: (item.options || []).map((x) => x.label).join(", ") || null, orderId: o.id });
         }
         // สลิปยืนยันอัตโนมัติทำให้ order ค้างที่ status "paid" ซึ่งไม่ใช่หนึ่งใน 4 คอลัมน์ Kanban แล้ว
         // ต้องเลื่อนเข้า "preparing" ทันที เหมือนตอนบาริสต้ากดยืนยันรับเงินสดเอง ไม่งั้นการ์ดจะหายไปจากบอร์ด
@@ -631,6 +631,7 @@ function ShopApp({ uid, user }) {
         platformName: platform ? platform.name : null,
         milkNote: opts.milkLabel || null,
         note: opts.note || null,
+        orderId: opts.orderId || null,
       });
     });
     showToast(`บันทึกการขาย ${menu.name} x${qty} (${channel === "delivery" ? (platform ? platform.name : "เดลิเวอรี่") : "หน้าร้าน"}) แล้ว`);
@@ -652,6 +653,33 @@ function ShopApp({ uid, user }) {
       items, total, status: "preparing", createdAt: new Date().toISOString(),
       saleRecorded: true, source: "admin-pos",
     }).catch((err) => showToast("บันทึกออเดอร์ไม่สำเร็จ: " + err.message));
+    return newRef.key;
+  }
+
+  // ยกเลิกออเดอร์ที่ตัดสต็อก/บันทึกยอดขายไปแล้ว (saleRecorded=true — ผ่าน preparing มาแล้วอย่างน้อยหนึ่งครั้ง แม้จะถูกลากการ์ด
+  // กลับมา "รอยืนยัน" ก่อนกดยกเลิกก็ตาม) ต้องคืนสต็อกและลบยอดขายที่ผูกกับออเดอร์นี้ออกด้วย ไม่งั้นยอดขาย/สต็อกจะเพี้ยนค้างอยู่
+  // ทั้งที่ออเดอร์ถูกยกเลิกไปแล้ว — ถ้ายังไม่เคยบันทึกยอดขาย (ยังไม่ผ่าน preparing) ก็แค่เปลี่ยนสถานะเฉยๆ เหมือนเดิม
+  function cancelOrder(order) {
+    if (order.saleRecorded) {
+      updateData((next) => {
+        const nextIngredientsById = {};
+        for (const ing of next.ingredients) nextIngredientsById[ing.id] = ing;
+        for (const item of order.items) {
+          const itemMenu = next.menus.find((m) => m.id === item.menuId);
+          if (!itemMenu) continue;
+          const substitutions = resolveIngredientAdjustmentsFromOptions(itemMenu, item.options || [], nextIngredientsById);
+          const lines = resolveLines(itemMenu, substitutions, nextIngredientsById);
+          for (const line of lines) {
+            const ing = next.ingredients.find((i) => i.id === line.ingredientId);
+            if (ing) ing.stockQty = round4(ing.stockQty + line.qty * item.qty);
+          }
+        }
+        next.sales = next.sales.filter((s) => s.orderId !== order.id);
+      });
+    }
+    update(ref(db, `orders/${uid}/${order.id}`), { status: "cancelled", saleRecorded: false })
+      .catch((err) => showToast("ยกเลิกไม่สำเร็จ: " + err.message));
+    showToast(order.saleRecorded ? "ยกเลิกออเดอร์แล้ว คืนสต็อกและตัดยอดขายออกให้อัตโนมัติ" : "ยกเลิกออเดอร์แล้ว");
   }
 
   const activeTabInfo = TABS.find((t) => t.id === tab);
@@ -829,7 +857,7 @@ function ShopApp({ uid, user }) {
 
           {tab === "dashboard" && <Dashboard data={data} setTab={setTab} />}
           {tab === "sell" && <SellPanel data={data} ingredientsById={ingredientsById} recordSale={recordSale} createInstoreOrder={createInstoreOrder} />}
-          {tab === "orders" && <OrdersPanel uid={uid} orders={orders} recordSale={recordSale} showToast={showToast} data={data} ingredientsById={ingredientsById} />}
+          {tab === "orders" && <OrdersPanel uid={uid} orders={orders} recordSale={recordSale} cancelOrder={cancelOrder} showToast={showToast} data={data} ingredientsById={ingredientsById} />}
           {tab === "menus" && <MenusPanel data={data} ingredientsById={ingredientsById} updateData={updateData} showToast={showToast} />}
           {tab === "promotions" && <PromotionsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} />}
@@ -1281,14 +1309,14 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
   }
 
   function checkout() {
+    const orderId = createInstoreOrder(cart, cartNote.trim());
     for (const line of cart) {
       recordSale(line.menuId, line.qty, line.channel, {
         substitutions: line.substitutions, upcharge: line.upcharge,
         promoDiscount: line.promo, platformId: line.platformId, milkLabel: line.optionsLabel,
-        note: cartNote.trim() || null,
+        note: cartNote.trim() || null, orderId,
       });
     }
-    createInstoreOrder(cart, cartNote.trim());
     setCart([]);
     setCartNote("");
     setPromo(0);
@@ -1641,7 +1669,7 @@ function OrderItemLines({ items, note, compact, onEditItem }) {
 
 const KANBAN_NEXT_LABEL = { pending: "ยืนยันรับเงินแล้ว", preparing: "พร้อมเสิร์ฟ", ready: "เสร็จ / ลูกค้ารับแล้ว" };
 
-function OrdersPanel({ uid, orders, recordSale, showToast, data, ingredientsById }) {
+function OrdersPanel({ uid, orders, recordSale, cancelOrder, showToast, data, ingredientsById }) {
   const prevStatusRef = useRef({});
   const [justMovedIds, setJustMovedIds] = useState(new Set());
   const [dragId, setDragId] = useState(null);
@@ -1696,12 +1724,19 @@ function OrdersPanel({ uid, orders, recordSale, showToast, data, ingredientsById
   }
 
   function confirmPaid(order) {
-    setStatus(order, "preparing");
+    // ถ้าเคยบันทึกยอดขายไปแล้ว (ลากการ์ดออกจาก "รอยืนยัน" แล้วลากกลับมาใหม่โดยไม่ได้กดยกเลิก) แค่เปลี่ยนสถานะเฉยๆ
+    // ห้ามบันทึกยอดขาย/ตัดสต็อกซ้ำอีกรอบ ไม่งั้นยอดขายจะเพี้ยนสูงเกินจริง
+    if (order.saleRecorded) {
+      setStatus(order, "preparing");
+      showToast(`ยืนยันออเดอร์ ${order.customerName || order.customerPhone} แล้ว`);
+      return;
+    }
+    update(ref(db, `orders/${uid}/${order.id}`), { status: "preparing", saleRecorded: true }).catch((err) => showToast("อัปเดตไม่สำเร็จ: " + err.message));
     for (const item of order.items) {
       const upcharge = (item.options || []).reduce((s, o) => s + (o.priceDelta || 0), 0);
       const itemMenu = data.menus.find((m) => m.id === item.menuId);
       const substitutions = itemMenu ? resolveIngredientAdjustmentsFromOptions(itemMenu, item.options, ingredientsById) : {};
-      recordSale(item.menuId, item.qty, "online", { upcharge, substitutions, milkLabel: (item.options || []).map((o) => o.label).join(", ") || null });
+      recordSale(item.menuId, item.qty, "online", { upcharge, substitutions, milkLabel: (item.options || []).map((o) => o.label).join(", ") || null, orderId: order.id });
     }
     showToast(`ยืนยันออเดอร์ ${order.customerName || order.customerPhone} แล้ว บันทึกยอดขายให้อัตโนมัติ`);
   }
@@ -1848,9 +1883,11 @@ function OrdersPanel({ uid, orders, recordSale, showToast, data, ingredientsById
                     {col.id !== "done" && (
                       <div style={{ display: "flex", gap: compact ? 4 : 6 }}>
                         <button className="cbtn cbtn-accent" style={{ flex: 1, fontSize: compact ? 10.5 : 12.5, padding: compact ? "6px 4px" : "8px 10px" }} onClick={() => advance(o)}>{compact ? "→ ถัดไป" : KANBAN_NEXT_LABEL[col.id]}</button>
-                        {col.id === "pending" && (
-                          <button className="cbtn cbtn-danger" style={{ padding: compact ? "6px 6px" : "8px 9px" }} onClick={() => setStatus(o, "cancelled")} title="ยกเลิกออเดอร์"><Icon name="x" size={13} /></button>
-                        )}
+                        <button
+                          className="cbtn cbtn-danger" style={{ padding: compact ? "6px 6px" : "8px 9px" }}
+                          onClick={() => cancelOrder(o)}
+                          title={o.saleRecorded ? "ยกเลิกออเดอร์ (คืนสต็อก/ตัดยอดขายที่บันทึกไปแล้วออกให้)" : "ยกเลิกออเดอร์"}
+                        ><Icon name="x" size={13} /></button>
                       </div>
                     )}
                   </div>
