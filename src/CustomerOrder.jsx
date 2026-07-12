@@ -410,6 +410,7 @@ export default function CustomerOrder({ shopUid }) {
   const [acceptingOrders, setAcceptingOrders] = useState(true);
   const [slipTestMode, setSlipTestMode] = useState(false);
   const [bannerImageUrl, setBannerImageUrl] = useState("");
+  const [categoryOrder, setCategoryOrder] = useState([]);
   const [cart, setCart] = useState([]);
   const [flyItems, setFlyItems] = useState([]);
   const [cartBump, setCartBump] = useState(false);
@@ -420,6 +421,7 @@ export default function CustomerOrder({ shopUid }) {
   const [pickingPromo, setPickingPromo] = useState(null);
   const [pickingChoicePromo, setPickingChoicePromo] = useState(null);
   const [choiceFlow, setChoiceFlow] = useState(null);
+  const [editingCartLine, setEditingCartLine] = useState(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [note, setNote] = useState("");
@@ -463,6 +465,7 @@ export default function CustomerOrder({ shopUid }) {
     );
     const unsub6 = onValue(ref(db, `shops/${shopUid}/settings/slipTestMode`), (snap) => setSlipTestMode(snap.val() === true));
     const unsub7 = onValue(ref(db, `shops/${shopUid}/settings/bannerImageUrl`), (snap) => setBannerImageUrl(snap.val() || ""));
+    const unsub9 = onValue(ref(db, `shops/${shopUid}/settings/categoryOrder`), (snap) => setCategoryOrder(snap.val() || []));
     const unsub8 = onValue(ref(db, `shops/${shopUid}/promotions`), (snap) => {
       const list = snap.val() || [];
       setPromotions(list.map((p) => ({
@@ -472,7 +475,7 @@ export default function CustomerOrder({ shopUid }) {
         chooseCount: p.chooseCount || 2,
       })));
     });
-    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); unsub7(); unsub8(); };
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); unsub7(); unsub8(); unsub9(); };
   }, [authUid, shopUid]);
 
   useEffect(() => {
@@ -536,8 +539,11 @@ export default function CustomerOrder({ shopUid }) {
     if (!menus) return [];
     const seen = [];
     for (const m of menus) if (!seen.includes(m.category)) seen.push(m.category);
-    return activePromotions.length > 0 ? [HOT_DEAL_CATEGORY, ...seen] : seen;
-  }, [menus, activePromotions]);
+    const ordered = categoryOrder && categoryOrder.length
+      ? [...categoryOrder.filter((c) => seen.includes(c)), ...seen.filter((c) => !categoryOrder.includes(c))]
+      : seen;
+    return activePromotions.length > 0 ? [HOT_DEAL_CATEGORY, ...ordered] : ordered;
+  }, [menus, activePromotions, categoryOrder]);
 
   useEffect(() => {
     if (categories.length > 0 && !activeCategory) setActiveCategory(categories[0]);
@@ -692,6 +698,13 @@ export default function CustomerOrder({ shopUid }) {
     }
   }
 
+  function canEditLineOptions(line) {
+    if (line.promoKind === "bundle" || line.promoKind === "choice") return false;
+    const menu = menusById[line.menuId];
+    if (!menu) return false;
+    return groupsForMenu(menu).length > 0;
+  }
+
   function setLineQty(lineId, qty) {
     if (qty <= 0) { removeLine(lineId); return; }
     setCart((c) => c.map((l) => {
@@ -699,7 +712,10 @@ export default function CustomerOrder({ shopUid }) {
       if (l.promoKind === "qty") {
         const menu = menusById[l.menuId];
         const promo = (promotions || []).find((p) => p.id === l.promoId);
-        if (menu && promo) return { ...l, qty, unitPrice: qtyPromoUnitPrice(promo, menu, qty) };
+        if (menu && promo) {
+          const optionDelta = (l.options || []).reduce((s, o) => s + (o.priceDelta || 0), 0);
+          return { ...l, qty, unitPrice: qtyPromoUnitPrice(promo, menu, qty) + optionDelta };
+        }
       }
       return { ...l, qty };
     }));
@@ -1026,6 +1042,8 @@ export default function CustomerOrder({ shopUid }) {
           onClose={() => setShowCart(false)}
           onSetQty={setLineQty}
           onRemove={removeCartLine}
+          canEditOptions={canEditLineOptions}
+          onEditOptions={setEditingCartLine}
           onCheckout={() => setShowCart(false)}
         />
       </div>
@@ -1391,15 +1409,27 @@ export default function CustomerOrder({ shopUid }) {
         onClose={() => setShowCart(false)}
         onSetQty={setLineQty}
         onRemove={removeCartLine}
+        canEditOptions={canEditLineOptions}
+        onEditOptions={setEditingCartLine}
         onCheckout={() => { setShowCart(false); setError(""); setStep("phone"); }}
       />
 
       <OptionPickerModal
-        visible={!!pickingMenu}
-        menu={pickingMenu}
-        groups={pickingMenu ? groupsForMenu(pickingMenu) : []}
-        onCancel={() => { setPickingMenu(null); setPickingPromo(null); }}
+        visible={!!pickingMenu || !!editingCartLine}
+        menu={editingCartLine ? menusById[editingCartLine.menuId] : pickingMenu}
+        groups={editingCartLine ? groupsForMenu(menusById[editingCartLine.menuId]) : (pickingMenu ? groupsForMenu(pickingMenu) : [])}
+        hideQty={!!editingCartLine}
+        initialOptions={editingCartLine ? editingCartLine.options : undefined}
+        onCancel={() => { setPickingMenu(null); setPickingPromo(null); setEditingCartLine(null); }}
         onConfirm={(qty, options) => {
+          if (editingCartLine) {
+            const oldDelta = (editingCartLine.options || []).reduce((s, o) => s + (o.priceDelta || 0), 0);
+            const base = editingCartLine.unitPrice - oldDelta;
+            const newDelta = options.reduce((s, o) => s + (o.priceDelta || 0), 0);
+            setCart((c) => c.map((l) => (l.lineId === editingCartLine.lineId ? { ...l, options, unitPrice: base + newDelta } : l)));
+            setEditingCartLine(null);
+            return;
+          }
           const refKey = pickingPromo ? "promo_" + pickingMenu.id : pickingMenu.id;
           spawnFly(refKey, pickingMenu.imageUrl);
           const isQty = pickingPromo && pickingPromo.type === "qty";
@@ -1492,7 +1522,7 @@ function SlipUpload({ shopUid, orderId, onVerified }) {
   );
 }
 
-function CartDrawer({ visible, cart, total, onClose, onSetQty, onRemove, onCheckout }) {
+function CartDrawer({ visible, cart, total, onClose, onSetQty, onRemove, onCheckout, canEditOptions, onEditOptions }) {
   const { mounted, shown } = useSheetTransition(visible);
   if (!mounted) return null;
   return (
@@ -1526,6 +1556,11 @@ function CartDrawer({ visible, cart, total, onClose, onSetQty, onRemove, onCheck
                     <button style={{ ...btn, padding: "4px 10px" }} onClick={() => onSetQty(l.lineId, l.qty + 1)}>+</button>
                   </>
                 )}
+                {canEditOptions && canEditOptions(l) && (
+                  <button style={{ ...btn, padding: "4px 8px" }} onClick={() => onEditOptions(l)} title="แก้ไขตัวเลือก">
+                    <i className="ti ti-edit" style={{ fontSize: 14 }} aria-hidden="true"></i>
+                  </button>
+                )}
                 <button style={{ ...btn, padding: "4px 8px", color: COLORS.danger, borderColor: COLORS.danger }} onClick={() => onRemove(l)}>
                   <i className="ti ti-trash" style={{ fontSize: 14 }} aria-hidden="true"></i>
                 </button>
@@ -1547,7 +1582,7 @@ function CartDrawer({ visible, cart, total, onClose, onSetQty, onRemove, onCheck
   );
 }
 
-function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm, hideQty }) {
+function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm, hideQty, initialOptions }) {
   const { mounted, shown } = useSheetTransition(visible);
   const cachedRef = useRef({ menu, groups });
   if (menu) cachedRef.current = { menu, groups };
@@ -1560,7 +1595,15 @@ function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm, hideQty
   useEffect(() => {
     if (menu) {
       setQty(1);
-      setSelections({});
+      if (initialOptions && initialOptions.length) {
+        const sel = {};
+        for (const o of initialOptions) {
+          sel[o.groupId] = { id: o.choiceId, label: o.label, note: "", priceDelta: o.priceDelta || 0, ingredientId: o.ingredientId || null, groupId: o.groupId, groupName: o.groupName };
+        }
+        setSelections(sel);
+      } else {
+        setSelections({});
+      }
       setErr("");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1580,7 +1623,7 @@ function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm, hideQty
     const options = cg
       .map((grp) => selections[grp.id])
       .filter(Boolean)
-      .map((c) => ({ groupId: c.groupId, groupName: c.groupName, choiceId: c.id, label: c.label, priceDelta: c.priceDelta || 0 }));
+      .map((c) => ({ groupId: c.groupId, groupName: c.groupName, choiceId: c.id, label: c.label, priceDelta: c.priceDelta || 0, ingredientId: c.ingredientId || null }));
     onConfirm(hideQty ? 1 : qty, options);
   }
 

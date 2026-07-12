@@ -30,8 +30,8 @@ function round4(n) { return Math.round(n * 10000) / 10000; }
 
 function seedIngredients() {
   const rows = [
-    ["coffee_pacamara", "Pacamara House Blend", "coffee", "g", 0.84, null, 0],
-    ["coffee_bluekoff", "Bluekoff A4.5 medium", "coffee", "g", 0.551, null, 0],
+    ["coffee_pacamara", "Pacamara House Blend", "coffee", "g", 0.84, "bean", 0],
+    ["coffee_bluekoff", "Bluekoff A4.5 medium", "coffee", "g", 0.551, "bean", 0],
     ["matcha_peace", "Peace Pure Matcha", "matcha", "g", 4.87, null, 0],
     ["cocoa_powder", "ผงโกโก้", "cocoa_tea", "g", 0.518, null, 0],
     ["thai_tea", "ผงชาไทย", "cocoa_tea", "g", 0.192, null, 0],
@@ -144,7 +144,7 @@ function defaultState() {
     menus,
     sales: [],
     purchases: [],
-    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true, slipTestMode: false, bannerImageUrl: "" },
+    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true, slipTestMode: false, bannerImageUrl: "", categoryOrder: [], defaultPackagingLines: [] },
     optionGroups,
     promotions: [],
   };
@@ -167,8 +167,13 @@ function normalizeData(raw) {
       acceptingOrders: raw.settings?.acceptingOrders ?? true,
       slipTestMode: raw.settings?.slipTestMode ?? false,
       bannerImageUrl: raw.settings?.bannerImageUrl || "",
+      categoryOrder: raw.settings?.categoryOrder || [],
+      defaultPackagingLines: raw.settings?.defaultPackagingLines || [],
     },
-    optionGroups: (raw.optionGroups || []).map((g) => ({ ...g, choices: g.choices || [] })),
+    optionGroups: (raw.optionGroups || []).map((g) => ({
+      ...g,
+      choices: (g.choices || []).map((c) => ({ ...c, ingredientId: c.ingredientId || null })),
+    })),
     promotions: (raw.promotions || []).map((p) => ({
       ...p,
       menuIds: p.menuIds || [],
@@ -239,6 +244,23 @@ function milkChoiceFor(menu, ingredientsById) {
   const group = ingredientsById[line.ingredientId].altGroup;
   const options = Object.values(ingredientsById).filter((i) => i.altGroup === group);
   return { originalIngredientId: line.ingredientId, options };
+}
+
+function resolveSubstitutionsFromOptions(menu, options, ingredientsById) {
+  const substitutions = {};
+  for (const opt of options || []) {
+    if (!opt.ingredientId) continue;
+    const chosenIng = ingredientsById[opt.ingredientId];
+    if (!chosenIng || !chosenIng.altGroup) continue;
+    const origLine = menu.ingredients.find((l) => {
+      const li = ingredientsById[l.ingredientId];
+      return li && li.altGroup === chosenIng.altGroup;
+    });
+    if (origLine && origLine.ingredientId !== opt.ingredientId) {
+      substitutions[origLine.ingredientId] = opt.ingredientId;
+    }
+  }
+  return substitutions;
 }
 
 function todayStr(d = new Date()) {
@@ -341,7 +363,9 @@ function ShopApp({ uid }) {
         autoRecordedRef.current.add(o.id);
         for (const item of o.items) {
           const upcharge = (item.options || []).reduce((s, x) => s + (x.priceDelta || 0), 0);
-          recordSale(item.menuId, item.qty, "online", { upcharge, milkLabel: (item.options || []).map((x) => x.label).join(", ") || null });
+          const itemMenu = data.menus.find((m) => m.id === item.menuId);
+          const substitutions = itemMenu ? resolveSubstitutionsFromOptions(itemMenu, item.options, ingredientsById) : {};
+          recordSale(item.menuId, item.qty, "online", { upcharge, substitutions, milkLabel: (item.options || []).map((x) => x.label).join(", ") || null });
         }
         update(ref(db, `orders/${uid}/${o.id}`), { saleRecorded: true }).catch(() => {});
         showToast(`สลิปยืนยันอัตโนมัติ: ออเดอร์ ${o.customerName || o.customerPhone} ชำระเงินแล้ว`);
@@ -518,7 +542,7 @@ function ShopApp({ uid }) {
 
           {tab === "dashboard" && <Dashboard data={data} ingredientsById={ingredientsById} setTab={setTab} recordSale={recordSale} />}
           {tab === "sell" && <SellPanel data={data} ingredientsById={ingredientsById} recordSale={recordSale} />}
-          {tab === "orders" && <OrdersPanel uid={uid} orders={orders} recordSale={recordSale} showToast={showToast} />}
+          {tab === "orders" && <OrdersPanel uid={uid} orders={orders} recordSale={recordSale} showToast={showToast} data={data} ingredientsById={ingredientsById} />}
           {tab === "menus" && <MenusPanel data={data} ingredientsById={ingredientsById} updateData={updateData} showToast={showToast} />}
           {tab === "promotions" && <PromotionsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} />}
@@ -811,7 +835,7 @@ function OrderItemLines({ items, note }) {
   );
 }
 
-function OrdersPanel({ uid, orders, recordSale, showToast }) {
+function OrdersPanel({ uid, orders, recordSale, showToast, data, ingredientsById }) {
   const prevStatusRef = useRef({});
   const [justPaidIds, setJustPaidIds] = useState(new Set());
 
@@ -842,7 +866,9 @@ function OrdersPanel({ uid, orders, recordSale, showToast }) {
     setStatus(order, "paid");
     for (const item of order.items) {
       const upcharge = (item.options || []).reduce((s, o) => s + (o.priceDelta || 0), 0);
-      recordSale(item.menuId, item.qty, "online", { upcharge, milkLabel: (item.options || []).map((o) => o.label).join(", ") || null });
+      const itemMenu = data.menus.find((m) => m.id === item.menuId);
+      const substitutions = itemMenu ? resolveSubstitutionsFromOptions(itemMenu, item.options, ingredientsById) : {};
+      recordSale(item.menuId, item.qty, "online", { upcharge, substitutions, milkLabel: (item.options || []).map((o) => o.label).join(", ") || null });
     }
     showToast(`ยืนยันออเดอร์ ${order.customerName || order.customerPhone} แล้ว บันทึกยอดขายให้อัตโนมัติ`);
   }
@@ -930,7 +956,8 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
   const [editing, setEditing] = useState(null);
 
   function newMenu() {
-    setEditing({ id: null, name: "", priceStore: 0, priceDelivery: 0, ingredients: [], optionGroupIds: [], available: true, category: "กาแฟ", imageUrl: "" });
+    const defaultPackaging = (data.settings.defaultPackagingLines || []).map((l) => ({ ...l }));
+    setEditing({ id: null, name: "", priceStore: 0, priceDelivery: 0, ingredients: defaultPackaging, optionGroupIds: [], available: true, category: "กาแฟ", imageUrl: "" });
   }
 
   function saveMenu(menu) {
@@ -959,8 +986,34 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
     showToast("ลบเมนูแล้ว");
   }
 
+  function moveMenu(id, direction) {
+    updateData((next) => {
+      const menu = next.menus.find((m) => m.id === id);
+      if (!menu) return;
+      const sameCat = next.menus.filter((m) => m.category === menu.category);
+      const idx = sameCat.findIndex((m) => m.id === id);
+      const swapWith = direction === "up" ? sameCat[idx - 1] : sameCat[idx + 1];
+      if (!swapWith) return;
+      const gA = next.menus.findIndex((m) => m.id === id);
+      const gB = next.menus.findIndex((m) => m.id === swapWith.id);
+      [next.menus[gA], next.menus[gB]] = [next.menus[gB], next.menus[gA]];
+    });
+  }
+
+  function moveCategory(cat, direction, categories) {
+    const order = categories.slice();
+    const idx = order.indexOf(cat);
+    const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= order.length) return;
+    [order[idx], order[swapIdx]] = [order[swapIdx], order[idx]];
+    updateData((next) => { next.settings.categoryOrder = order; });
+  }
+
+  const rawCategories = [...new Set(data.menus.map((m) => m.category).filter(Boolean))];
+  const orderPref = data.settings.categoryOrder || [];
+  const categories = [...orderPref.filter((c) => rawCategories.includes(c)), ...rawCategories.filter((c) => !orderPref.includes(c))];
+
   if (editing) {
-    const categories = [...new Set(data.menus.map((m) => m.category).filter(Boolean))];
     return <MenuEditor menu={editing} ingredients={data.ingredients} optionGroups={data.optionGroups} categories={categories} onSave={saveMenu} onCancel={() => setEditing(null)} />;
   }
 
@@ -970,65 +1023,91 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
         <SectionTitle icon="cup" text="เมนูทั้งหมด" />
         <button className="cbtn cbtn-accent" onClick={newMenu}><Icon name="plus" size={14} /> เพิ่มเมนู</button>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
-        {data.menus.map((menu) => {
-          const { ingredientCost, breakdown } = calcRecipeCost(menu, ingredientsById, {});
-          const totalCost = ingredientCost + data.settings.overheadPerCup;
-          const marginStore = menu.priceStore > 0 ? ((menu.priceStore - totalCost) / menu.priceStore) * 100 : 0;
-          return (
-            <div key={menu.id} style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14, fontFamily: "var(--f-mono)", opacity: menu.available ? 1 : 0.6 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                  {menu.imageUrl && <img src={menu.imageUrl} alt="" width={32} height={32} style={{ borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />}
-                  <div>
-                    <div style={{ fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 16, color: "var(--espresso-5)" }}>{menu.name}</div>
-                    <div style={{ fontSize: 10.5, color: "var(--espresso-2)", textTransform: "uppercase", letterSpacing: ".03em" }}>{menu.category}</div>
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: 4 }}>
-                  <button className="cbtn" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => toggleAvailable(menu)} title={menu.available ? "ปิดขายชั่วคราว" : "เปิดขาย"}>
-                    {menu.available ? "เปิดขาย" : "หมด"}
-                  </button>
-                  <button className="cbtn cbtn-edit" style={{ padding: "4px 8px" }} onClick={() => setEditing(menu)} title="แก้ไขเมนู"><Icon name="edit" size={13} /></button>
-                  <button className="cbtn cbtn-danger" style={{ padding: "4px 8px" }} onClick={() => deleteMenu(menu.id)} title="ลบเมนู"><Icon name="trash" size={13} /></button>
-                </div>
+
+      {categories.length > 1 && (
+        <div style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 12, marginBottom: 18 }}>
+          <p style={{ fontSize: 11.5, fontWeight: 600, color: "var(--espresso-3)", margin: "0 0 8px", textTransform: "uppercase", letterSpacing: ".03em" }}>ลำดับหมวดหมู่ที่แสดงหน้าลูกค้า</p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {categories.map((cat, idx) => (
+              <div key={cat} style={{ display: "flex", alignItems: "center", gap: 2, background: "var(--cream-2)", borderRadius: 9, padding: "4px 4px 4px 10px" }}>
+                <span style={{ fontSize: 12.5 }}>{cat}</span>
+                <button className="cbtn" style={{ padding: "3px 6px" }} disabled={idx === 0} onClick={() => moveCategory(cat, "up", categories)} title="ย้ายขึ้น"><Icon name="chevron-up" size={12} /></button>
+                <button className="cbtn" style={{ padding: "3px 6px" }} disabled={idx === categories.length - 1} onClick={() => moveCategory(cat, "down", categories)} title="ย้ายลง"><Icon name="chevron-down" size={12} /></button>
               </div>
-              <div style={{ borderTop: "1px dashed var(--line)", margin: "8px 0", paddingTop: 8, fontSize: 11.5 }}>
-                {breakdown.map((b) => (
-                  <div key={b.ingredientId} style={{ display: "flex", justifyContent: "space-between", color: "var(--espresso-3)" }}>
-                    <span>{b.name} ×{b.qty}{UNITS[b.unit]}</span><span>฿{money(b.lineCost)}</span>
-                  </div>
-                ))}
-                <div style={{ display: "flex", justifyContent: "space-between", color: "var(--espresso-3)" }}>
-                  <span>ต้นทุนแฝง/แก้ว</span><span>฿{money(data.settings.overheadPerCup)}</span>
-                </div>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 600, fontSize: 13, borderTop: "1px dashed var(--line)", paddingTop: 8 }}>
-                <span>ต้นทุนรวม/แก้ว</span><span>฿{money(totalCost)}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginTop: 4 }}>
-                <span><ChannelPill channel="store" /> ฿{money(menu.priceStore)}</span>
-                <span style={{ color: marginStore >= 0 ? "var(--sage-dark)" : "var(--danger)" }}>{money(marginStore)}%</span>
-              </div>
-              <div style={{ fontSize: 12.5, marginTop: 2 }}>
-                <span><ChannelPill channel="delivery" /> ฿{money(menu.priceDelivery)}</span>
-              </div>
-              <div style={{ marginTop: 4 }}>
-                {data.settings.platforms.map((p) => {
-                  const net = menu.priceDelivery * (1 - p.gpPercent / 100);
-                  const margin = menu.priceDelivery > 0 ? ((net - totalCost) / menu.priceDelivery) * 100 : 0;
-                  return (
-                    <div key={p.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--espresso-3)" }}>
-                      <span>{p.name} (GP {p.gpPercent}%)</span>
-                      <span style={{ color: margin >= 0 ? "var(--sage-dark)" : "var(--danger)" }}>{money(margin)}%</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {categories.map((cat) => {
+        const menusInCat = data.menus.filter((m) => m.category === cat);
+        return (
+          <div key={cat} style={{ marginBottom: 22 }}>
+            <p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--espresso-3)", margin: "0 0 8px" }}>{cat}</p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
+              {menusInCat.map((menu, idx) => {
+                const { ingredientCost, breakdown } = calcRecipeCost(menu, ingredientsById, {});
+                const totalCost = ingredientCost + data.settings.overheadPerCup;
+                const marginStore = menu.priceStore > 0 ? ((menu.priceStore - totalCost) / menu.priceStore) * 100 : 0;
+                return (
+                  <div key={menu.id} style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14, fontFamily: "var(--f-mono)", opacity: menu.available ? 1 : 0.6 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                        {menu.imageUrl && <img src={menu.imageUrl} alt="" width={32} height={32} style={{ borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />}
+                        <div>
+                          <div style={{ fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 16, color: "var(--espresso-5)" }}>{menu.name}</div>
+                          <div style={{ fontSize: 10.5, color: "var(--espresso-2)", textTransform: "uppercase", letterSpacing: ".03em" }}>{menu.category}</div>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                        <button className="cbtn" style={{ padding: "4px 6px" }} disabled={idx === 0} onClick={() => moveMenu(menu.id, "up")} title="ย้ายขึ้น"><Icon name="chevron-up" size={12} /></button>
+                        <button className="cbtn" style={{ padding: "4px 6px" }} disabled={idx === menusInCat.length - 1} onClick={() => moveMenu(menu.id, "down")} title="ย้ายลง"><Icon name="chevron-down" size={12} /></button>
+                        <button className="cbtn" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => toggleAvailable(menu)} title={menu.available ? "ปิดขายชั่วคราว" : "เปิดขาย"}>
+                          {menu.available ? "เปิดขาย" : "หมด"}
+                        </button>
+                        <button className="cbtn cbtn-edit" style={{ padding: "4px 8px" }} onClick={() => setEditing(menu)} title="แก้ไขเมนู"><Icon name="edit" size={13} /></button>
+                        <button className="cbtn cbtn-danger" style={{ padding: "4px 8px" }} onClick={() => deleteMenu(menu.id)} title="ลบเมนู"><Icon name="trash" size={13} /></button>
+                      </div>
                     </div>
-                  );
-                })}
-              </div>
+                    <div style={{ borderTop: "1px dashed var(--line)", margin: "8px 0", paddingTop: 8, fontSize: 11.5 }}>
+                      {breakdown.map((b) => (
+                        <div key={b.ingredientId} style={{ display: "flex", justifyContent: "space-between", color: "var(--espresso-3)" }}>
+                          <span>{b.name} ×{b.qty}{UNITS[b.unit]}</span><span>฿{money(b.lineCost)}</span>
+                        </div>
+                      ))}
+                      <div style={{ display: "flex", justifyContent: "space-between", color: "var(--espresso-3)" }}>
+                        <span>ต้นทุนแฝง/แก้ว</span><span>฿{money(data.settings.overheadPerCup)}</span>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 600, fontSize: 13, borderTop: "1px dashed var(--line)", paddingTop: 8 }}>
+                      <span>ต้นทุนรวม/แก้ว</span><span>฿{money(totalCost)}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginTop: 4 }}>
+                      <span><ChannelPill channel="store" /> ฿{money(menu.priceStore)}</span>
+                      <span style={{ color: marginStore >= 0 ? "var(--sage-dark)" : "var(--danger)" }}>{money(marginStore)}%</span>
+                    </div>
+                    <div style={{ fontSize: 12.5, marginTop: 2 }}>
+                      <span><ChannelPill channel="delivery" /> ฿{money(menu.priceDelivery)}</span>
+                    </div>
+                    <div style={{ marginTop: 4 }}>
+                      {data.settings.platforms.map((p) => {
+                        const net = menu.priceDelivery * (1 - p.gpPercent / 100);
+                        const margin = menu.priceDelivery > 0 ? ((net - totalCost) / menu.priceDelivery) * 100 : 0;
+                        return (
+                          <div key={p.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--espresso-3)" }}>
+                            <span>{p.name} (GP {p.gpPercent}%)</span>
+                            <span style={{ color: margin >= 0 ? "var(--sage-dark)" : "var(--danger)" }}>{money(margin)}%</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
-      </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1538,12 +1617,56 @@ function IngredientsPanel({ data, updateData, showToast }) {
         );
       })}
 
+      <DefaultPackagingSection data={data} updateData={updateData} />
+
       {restocking && (
         <RestockModal ingredient={data.ingredients.find((i) => i.id === restocking)} onClose={() => setRestocking(null)} onConfirm={doRestock} />
       )}
       {editingId && (
         <EditIngredientModal ingredient={data.ingredients.find((i) => i.id === editingId)} onClose={() => setEditingId(null)} onSave={saveEdit} />
       )}
+    </div>
+  );
+}
+
+function DefaultPackagingSection({ data, updateData }) {
+  const packagingIngredients = data.ingredients.filter((i) => i.category === "packaging");
+  const lines = data.settings.defaultPackagingLines || [];
+
+  function addLine() {
+    updateData((next) => {
+      if (!next.settings.defaultPackagingLines) next.settings.defaultPackagingLines = [];
+      const firstPkg = next.ingredients.find((i) => i.category === "packaging");
+      next.settings.defaultPackagingLines.push({ ingredientId: firstPkg ? firstPkg.id : "", qty: 1 });
+    });
+  }
+  function updateLine(idx, patch) {
+    updateData((next) => {
+      next.settings.defaultPackagingLines[idx] = { ...next.settings.defaultPackagingLines[idx], ...patch };
+    });
+  }
+  function removeLine(idx) {
+    updateData((next) => { next.settings.defaultPackagingLines.splice(idx, 1); });
+  }
+
+  if (packagingIngredients.length === 0) return null;
+
+  return (
+    <div style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14, marginTop: 8 }}>
+      <SectionTitle icon="box" text="บรรจุภัณฑ์เริ่มต้นสำหรับเมนูใหม่" />
+      <p style={{ fontSize: 11.5, color: "var(--espresso-2)", margin: "-6px 0 12px" }}>
+        ตั้งไว้ครั้งเดียว ระบบจะใส่รายการเหล่านี้ให้อัตโนมัติทุกครั้งที่กด "เพิ่มเมนู" ใหม่ (แก้ไขเพิ่ม/ลบต่อเมนูได้ตามปกติภายหลัง)
+      </p>
+      {lines.map((line, idx) => (
+        <div key={idx} style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
+          <select className="cfield" value={line.ingredientId} onChange={(e) => updateLine(idx, { ingredientId: e.target.value })}>
+            {packagingIngredients.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+          </select>
+          <input className="cfield" style={{ width: 80 }} type="number" value={line.qty} onChange={(e) => updateLine(idx, { qty: Number(e.target.value) })} />
+          <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => removeLine(idx)} title="ลบรายการนี้"><Icon name="x" size={13} /></button>
+        </div>
+      ))}
+      <button className="cbtn" onClick={addLine}><Icon name="plus" size={13} /> เพิ่มบรรจุภัณฑ์เริ่มต้น</button>
     </div>
   );
 }
@@ -1759,7 +1882,7 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
   function addChoice(groupId) {
     updateData((next) => {
       const g = next.optionGroups.find((x) => x.id === groupId);
-      if (g) g.choices.push({ id: genId("choice"), label: "ตัวเลือกใหม่", note: "", priceDelta: 0 });
+      if (g) g.choices.push({ id: genId("choice"), label: "ตัวเลือกใหม่", note: "", priceDelta: 0, ingredientId: null });
     });
   }
   function patchChoice(groupId, choiceId, patch) {
@@ -1784,6 +1907,8 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
       </div>
       <p style={{ fontSize: 11.5, color: "var(--espresso-2)", margin: "0 0 14px" }}>
         ตั้งค่าที่นี่ครั้งเดียว แล้วไปติ๊กเลือกว่าเมนูไหนใช้กลุ่มตัวเลือกไหนได้ในแท็บ "เมนู & สูตร" ตอนแก้ไขเมนู
+        ถ้าตัวเลือกไหนแทนวัตถุดิบ (เช่น เลือกเมล็ด/นมคนละแบบ) ให้เลือก "วัตถุดิบที่ใช้แทน" ระบบจะตัดสต็อกตามที่ลูกค้าเลือกจริงแทนสูตรตั้งต้น
+        (วัตถุดิบต้นทางและตัวเลือกต้องตั้ง "กลุ่มทางเลือก" ให้ตรงกันในแท็บวัตถุดิบก่อน)
       </p>
 
       {data.optionGroups.length === 0 && <EmptyNote text={'ยังไม่มีกลุ่มตัวเลือก กด "เพิ่มกลุ่มตัวเลือก" เพื่อเริ่ม'} />}
@@ -1800,10 +1925,22 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
           </div>
 
           {g.choices.map((c) => (
-            <div key={c.id} style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center", paddingLeft: 12 }}>
-              <input className="cfield" value={c.label} onChange={(e) => patchChoice(g.id, c.id, { label: e.target.value })} placeholder="ชื่อตัวเลือก" style={{ flex: 1.2 }} />
-              <input className="cfield" value={c.note} onChange={(e) => patchChoice(g.id, c.id, { note: e.target.value })} placeholder="คำอธิบาย (ถ้ามี)" style={{ flex: 1.5 }} />
+            <div key={c.id} style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center", paddingLeft: 12, flexWrap: "wrap" }}>
+              <input className="cfield" value={c.label} onChange={(e) => patchChoice(g.id, c.id, { label: e.target.value })} placeholder="ชื่อตัวเลือก" style={{ flex: 1.2, minWidth: 110 }} />
+              <input className="cfield" value={c.note} onChange={(e) => patchChoice(g.id, c.id, { note: e.target.value })} placeholder="คำอธิบาย (ถ้ามี)" style={{ flex: 1.5, minWidth: 110 }} />
               <input className="cfield" type="number" value={c.priceDelta} onChange={(e) => patchChoice(g.id, c.id, { priceDelta: Number(e.target.value) })} style={{ width: 70 }} title="ราคาเพิ่ม (บาท)" />
+              <select
+                className="cfield"
+                style={{ flex: 1.3, minWidth: 150 }}
+                value={c.ingredientId || ""}
+                onChange={(e) => patchChoice(g.id, c.id, { ingredientId: e.target.value || null })}
+                title="วัตถุดิบที่ใช้แทนเมื่อลูกค้าเลือกตัวเลือกนี้"
+              >
+                <option value="">ไม่ตัดสต็อกแทนวัตถุดิบ</option>
+                {data.ingredients.filter((i) => i.altGroup).map((i) => (
+                  <option key={i.id} value={i.id}>{i.name} ({i.altGroup})</option>
+                ))}
+              </select>
               <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => removeChoice(g.id, c.id)} title="ลบตัวเลือกย่อยนี้"><Icon name="x" size={13} /></button>
             </div>
           ))}
