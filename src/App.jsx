@@ -1255,8 +1255,8 @@ function OrderItemLines({ items, note, compact, onEditItem }) {
               <span style={{ fontSize: compact ? 10.5 : 15, fontWeight: 700, fontFamily: "var(--f-body)", textAlign: "right", whiteSpace: "nowrap" }}>฿{money(i.unitPrice * i.qty)}</span>
             </span>
           </div>
-          {i.options?.length > 0 && !compact && (
-            <div style={{ fontSize: 13, color: "var(--espresso-3)", marginTop: 3, lineHeight: 1.5 }}>{i.options.map((o) => o.label).join(", ")}</div>
+          {i.options?.length > 0 && (
+            <div style={{ fontSize: compact ? 10.5 : 13, color: "var(--espresso-3)", marginTop: 3, lineHeight: 1.4 }}>{i.options.map((o) => o.label).join(", ")}</div>
           )}
         </div>
       ))}
