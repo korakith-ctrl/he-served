@@ -81,7 +81,7 @@ function genLineId() {
   return "line_" + Math.random().toString(36).slice(2, 9);
 }
 
-const HOT_DEAL_CATEGORY = "ดีลพิเศษ 🔥";
+const HOT_DEAL_CATEGORY = "HOT DEAL";
 
 function singlePromoPrice(promo, menu) {
   if (!menu) return 0;
@@ -339,18 +339,70 @@ function useSheetTransition(visible, duration = 300) {
   return { mounted, shown };
 }
 
-function MenuThumb({ imageUrl }) {
+function MenuThumb({ imageUrl, size = 60 }) {
   const [failed, setFailed] = useState(false);
   return (
     <div style={{
-      width: 60, height: 60, borderRadius: 12, flexShrink: 0, overflow: "hidden",
+      width: size, height: size, borderRadius: 12, flexShrink: 0, overflow: "hidden",
       background: COLORS.sageLight, display: "flex", alignItems: "center", justifyContent: "center",
     }}>
       {imageUrl && !failed ? (
         <img src={imageUrl} alt="" onError={() => setFailed(true)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
       ) : (
-        <i className="ti ti-cup" style={{ fontSize: 24, color: COLORS.sageDark }} aria-hidden="true"></i>
+        <i className="ti ti-cup" style={{ fontSize: size * 0.4, color: COLORS.sageDark }} aria-hidden="true"></i>
       )}
+    </div>
+  );
+}
+
+function PromoImageCell({ url }) {
+  const [failed, setFailed] = useState(false);
+  const ok = url && !failed;
+  return (
+    <div style={{
+      position: "relative", width: "100%", height: "100%", background: COLORS.sageLight,
+      display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
+    }}>
+      {ok ? (
+        <img src={url} alt="" onError={() => setFailed(true)} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+      ) : (
+        <i className="ti ti-cup" style={{ fontSize: 16, color: COLORS.sageDark }} aria-hidden="true"></i>
+      )}
+    </div>
+  );
+}
+
+function PromoImageGrid({ images, size = 72 }) {
+  const list = images || [];
+  if (list.length <= 1) return <MenuThumb imageUrl={list[0]} size={size} />;
+  const containerStyle = { width: size, height: size, borderRadius: 14, overflow: "hidden", flexShrink: 0, background: COLORS.sageLight };
+  if (list.length <= 3) {
+    return (
+      <div style={{ ...containerStyle, display: "flex", gap: 2 }}>
+        {list.map((url, i) => <div key={i} style={{ flex: 1 }}><PromoImageCell url={url} /></div>)}
+      </div>
+    );
+  }
+  const shown = list.slice(0, 4);
+  const extra = list.length - 4;
+  return (
+    <div style={{ ...containerStyle, display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: 2 }}>
+      {shown.map((url, i) => {
+        const isLast = i === 3 && extra > 0;
+        return (
+          <div key={i} style={{ position: "relative" }}>
+            <PromoImageCell url={url} />
+            {isLast && (
+              <div style={{
+                position: "absolute", inset: 0, background: "rgba(11,17,15,0.58)",
+                display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: size * 0.2,
+              }}>
+                +{extra}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -479,6 +531,7 @@ export default function CustomerOrder({ shopUid }) {
   const [pickingPromo, setPickingPromo] = useState(null);
   const [pickingChoicePromo, setPickingChoicePromo] = useState(null);
   const [choiceFlow, setChoiceFlow] = useState(null);
+  const [bundleFlow, setBundleFlow] = useState(null);
   const [editingCartLine, setEditingCartLine] = useState(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -684,7 +737,7 @@ export default function CustomerOrder({ shopUid }) {
     return line ? line.qty : 0;
   }
 
-  function setBundleQty(promo, qty) {
+  function setBundleQty(promo, qty, optionsByMenuId) {
     if (qty <= 0) {
       setCart((c) => c.filter((l) => l.promoId !== promo.id));
       return;
@@ -694,17 +747,46 @@ export default function CustomerOrder({ shopUid }) {
       const others = c.filter((l) => l.promoId !== promo.id);
       const newLines = prices.map((p) => {
         const existing = c.find((l) => l.promoId === promo.id && l.menuId === p.menuId);
+        const opts = existing ? existing.options : ((optionsByMenuId && optionsByMenuId[p.menuId]) || []);
+        const optionDelta = opts.reduce((s, o) => s + (o.priceDelta || 0), 0);
         return {
           lineId: existing ? existing.lineId : genLineId(),
-          menuId: p.menuId, name: p.name, unitPrice: p.unitPrice, qty, options: [], promoId: promo.id, promoKind: "bundle",
+          menuId: p.menuId, name: p.name, unitPrice: p.unitPrice + optionDelta, qty, options: opts, promoId: promo.id, promoKind: "bundle",
         };
       });
       return [...others, ...newLines];
     });
   }
 
-  function addBundle(promo) {
-    setBundleQty(promo, bundleQtyInCart(promo) + 1);
+  function addBundle(promo, optionsByMenuId) {
+    setBundleQty(promo, bundleQtyInCart(promo) + 1, optionsByMenuId);
+  }
+
+  function startBundleFlow(promo) {
+    if (bundleQtyInCart(promo) > 0) {
+      addBundle(promo);
+      return;
+    }
+    const items = promo.menuIds.map((id) => menusById[id]).filter(Boolean);
+    const needsOptions = items.filter((m) => groupsForMenu(m).length > 0);
+    if (needsOptions.length === 0) {
+      addBundle(promo);
+      return;
+    }
+    setBundleFlow({ promo, queue: needsOptions, index: 0, optionsByMenuId: {} });
+  }
+
+  function confirmBundleFlowStep(qty, options) {
+    if (!bundleFlow) return;
+    const menu = bundleFlow.queue[bundleFlow.index];
+    const nextOptions = { ...bundleFlow.optionsByMenuId, [menu.id]: options };
+    const nextIndex = bundleFlow.index + 1;
+    if (nextIndex >= bundleFlow.queue.length) {
+      addBundle(bundleFlow.promo, nextOptions);
+      setBundleFlow(null);
+    } else {
+      setBundleFlow({ ...bundleFlow, index: nextIndex, optionsByMenuId: nextOptions });
+    }
   }
 
   function addChoiceSet(promo, chosenMenus, optionsByMenuId) {
@@ -1194,16 +1276,16 @@ export default function CustomerOrder({ shopUid }) {
                     const displayName = promo.name || `เลือก ${promo.chooseCount} จาก ${pool.length} รายการ`;
                     const priceText = promo.discountType === "percent" ? `ลด ${promo.discountValue}%` : `ชุดละ ${money(promo.discountValue)}`;
                     return (
-                      <div key={promo.id} style={{ ...GLASS_PANEL, display: "flex", gap: 12, alignItems: "center", padding: "10px 12px", borderRadius: 14, marginBottom: 8 }}>
-                        <MenuThumb imageUrl={pool[0]?.imageUrl} />
+                      <div key={promo.id} style={{ ...GLASS_PANEL, display: "flex", gap: 14, alignItems: "center", padding: "16px", borderRadius: 18, marginBottom: 12 }}>
+                        <PromoImageGrid images={pool.map((m) => m.imageUrl)} />
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: 500, fontSize: 14, color: COLORS.espresso5 }}>{displayName}</div>
-                          <div style={{ fontSize: 11.5, color: COLORS.espresso2, margin: "2px 0" }}>{pool.map((m) => m.name).join(", ")}</div>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: COLORS.danger, marginTop: 3 }}>{priceText}</div>
+                          <div style={{ fontWeight: 600, fontSize: 15.5, color: COLORS.espresso5 }}>{displayName}</div>
+                          <div style={{ fontSize: 12, color: COLORS.espresso2, margin: "3px 0" }}>{pool.map((m) => m.name).join(", ")}</div>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: COLORS.danger, marginTop: 4 }}>{priceText}</div>
                         </div>
                         <button onClick={() => setPickingChoicePromo(promo)} style={{
                           flexShrink: 0, border: "none", background: COLORS.espresso5, color: "#fff",
-                          fontSize: 12.5, fontWeight: 600, borderRadius: 9, padding: "9px 12px",
+                          fontSize: 13, fontWeight: 600, borderRadius: 10, padding: "10px 14px",
                         }}>เลือกเมนู</button>
                       </div>
                     );
@@ -1217,32 +1299,32 @@ export default function CustomerOrder({ shopUid }) {
                     const setPrice = qtyPromoTotal(promo, menu, promo.minQty);
                     return (
                       <div key={promo.id} onClick={() => !singleLine && openMenu(menu, promo)} style={{
-                        ...GLASS_PANEL, display: "flex", gap: 12, alignItems: "center", padding: "10px 12px", borderRadius: 14, marginBottom: 8,
+                        ...GLASS_PANEL, display: "flex", gap: 14, alignItems: "center", padding: "16px", borderRadius: 18, marginBottom: 12,
                         cursor: singleLine ? "default" : "pointer",
                       }}>
                         <div ref={(el) => { menuThumbRefs.current["promo_" + menu.id] = el; }}>
-                          <MenuThumb imageUrl={menu.imageUrl} />
+                          <MenuThumb imageUrl={menu.imageUrl} size={72} />
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: 500, fontSize: 14, color: COLORS.espresso5 }}>{promo.name || menu.name}</div>
+                          <div style={{ fontWeight: 600, fontSize: 15.5, color: COLORS.espresso5 }}>{promo.name || menu.name}</div>
                           <div style={{ fontSize: 13, color: COLORS.gold, fontWeight: 600, marginTop: 3 }}>{money(menu.priceStore)}/ชิ้น</div>
-                          <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 3 }}>
-                            <span style={{ fontSize: 12, color: COLORS.espresso2, textDecoration: "line-through" }}>{money(menu.priceStore * promo.minQty)}</span>
-                            <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.danger }}>ซื้อครบ {promo.minQty} ชิ้น {money(setPrice)}</span>
+                          <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 4 }}>
+                            <span style={{ fontSize: 12.5, color: COLORS.espresso2, textDecoration: "line-through" }}>{money(menu.priceStore * promo.minQty)}</span>
+                            <span style={{ fontSize: 15, fontWeight: 700, color: COLORS.danger }}>ซื้อครบ {promo.minQty} ชิ้น {money(setPrice)}</span>
                           </div>
                         </div>
                         {singleLine ? (
                           <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
                             <button onClick={() => setLineQty(singleLine.lineId, singleLine.qty - 1)} style={{
-                              width: 28, height: 28, borderRadius: 9, border: "1px solid rgba(255,255,255,0.7)", background: "rgba(255,255,255,0.6)",
-                              color: COLORS.espresso5, fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                              width: 30, height: 30, borderRadius: 9, border: "1px solid rgba(255,255,255,0.7)", background: "rgba(255,255,255,0.6)",
+                              color: COLORS.espresso5, fontSize: 17, display: "flex", alignItems: "center", justifyContent: "center",
                             }}>−</button>
                             <span style={{ minWidth: 16, textAlign: "center", fontWeight: 600, color: COLORS.espresso5 }}><AnimatedQty value={qty} /></span>
                             <button
                               onClick={() => setLineQty(singleLine.lineId, singleLine.qty + 1)}
                               style={{
-                                width: 28, height: 28, borderRadius: 8, border: "none", background: COLORS.espresso5,
-                                color: "#fff", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                                width: 30, height: 30, borderRadius: 9, border: "none", background: COLORS.espresso5,
+                                color: "#fff", fontSize: 17, display: "flex", alignItems: "center", justifyContent: "center",
                               }}
                             >+</button>
                           </div>
@@ -1250,8 +1332,8 @@ export default function CustomerOrder({ shopUid }) {
                           <button
                             onClick={(e) => { e.stopPropagation(); openMenu(menu, promo); }}
                             style={{
-                              width: 32, height: 32, borderRadius: 9, flexShrink: 0, border: "none",
-                              background: COLORS.espresso5, color: "#fff", fontSize: 18, lineHeight: 1,
+                              width: 34, height: 34, borderRadius: 10, flexShrink: 0, border: "none",
+                              background: COLORS.espresso5, color: "#fff", fontSize: 19, lineHeight: 1,
                               display: "flex", alignItems: "center", justifyContent: "center",
                             }}
                           >+</button>
@@ -1267,32 +1349,32 @@ export default function CustomerOrder({ shopUid }) {
                     const displayName = promo.name || prices.map((p) => p.name).join(" + ");
                     const thumbImg = menusById[promo.menuIds[0]]?.imageUrl;
                     return (
-                      <div key={promo.id} style={{ ...GLASS_PANEL, display: "flex", gap: 12, alignItems: "center", padding: "10px 12px", borderRadius: 14, marginBottom: 8 }}>
-                        <MenuThumb imageUrl={thumbImg} />
+                      <div key={promo.id} style={{ ...GLASS_PANEL, display: "flex", gap: 14, alignItems: "center", padding: "16px", borderRadius: 18, marginBottom: 12 }}>
+                        <PromoImageGrid images={promo.menuIds.map((id) => menusById[id]?.imageUrl)} />
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: 500, fontSize: 14, color: COLORS.espresso5 }}>{displayName}</div>
-                          <div style={{ fontSize: 11.5, color: COLORS.espresso2, margin: "2px 0" }}>{prices.map((p) => p.name).join(" + ")}</div>
-                          <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 3 }}>
-                            <span style={{ fontSize: 12, color: COLORS.espresso2, textDecoration: "line-through" }}>{money(originalTotal)}</span>
-                            <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.danger }}>{money(promoTotal)}</span>
+                          <div style={{ fontWeight: 600, fontSize: 15.5, color: COLORS.espresso5 }}>{displayName}</div>
+                          <div style={{ fontSize: 12, color: COLORS.espresso2, margin: "3px 0" }}>{prices.map((p) => p.name).join(" + ")}</div>
+                          <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 4 }}>
+                            <span style={{ fontSize: 12.5, color: COLORS.espresso2, textDecoration: "line-through" }}>{money(originalTotal)}</span>
+                            <span style={{ fontSize: 15, fontWeight: 700, color: COLORS.danger }}>{money(promoTotal)}</span>
                           </div>
                         </div>
                         {qty > 0 ? (
                           <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                             <button onClick={() => setBundleQty(promo, qty - 1)} style={{
-                              width: 28, height: 28, borderRadius: 9, border: "1px solid rgba(255,255,255,0.7)", background: "rgba(255,255,255,0.6)",
-                              color: COLORS.espresso5, fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                              width: 30, height: 30, borderRadius: 9, border: "1px solid rgba(255,255,255,0.7)", background: "rgba(255,255,255,0.6)",
+                              color: COLORS.espresso5, fontSize: 17, display: "flex", alignItems: "center", justifyContent: "center",
                             }}>−</button>
                             <span style={{ minWidth: 16, textAlign: "center", fontWeight: 600, color: COLORS.espresso5 }}><AnimatedQty value={qty} /></span>
                             <button onClick={() => setBundleQty(promo, qty + 1)} style={{
-                              width: 28, height: 28, borderRadius: 8, border: "none", background: COLORS.espresso5,
-                              color: "#fff", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                              width: 30, height: 30, borderRadius: 9, border: "none", background: COLORS.espresso5,
+                              color: "#fff", fontSize: 17, display: "flex", alignItems: "center", justifyContent: "center",
                             }}>+</button>
                           </div>
                         ) : (
-                          <button onClick={() => addBundle(promo)} style={{
-                            width: 32, height: 32, borderRadius: 9, flexShrink: 0, border: "none",
-                            background: COLORS.espresso5, color: "#fff", fontSize: 18, lineHeight: 1,
+                          <button onClick={() => startBundleFlow(promo)} style={{
+                            width: 34, height: 34, borderRadius: 10, flexShrink: 0, border: "none",
+                            background: COLORS.espresso5, color: "#fff", fontSize: 19, lineHeight: 1,
                             display: "flex", alignItems: "center", justifyContent: "center",
                           }}>+</button>
                         )}
@@ -1308,31 +1390,31 @@ export default function CustomerOrder({ shopUid }) {
                   const canAddDirectly = groupsForMenu(menu).length === 0;
                   return (
                     <div key={promo.id} onClick={() => !singleLine && openMenu(menu, promo)} style={{
-                      ...GLASS_PANEL, display: "flex", gap: 12, alignItems: "center", padding: "10px 12px", borderRadius: 14, marginBottom: 8,
+                      ...GLASS_PANEL, display: "flex", gap: 14, alignItems: "center", padding: "16px", borderRadius: 18, marginBottom: 12,
                       cursor: singleLine ? "default" : "pointer",
                     }}>
                       <div ref={(el) => { menuThumbRefs.current["promo_" + menu.id] = el; }}>
-                        <MenuThumb imageUrl={menu.imageUrl} />
+                        <MenuThumb imageUrl={menu.imageUrl} size={72} />
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 500, fontSize: 14, color: COLORS.espresso5 }}>{promo.name || menu.name}</div>
-                        <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 3 }}>
-                          <span style={{ fontSize: 12, color: COLORS.espresso2, textDecoration: "line-through" }}>{money(menu.priceStore)}</span>
-                          <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.danger }}>{money(promoPrice)}</span>
+                        <div style={{ fontWeight: 600, fontSize: 15.5, color: COLORS.espresso5 }}>{promo.name || menu.name}</div>
+                        <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 4 }}>
+                          <span style={{ fontSize: 12.5, color: COLORS.espresso2, textDecoration: "line-through" }}>{money(menu.priceStore)}</span>
+                          <span style={{ fontSize: 15, fontWeight: 700, color: COLORS.danger }}>{money(promoPrice)}</span>
                         </div>
                       </div>
                       {singleLine ? (
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
                           <button onClick={() => setLineQty(singleLine.lineId, singleLine.qty - 1)} style={{
-                            width: 28, height: 28, borderRadius: 9, border: "1px solid rgba(255,255,255,0.7)", background: "rgba(255,255,255,0.6)",
-                            color: COLORS.espresso5, fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                            width: 30, height: 30, borderRadius: 9, border: "1px solid rgba(255,255,255,0.7)", background: "rgba(255,255,255,0.6)",
+                            color: COLORS.espresso5, fontSize: 17, display: "flex", alignItems: "center", justifyContent: "center",
                           }}>−</button>
                           <span style={{ minWidth: 16, textAlign: "center", fontWeight: 600, color: COLORS.espresso5 }}><AnimatedQty value={qty} /></span>
                           <button
                             onClick={() => { if (canAddDirectly) { spawnFly("promo_" + menu.id, menu.imageUrl); setLineQty(singleLine.lineId, singleLine.qty + 1); } else openMenu(menu, promo); }}
                             style={{
-                              width: 28, height: 28, borderRadius: 8, border: "none", background: COLORS.espresso5,
-                              color: "#fff", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                              width: 30, height: 30, borderRadius: 9, border: "none", background: COLORS.espresso5,
+                              color: "#fff", fontSize: 17, display: "flex", alignItems: "center", justifyContent: "center",
                             }}
                           >+</button>
                         </div>
@@ -1340,8 +1422,8 @@ export default function CustomerOrder({ shopUid }) {
                         <button
                           onClick={(e) => { e.stopPropagation(); openMenu(menu, promo); }}
                           style={{
-                            position: "relative", width: 32, height: 32, borderRadius: 9, flexShrink: 0, border: "none",
-                            background: COLORS.espresso5, color: "#fff", fontSize: 18, lineHeight: 1,
+                            position: "relative", width: 34, height: 34, borderRadius: 10, flexShrink: 0, border: "none",
+                            background: COLORS.espresso5, color: "#fff", fontSize: 19, lineHeight: 1,
                             display: "flex", alignItems: "center", justifyContent: "center",
                           }}
                         >
@@ -1508,6 +1590,15 @@ export default function CustomerOrder({ shopUid }) {
         hideQty
         onCancel={() => setChoiceFlow(null)}
         onConfirm={(qty, options) => confirmChoiceFlowStep(qty, options)}
+      />
+
+      <OptionPickerModal
+        visible={!!bundleFlow}
+        menu={bundleFlow ? bundleFlow.queue[bundleFlow.index] : null}
+        groups={bundleFlow ? groupsForMenu(bundleFlow.queue[bundleFlow.index]) : []}
+        hideQty
+        onCancel={() => setBundleFlow(null)}
+        onConfirm={(qty, options) => confirmBundleFlowStep(qty, options)}
       />
     </div>
   );
