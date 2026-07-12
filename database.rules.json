@@ -29,7 +29,7 @@
         ".read": "auth != null && auth.uid === $uid",
         "$orderId": {
           ".read": "auth != null && (auth.uid === $uid || data.child('customerUid').val() === auth.uid)",
-          ".write": "auth != null && (auth.uid === $uid || (!data.exists() && newData.child('customerUid').val() === auth.uid && root.child('shops/' + $uid + '/settings/acceptingOrders').val() !== false))"
+          ".write": "auth != null && (auth.uid === $uid || (!data.exists() && root.child('shops/' + $uid + '/settings/acceptingOrders').val() !== false && newData.child('customerUid').val() === auth.uid && newData.child('customerName').isString() && newData.child('customerName').val().length > 0 && newData.child('customerPhone').isString() && newData.child('paymentMethod').isString() && newData.child('createdAt').isString() && newData.child('items').hasChildren() && newData.child('total').isNumber() && newData.child('total').val() >= 0 && newData.child('status').val() === 'pending' && !newData.hasChild('paymentVerified') && !newData.hasChild('paymentVerifiedBy') && !newData.hasChild('paymentVerifiedAt') && !newData.hasChild('slipRef') && !newData.hasChild('saleRecorded') && !newData.hasChild('source')))"
         }
       }
     }
