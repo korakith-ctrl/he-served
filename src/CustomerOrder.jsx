@@ -223,6 +223,15 @@ const GLOBAL_CSS = `
   .corder button { font-family: inherit; cursor: pointer; }
   .corder ::-webkit-scrollbar { display: none; }
   .corder { scrollbar-width: none; }
+  .offer-carousel { -webkit-overflow-scrolling: touch; }
+  .offer-card { transition: transform .25s ease, box-shadow .25s ease; }
+  .offer-card:hover { transform: translateY(-2px) scale(1.02); box-shadow: 0 14px 32px rgba(43,29,20,0.18); }
+  .offer-card:active { transform: scale(0.98); }
+  .offer-arrow-btn { transition: transform .2s ease, background .2s ease; }
+  .offer-arrow-btn:hover { transform: scale(1.08); background: #d8f0de; }
+  .offer-arrow-btn:active { transform: scale(0.94); }
+  @keyframes offerRipple { 0% { transform: scale(0); opacity: .5; } 100% { transform: scale(2.4); opacity: 0; } }
+  .offer-ripple { position: absolute; inset: 0; border-radius: inherit; background: rgba(6,51,96,0.18); animation: offerRipple .5s ease-out; pointer-events: none; }
   @keyframes pulseCup { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.08); opacity: .75; } }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
   @keyframes logoReveal {
@@ -551,6 +560,8 @@ export default function CustomerOrder({ shopUid }) {
 
   const mainRef = useRef(null);
   const sectionRefs = useRef({});
+  const offerCarouselRef = useRef(null);
+  const [offerRippleId, setOfferRippleId] = useState(null);
 
   useEffect(() => {
     const t = setTimeout(() => setSplashDone(true), 5000);
@@ -704,6 +715,19 @@ export default function CustomerOrder({ shopUid }) {
     const id = Math.random().toString(36).slice(2);
     setFlyItems((list) => [...list, { id, imageUrl, startX, startY, dx: endX - startX, dy: endY - startY }]);
     setTimeout(() => setFlyItems((list) => list.filter((f) => f.id !== id)), 650);
+  }
+
+  function scrollOfferCarousel(dir) {
+    const el = offerCarouselRef.current;
+    if (!el) return;
+    const card = el.firstElementChild;
+    const step = card ? card.getBoundingClientRect().width + 14 : el.clientWidth;
+    el.scrollBy({ left: dir * step, behavior: "smooth" });
+  }
+
+  function triggerOfferRipple(id) {
+    setOfferRippleId(id);
+    setTimeout(() => setOfferRippleId((cur) => (cur === id ? null : cur)), 500);
   }
 
   function openMenu(menu, promo) {
@@ -1269,234 +1293,201 @@ export default function CustomerOrder({ shopUid }) {
           <main ref={mainRef} style={{ flex: 1, overflowY: "auto", padding: "0 0 100px" }}>
             {categories.map((cat) => (
               <section key={cat} data-category={cat} ref={(el) => { sectionRefs.current[cat] = el; }} style={{ padding: "16px 6px 0" }}>
-                <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 600, color: COLORS.espresso5, margin: "0 0 10px" }}>{cat}</h2>
-                {cat === HOT_DEAL_CATEGORY ? activePromotions.map((promo) => {
-                  if (promo.type === "choice") {
-                    const pool = promo.menuIds.map((id) => menusById[id]).filter((m) => m && m.available !== false);
-                    const displayName = promo.name || `เลือก ${promo.chooseCount} จาก ${pool.length} รายการ`;
-                    const priceText = promo.discountType === "percent" ? `ลด ${promo.discountValue}%` : `ชุดละ ${money(promo.discountValue)}`;
-                    return (
-                      <div key={promo.id} style={{ ...GLASS_PANEL, display: "flex", gap: 14, alignItems: "center", padding: "16px", borderRadius: 18, marginBottom: 12 }}>
-                        <PromoImageGrid images={pool.map((m) => m.imageUrl)} />
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: 600, fontSize: 15.5, color: COLORS.espresso5 }}>{displayName}</div>
-                          <div style={{ fontSize: 12, color: COLORS.espresso2, margin: "3px 0" }}>{pool.map((m) => m.name).join(", ")}</div>
-                          <div style={{ fontSize: 15, fontWeight: 700, color: COLORS.danger, marginTop: 4 }}>{priceText}</div>
-                        </div>
-                        <button onClick={() => setPickingChoicePromo(promo)} style={{
-                          flexShrink: 0, border: "none", background: COLORS.espresso5, color: "#fff",
-                          fontSize: 13, fontWeight: 600, borderRadius: 10, padding: "10px 14px",
-                        }}>เลือกเมนู</button>
-                      </div>
-                    );
-                  }
-                  if (promo.type === "qty") {
-                    const menu = menusById[promo.menuIds[0]];
-                    if (!menu) return null;
-                    const lines = linesForMenu(menu.id, promo.id);
-                    const qty = lines.reduce((s, l) => s + l.qty, 0);
-                    const singleLine = lines.length === 1 ? lines[0] : null;
-                    const setPrice = qtyPromoTotal(promo, menu, promo.minQty);
-                    return (
-                      <div key={promo.id} onClick={() => !singleLine && openMenu(menu, promo)} style={{
-                        ...GLASS_PANEL, display: "flex", gap: 14, alignItems: "center", padding: "16px", borderRadius: 18, marginBottom: 12,
-                        cursor: singleLine ? "default" : "pointer",
-                      }}>
-                        <div ref={(el) => { menuThumbRefs.current["promo_" + menu.id] = el; }}>
-                          <MenuThumb imageUrl={menu.imageUrl} size={72} />
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: 600, fontSize: 15.5, color: COLORS.espresso5 }}>{promo.name || menu.name}</div>
-                          <div style={{ fontSize: 13, color: COLORS.gold, fontWeight: 600, marginTop: 3 }}>{money(menu.priceStore)}/ชิ้น</div>
-                          <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 4 }}>
-                            <span style={{ fontSize: 12.5, color: COLORS.espresso2, textDecoration: "line-through" }}>{money(menu.priceStore * promo.minQty)}</span>
-                            <span style={{ fontSize: 15, fontWeight: 700, color: COLORS.danger }}>ซื้อครบ {promo.minQty} ชิ้น {money(setPrice)}</span>
-                          </div>
-                        </div>
-                        {singleLine ? (
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
-                            <button onClick={() => setLineQty(singleLine.lineId, singleLine.qty - 1)} style={{
-                              width: 30, height: 30, borderRadius: 9, border: "1px solid rgba(255,255,255,0.7)", background: "rgba(255,255,255,0.6)",
-                              color: COLORS.espresso5, fontSize: 17, display: "flex", alignItems: "center", justifyContent: "center",
-                            }}>−</button>
-                            <span style={{ minWidth: 16, textAlign: "center", fontWeight: 600, color: COLORS.espresso5 }}><AnimatedQty value={qty} /></span>
-                            <button
-                              onClick={() => setLineQty(singleLine.lineId, singleLine.qty + 1)}
+                {cat === HOT_DEAL_CATEGORY ? (
+                  <>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "0 16px 14px" }}>
+                      <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 22, color: COLORS.espresso5, margin: 0 }}>Today's Offer</h2>
+                      <button
+                        className="offer-arrow-btn"
+                        onClick={() => { triggerOfferRipple("__nav__"); scrollOfferCarousel(1); }}
+                        style={{
+                          width: 40, height: 40, borderRadius: "50%", background: "#E4F5E8", border: "none",
+                          display: "flex", alignItems: "center", justifyContent: "center", position: "relative", overflow: "hidden", flexShrink: 0,
+                        }}
+                      >
+                        <i className="ti ti-arrow-right" style={{ fontSize: 18, color: COLORS.success }} aria-hidden="true"></i>
+                        {offerRippleId === "__nav__" && <span className="offer-ripple" />}
+                      </button>
+                    </div>
+
+                    <div className="offer-carousel" ref={offerCarouselRef} style={{
+                      display: "flex", gap: 14, overflowX: "auto", scrollSnapType: "x mandatory",
+                      padding: "2px 16px 10px", margin: "0 -6px",
+                    }}>
+                      {activePromotions.map((promo) => {
+                        let images = [];
+                        let label = "";
+                        let title = "";
+                        let subtitle = null;
+                        let priceNode = null;
+                        let qty = 0;
+                        let onCardClick = () => {};
+                        let refKey = "promo_" + promo.id;
+
+                        if (promo.type === "choice") {
+                          const pool = promo.menuIds.map((id) => menusById[id]).filter((m) => m && m.available !== false);
+                          images = pool.map((m) => m.imageUrl);
+                          label = promo.discountType === "percent" ? `เลือกเอง ลด ${promo.discountValue}%` : `เลือก ${promo.chooseCount} จาก ${pool.length}`;
+                          title = promo.name || `เลือก ${promo.chooseCount} จาก ${pool.length} รายการ`;
+                          subtitle = pool.map((m) => m.name).join(", ");
+                          priceNode = (
+                            <span style={{ fontSize: 15, fontWeight: 700, color: COLORS.danger }}>
+                              {promo.discountType === "percent" ? `ลด ${promo.discountValue}%` : `ชุดละ ${money(promo.discountValue)}`}
+                            </span>
+                          );
+                          onCardClick = () => setPickingChoicePromo(promo);
+                        } else if (promo.type === "qty") {
+                          const menu = menusById[promo.menuIds[0]];
+                          if (!menu) return null;
+                          const lines = linesForMenu(menu.id, promo.id);
+                          qty = lines.reduce((s, l) => s + l.qty, 0);
+                          const setPrice = qtyPromoTotal(promo, menu, promo.minQty);
+                          images = [menu.imageUrl];
+                          label = `ซื้อครบ ${promo.minQty} ชิ้น ลด ${promo.discountType === "percent" ? promo.discountValue + "%" : ""}`;
+                          title = promo.name || menu.name;
+                          subtitle = `${money(menu.priceStore)}/ชิ้น`;
+                          priceNode = (
+                            <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                              <span style={{ fontSize: 12.5, color: COLORS.espresso2, textDecoration: "line-through" }}>{money(menu.priceStore * promo.minQty)}</span>
+                              <span style={{ fontSize: 15, fontWeight: 700, color: COLORS.danger }}>{money(setPrice)}</span>
+                            </span>
+                          );
+                          onCardClick = () => openMenu(menu, promo);
+                          refKey = "promo_" + menu.id;
+                        } else if (promo.type === "bundle") {
+                          const prices = splitBundlePrices(promo, menusById);
+                          const originalTotal = promo.menuIds.reduce((s, id) => s + (menusById[id]?.priceStore || 0), 0);
+                          const promoTotal = prices.reduce((s, p) => s + p.unitPrice, 0);
+                          qty = bundleQtyInCart(promo);
+                          images = promo.menuIds.map((id) => menusById[id]?.imageUrl);
+                          label = promo.discountType === "percent" ? `จับคู่ ลด ${promo.discountValue}%` : "จับคู่คอมโบ";
+                          title = promo.name || prices.map((p) => p.name).join(" + ");
+                          subtitle = prices.map((p) => p.name).join(", ");
+                          priceNode = (
+                            <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                              <span style={{ fontSize: 12.5, color: COLORS.espresso2, textDecoration: "line-through" }}>{money(originalTotal)}</span>
+                              <span style={{ fontSize: 15, fontWeight: 700, color: COLORS.danger }}>{money(promoTotal)}</span>
+                            </span>
+                          );
+                          onCardClick = () => startBundleFlow(promo);
+                        } else {
+                          const menu = menusById[promo.menuIds[0]];
+                          if (!menu) return null;
+                          const promoPrice = singlePromoPrice(promo, menu);
+                          const lines = linesForMenu(menu.id, promo.id);
+                          qty = lines.reduce((s, l) => s + l.qty, 0);
+                          images = [menu.imageUrl];
+                          label = promo.discountType === "percent" ? `HOT DEAL ลด ${promo.discountValue}%` : "HOT DEAL";
+                          title = promo.name || menu.name;
+                          subtitle = null;
+                          priceNode = (
+                            <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                              <span style={{ fontSize: 12.5, color: COLORS.espresso2, textDecoration: "line-through" }}>{money(menu.priceStore)}</span>
+                              <span style={{ fontSize: 15, fontWeight: 700, color: COLORS.danger }}>{money(promoPrice)}</span>
+                            </span>
+                          );
+                          onCardClick = () => openMenu(menu, promo);
+                          refKey = "promo_" + menu.id;
+                        }
+
+                        return (
+                          <div key={promo.id} style={{ flex: "0 0 100%", scrollSnapAlign: "start" }}>
+                            <div
+                              className="offer-card"
+                              onClick={() => { triggerOfferRipple(promo.id); onCardClick(); }}
                               style={{
-                                width: 30, height: 30, borderRadius: 9, border: "none", background: COLORS.espresso5,
-                                color: "#fff", fontSize: 17, display: "flex", alignItems: "center", justifyContent: "center",
+                                display: "flex", alignItems: "center", gap: 16, background: "#fff", borderRadius: 20,
+                                padding: 20, boxShadow: "0 6px 20px rgba(43,29,20,0.10)", position: "relative", cursor: "pointer",
                               }}
-                            >+</button>
+                            >
+                              <div ref={(el) => { menuThumbRefs.current[refKey] = el; }} style={{ flex: "0 0 30%", maxWidth: 116 }}>
+                                <PromoImageGrid images={images} size={104} />
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 11, fontWeight: 600, color: "#F97316", textTransform: "uppercase", letterSpacing: ".04em" }}>{label}</div>
+                                <div style={{ fontSize: 19, fontWeight: 700, color: COLORS.espresso5, marginTop: 4, lineHeight: 1.25 }}>{title}</div>
+                                {subtitle && <div style={{ fontSize: 12, color: COLORS.espresso2, marginTop: 3 }}>{subtitle}</div>}
+                                <div style={{ marginTop: 8 }}>{priceNode}</div>
+                              </div>
+                              {qty > 0 && (
+                                <div style={{
+                                  position: "absolute", top: 12, right: 12, background: COLORS.sage, color: "#fff",
+                                  fontSize: 11, fontWeight: 700, borderRadius: 999, minWidth: 22, height: 22,
+                                  display: "flex", alignItems: "center", justifyContent: "center", padding: "0 6px",
+                                }}>
+                                  <AnimatedQty value={qty} />
+                                </div>
+                              )}
+                              {offerRippleId === promo.id && <span className="offer-ripple" />}
+                            </div>
                           </div>
-                        ) : (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); openMenu(menu, promo); }}
-                            style={{
-                              width: 34, height: 34, borderRadius: 10, flexShrink: 0, border: "none",
-                              background: COLORS.espresso5, color: "#fff", fontSize: 19, lineHeight: 1,
-                              display: "flex", alignItems: "center", justifyContent: "center",
-                            }}
-                          >+</button>
-                        )}
-                      </div>
-                    );
-                  }
-                  if (promo.type === "bundle") {
-                    const prices = splitBundlePrices(promo, menusById);
-                    const originalTotal = promo.menuIds.reduce((s, id) => s + (menusById[id]?.priceStore || 0), 0);
-                    const promoTotal = prices.reduce((s, p) => s + p.unitPrice, 0);
-                    const qty = bundleQtyInCart(promo);
-                    const displayName = promo.name || prices.map((p) => p.name).join(" + ");
-                    const thumbImg = menusById[promo.menuIds[0]]?.imageUrl;
-                    return (
-                      <div key={promo.id} style={{ ...GLASS_PANEL, display: "flex", gap: 14, alignItems: "center", padding: "16px", borderRadius: 18, marginBottom: 12 }}>
-                        <PromoImageGrid images={promo.menuIds.map((id) => menusById[id]?.imageUrl)} />
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: 600, fontSize: 15.5, color: COLORS.espresso5 }}>{displayName}</div>
-                          <div style={{ fontSize: 12, color: COLORS.espresso2, margin: "3px 0" }}>{prices.map((p) => p.name).join(" + ")}</div>
-                          <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 4 }}>
-                            <span style={{ fontSize: 12.5, color: COLORS.espresso2, textDecoration: "line-through" }}>{money(originalTotal)}</span>
-                            <span style={{ fontSize: 15, fontWeight: 700, color: COLORS.danger }}>{money(promoTotal)}</span>
-                          </div>
-                        </div>
-                        {qty > 0 ? (
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                            <button onClick={() => setBundleQty(promo, qty - 1)} style={{
-                              width: 30, height: 30, borderRadius: 9, border: "1px solid rgba(255,255,255,0.7)", background: "rgba(255,255,255,0.6)",
-                              color: COLORS.espresso5, fontSize: 17, display: "flex", alignItems: "center", justifyContent: "center",
-                            }}>−</button>
-                            <span style={{ minWidth: 16, textAlign: "center", fontWeight: 600, color: COLORS.espresso5 }}><AnimatedQty value={qty} /></span>
-                            <button onClick={() => setBundleQty(promo, qty + 1)} style={{
-                              width: 30, height: 30, borderRadius: 9, border: "none", background: COLORS.espresso5,
-                              color: "#fff", fontSize: 17, display: "flex", alignItems: "center", justifyContent: "center",
-                            }}>+</button>
-                          </div>
-                        ) : (
-                          <button onClick={() => startBundleFlow(promo)} style={{
-                            width: 34, height: 34, borderRadius: 10, flexShrink: 0, border: "none",
-                            background: COLORS.espresso5, color: "#fff", fontSize: 19, lineHeight: 1,
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                          }}>+</button>
-                        )}
-                      </div>
-                    );
-                  }
-                  const menu = menusById[promo.menuIds[0]];
-                  if (!menu) return null;
-                  const promoPrice = singlePromoPrice(promo, menu);
-                  const lines = linesForMenu(menu.id, promo.id);
-                  const qty = lines.reduce((s, l) => s + l.qty, 0);
-                  const singleLine = lines.length === 1 ? lines[0] : null;
-                  const canAddDirectly = groupsForMenu(menu).length === 0;
-                  return (
-                    <div key={promo.id} onClick={() => !singleLine && openMenu(menu, promo)} style={{
-                      ...GLASS_PANEL, display: "flex", gap: 14, alignItems: "center", padding: "16px", borderRadius: 18, marginBottom: 12,
-                      cursor: singleLine ? "default" : "pointer",
-                    }}>
-                      <div ref={(el) => { menuThumbRefs.current["promo_" + menu.id] = el; }}>
-                        <MenuThumb imageUrl={menu.imageUrl} size={72} />
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: 15.5, color: COLORS.espresso5 }}>{promo.name || menu.name}</div>
-                        <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 4 }}>
-                          <span style={{ fontSize: 12.5, color: COLORS.espresso2, textDecoration: "line-through" }}>{money(menu.priceStore)}</span>
-                          <span style={{ fontSize: 15, fontWeight: 700, color: COLORS.danger }}>{money(promoPrice)}</span>
-                        </div>
-                      </div>
-                      {singleLine ? (
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
-                          <button onClick={() => setLineQty(singleLine.lineId, singleLine.qty - 1)} style={{
-                            width: 30, height: 30, borderRadius: 9, border: "1px solid rgba(255,255,255,0.7)", background: "rgba(255,255,255,0.6)",
-                            color: COLORS.espresso5, fontSize: 17, display: "flex", alignItems: "center", justifyContent: "center",
-                          }}>−</button>
-                          <span style={{ minWidth: 16, textAlign: "center", fontWeight: 600, color: COLORS.espresso5 }}><AnimatedQty value={qty} /></span>
-                          <button
-                            onClick={() => { if (canAddDirectly) { spawnFly("promo_" + menu.id, menu.imageUrl); setLineQty(singleLine.lineId, singleLine.qty + 1); } else openMenu(menu, promo); }}
-                            style={{
-                              width: 30, height: 30, borderRadius: 9, border: "none", background: COLORS.espresso5,
-                              color: "#fff", fontSize: 17, display: "flex", alignItems: "center", justifyContent: "center",
-                            }}
-                          >+</button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); openMenu(menu, promo); }}
-                          style={{
-                            position: "relative", width: 34, height: 34, borderRadius: 10, flexShrink: 0, border: "none",
-                            background: COLORS.espresso5, color: "#fff", fontSize: 19, lineHeight: 1,
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                          }}
-                        >
-                          +
-                          {qty > 0 && (
-                            <span style={{
-                              position: "absolute", top: -6, right: -6, background: COLORS.danger, color: "#fff",
-                              fontSize: 10, fontWeight: 700, borderRadius: 999, minWidth: 16, height: 16,
-                              display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px",
-                            }}><AnimatedQty value={qty} /></span>
-                          )}
-                        </button>
-                      )}
+                        );
+                      })}
                     </div>
-                  );
-                }) : menus.filter((m) => m.category === cat).map((m) => {
-                  const soldOut = m.available === false;
-                  const lines = linesForMenu(m.id);
-                  const qty = lines.reduce((s, l) => s + l.qty, 0);
-                  const singleLine = lines.length === 1 ? lines[0] : null;
-                  const canAddDirectly = groupsForMenu(m).length === 0;
-                  return (
-                    <div key={m.id} onClick={() => !soldOut && !singleLine && openMenu(m)} style={{
-                      ...GLASS_PANEL, display: "flex", gap: 12, alignItems: "center", padding: "10px 12px", borderRadius: 14, marginBottom: 8,
-                      opacity: soldOut ? 0.5 : 1, cursor: soldOut || singleLine ? "default" : "pointer",
-                    }}>
-                      <div ref={(el) => { menuThumbRefs.current[m.id] = el; }}>
-                        <MenuThumb imageUrl={m.imageUrl} />
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 500, fontSize: 14, color: COLORS.espresso5 }}>{m.name}</div>
-                        <div style={{ fontSize: 13, color: soldOut ? COLORS.danger : COLORS.gold, fontWeight: 600, marginTop: 3 }}>
-                          {soldOut ? "หมดวันนี้" : money(m.priceStore)}
-                        </div>
-                      </div>
-                      {singleLine ? (
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
-                          <button onClick={() => setLineQty(singleLine.lineId, singleLine.qty - 1)} style={{
-                            width: 28, height: 28, borderRadius: 9, border: "1px solid rgba(255,255,255,0.7)", background: "rgba(255,255,255,0.6)",
-                            color: COLORS.espresso5, fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
-                          }}>−</button>
-                          <span style={{ minWidth: 16, textAlign: "center", fontWeight: 600, color: COLORS.espresso5 }}><AnimatedQty value={qty} /></span>
-                          <button
-                            onClick={() => { if (canAddDirectly) { spawnFly(m.id, m.imageUrl); setLineQty(singleLine.lineId, singleLine.qty + 1); } else openMenu(m); }}
-                            style={{
-                              width: 28, height: 28, borderRadius: 8, border: "none", background: COLORS.espresso5,
-                              color: "#fff", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
-                            }}
-                          >+</button>
-                        </div>
-                      ) : (
-                        <button
-                          disabled={soldOut}
-                          onClick={(e) => { e.stopPropagation(); openMenu(m); }}
-                          style={{
-                            position: "relative", width: 32, height: 32, borderRadius: 9, flexShrink: 0, border: "none",
-                            background: soldOut ? COLORS.line : COLORS.espresso5, color: "#fff", fontSize: 18, lineHeight: 1,
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                          }}
-                        >
-                          +
-                          {qty > 0 && (
-                            <span style={{
-                              position: "absolute", top: -6, right: -6, background: COLORS.danger, color: "#fff",
-                              fontSize: 10, fontWeight: 700, borderRadius: 999, minWidth: 16, height: 16,
-                              display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px",
-                            }}><AnimatedQty value={qty} /></span>
+                  </>
+                ) : (
+                  <>
+                    <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 600, color: COLORS.espresso5, margin: "0 0 10px" }}>{cat}</h2>
+                    {menus.filter((m) => m.category === cat).map((m) => {
+                      const soldOut = m.available === false;
+                      const lines = linesForMenu(m.id);
+                      const qty = lines.reduce((s, l) => s + l.qty, 0);
+                      const singleLine = lines.length === 1 ? lines[0] : null;
+                      const canAddDirectly = groupsForMenu(m).length === 0;
+                      return (
+                        <div key={m.id} onClick={() => !soldOut && !singleLine && openMenu(m)} style={{
+                          ...GLASS_PANEL, display: "flex", gap: 12, alignItems: "center", padding: "10px 12px", borderRadius: 14, marginBottom: 8,
+                          opacity: soldOut ? 0.5 : 1, cursor: soldOut || singleLine ? "default" : "pointer",
+                        }}>
+                          <div ref={(el) => { menuThumbRefs.current[m.id] = el; }}>
+                            <MenuThumb imageUrl={m.imageUrl} />
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 500, fontSize: 14, color: COLORS.espresso5 }}>{m.name}</div>
+                            <div style={{ fontSize: 13, color: soldOut ? COLORS.danger : COLORS.gold, fontWeight: 600, marginTop: 3 }}>
+                              {soldOut ? "หมดวันนี้" : money(m.priceStore)}
+                            </div>
+                          </div>
+                          {singleLine ? (
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                              <button onClick={() => setLineQty(singleLine.lineId, singleLine.qty - 1)} style={{
+                                width: 28, height: 28, borderRadius: 9, border: "1px solid rgba(255,255,255,0.7)", background: "rgba(255,255,255,0.6)",
+                                color: COLORS.espresso5, fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                              }}>−</button>
+                              <span style={{ minWidth: 16, textAlign: "center", fontWeight: 600, color: COLORS.espresso5 }}><AnimatedQty value={qty} /></span>
+                              <button
+                                onClick={() => { if (canAddDirectly) { spawnFly(m.id, m.imageUrl); setLineQty(singleLine.lineId, singleLine.qty + 1); } else openMenu(m); }}
+                                style={{
+                                  width: 28, height: 28, borderRadius: 8, border: "none", background: COLORS.espresso5,
+                                  color: "#fff", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                                }}
+                              >+</button>
+                            </div>
+                          ) : (
+                            <button
+                              disabled={soldOut}
+                              onClick={(e) => { e.stopPropagation(); openMenu(m); }}
+                              style={{
+                                position: "relative", width: 32, height: 32, borderRadius: 9, flexShrink: 0, border: "none",
+                                background: soldOut ? COLORS.line : COLORS.espresso5, color: "#fff", fontSize: 18, lineHeight: 1,
+                                display: "flex", alignItems: "center", justifyContent: "center",
+                              }}
+                            >
+                              +
+                              {qty > 0 && (
+                                <span style={{
+                                  position: "absolute", top: -6, right: -6, background: COLORS.danger, color: "#fff",
+                                  fontSize: 10, fontWeight: 700, borderRadius: 999, minWidth: 16, height: 16,
+                                  display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px",
+                                }}><AnimatedQty value={qty} /></span>
+                              )}
+                            </button>
                           )}
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
+                        </div>
+                      );
+                    })}
+                  </>
+                )}
               </section>
             ))}
           </main>
