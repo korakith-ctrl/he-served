@@ -950,10 +950,117 @@ function EmptyNote({ text }) {
   return <p style={{ fontSize: 12.5, color: "var(--espresso-2)", fontStyle: "italic", margin: 0 }}>{text}</p>;
 }
 
+// พาเลตสีเฉพาะหน้าขายเครื่องดื่ม (POS) — แยกจากธีม sage/espresso ของแอดมินหน้าอื่นๆ ตามที่ตั้งใจให้หน้านี้
+// ดูพรีเมียมแบบ POS ร้านกาแฟระดับสูง ไม่กระทบธีมของแท็บอื่น
+const POS = {
+  primary: "#D85C08", primaryDark: "#C14F06", primarySoft: "#FCE8DA",
+  navy: "#163B73", warm: "#FAF7F2", border: "#ECE8E2", gray: "#6B7280",
+  chipBg: "#F2EEE7",
+};
+
+function Segmented({ options, value, onChange, dense }) {
+  return (
+    <div style={{ display: "inline-flex", background: POS.chipBg, borderRadius: dense ? 10 : 14, padding: 3, gap: 2, flexWrap: "wrap" }}>
+      {options.map((o) => {
+        const active = o.value === value;
+        return (
+          <button
+            key={o.value} type="button" disabled={o.disabled}
+            onClick={() => !o.disabled && onChange(o.value)}
+            title={o.title}
+            style={{
+              border: "none", cursor: o.disabled ? "not-allowed" : "pointer",
+              padding: dense ? "6px 11px" : "9px 16px", minHeight: dense ? 32 : 44,
+              borderRadius: dense ? 8 : 11, fontSize: dense ? 12.5 : 13.5, fontWeight: 600,
+              background: active ? "#fff" : "transparent",
+              color: active ? POS.navy : "#8B8680",
+              boxShadow: active ? "0 2px 6px rgba(0,0,0,0.08)" : "none",
+              opacity: o.disabled ? 0.4 : 1,
+              transition: "all 200ms ease",
+            }}
+          >{o.label}</button>
+        );
+      })}
+    </div>
+  );
+}
+
+function PosProductThumb({ src, size = 84 }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: 18, flexShrink: 0, overflow: "hidden",
+      background: `linear-gradient(135deg, ${POS.primarySoft}, ${POS.warm})`,
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }}>
+      {src && !failed ? (
+        <img src={src} alt="" onError={() => setFailed(true)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+      ) : (
+        <Icon name="cup" size={Math.round(size * 0.4)} style={{ color: POS.primary, opacity: 0.6 }} />
+      )}
+    </div>
+  );
+}
+
+function PosStatPill({ icon, label, value, accent }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 9, background: "#fff", border: `1px solid ${POS.border}`, borderRadius: 14, padding: "7px 13px 7px 9px" }}>
+      <div style={{
+        width: 30, height: 30, borderRadius: 10, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+        background: accent ? POS.primary : POS.chipBg, color: accent ? "#fff" : POS.navy,
+      }}><Icon name={icon} size={14} /></div>
+      <div>
+        <div style={{ fontSize: 10.5, color: POS.gray, fontWeight: 600, lineHeight: 1.3 }}>{label}</div>
+        <div style={{ fontSize: 14.5, fontWeight: 700, color: POS.navy, lineHeight: 1.3 }}>{value}</div>
+      </div>
+    </div>
+  );
+}
+
+// กลุ่มตัวเลือกน้อย (<=3 ชอยส์) แสดงเป็น segmented control กดครั้งเดียวจบ กลุ่มที่มีตัวเลือกเยอะใช้ dropdown แทน
+// เพื่อลดจำนวน chip เกลื่อนจอ — ไม่เปลี่ยนโครงสร้างข้อมูล ยังเรียก onPick(group, choice) เหมือนเดิมทุกที่
+function PosOptionGroup({ group, selected, onPick }) {
+  const compact = group.choices.length <= 3;
+  return (
+    <div style={{ marginBottom: 9 }}>
+      <div style={{ fontSize: 12, color: POS.gray, fontWeight: 600, marginBottom: 5 }}>
+        {group.name}{group.required && <span style={{ color: POS.primary }}> *</span>}
+      </div>
+      {compact ? (
+        <Segmented
+          dense
+          options={group.choices.map((c) => ({ value: c.id, label: c.label + (c.priceDelta ? ` +${c.priceDelta}` : "") }))}
+          value={selected?.id}
+          onChange={(id) => onPick(group, group.choices.find((c) => c.id === id))}
+        />
+      ) : (
+        <select
+          value={selected?.id || ""}
+          onChange={(e) => { const c = group.choices.find((x) => x.id === e.target.value); if (c) onPick(group, c); }}
+          style={{
+            width: "100%", padding: "9px 11px", borderRadius: 12, border: `1px solid ${POS.border}`,
+            fontSize: 13.5, background: "#fff", color: POS.navy, fontWeight: 500, cursor: "pointer",
+          }}
+        >
+          <option value="" disabled>เลือก{group.name}</option>
+          {group.choices.map((c) => <option key={c.id} value={c.id}>{c.label}{c.priceDelta ? ` (+฿${c.priceDelta})` : ""}</option>)}
+        </select>
+      )}
+    </div>
+  );
+}
+
 function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
   const [state, setState] = useState({});
   const [cart, setCart] = useState([]);
   const [cartNote, setCartNote] = useState("");
+  // ช่องทางขาย/แพลตฟอร์ม/โปรโมชั่น ยกขึ้นมาเป็นตัวเลือกกลางตัวเดียวเหนือกริดสินค้า แทนที่จะให้ทุกการ์ดมีชุดของตัวเอง
+  const [channel, setChannel] = useState("store");
+  const [platformId, setPlatformId] = useState(data.settings.platforms[0]?.id || "");
+  const [promo, setPromo] = useState(0);
+  const [infoFor, setInfoFor] = useState(null);
+  const [warnOpen, setWarnOpen] = useState({});
+  const [advOpen, setAdvOpen] = useState({});
 
   function get(menuId, key, fallback) {
     return (state[menuId] && state[menuId][key] !== undefined) ? state[menuId][key] : fallback;
@@ -1002,7 +1109,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
       options: optionsArr, optionsLabel,
       substitutions, upcharge, unitPrice, promo: channel === "delivery" ? (promo || 0) : 0,
     }]);
-    set(menu.id, { qty: 1, promo: 0 });
+    set(menu.id, { qty: 1 });
   }
 
   function removeFromCart(cartId) {
@@ -1024,140 +1131,243 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
     createInstoreOrder(cart, cartNote.trim());
     setCart([]);
     setCartNote("");
+    setPromo(0);
   }
 
   const cartCups = cart.reduce((s, l) => s + l.qty, 0);
   const cartTotal = cart.reduce((s, l) => s + l.unitPrice * l.qty - (l.promo || 0), 0);
 
+  const today = todayStr();
+  const todaySales = data.sales.filter((s) => s.timestamp.slice(0, 10) === today);
+  const todayRevenue = todaySales.reduce((s, x) => s + x.netRevenue, 0);
+  const todayOrderCount = todaySales.length;
+
+  const platform = data.settings.platforms.find((p) => p.id === platformId);
+
   return (
     <div>
-      <SectionTitle icon="cash-register" text="บันทึกการขาย — ตัวเลือกเมนูแบบเดียวกับหน้าลูกค้า หยิบใส่ตะกร้าแล้วค่อยยืนยันทีเดียว ลดโอกาสกดพลาด" />
-      <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
-        <div style={{ flex: "3 1 480px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12, minWidth: 0 }}>
+      <style>{`
+        .pos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 24px; }
+        .pos-card {
+          position: relative; background: ${POS.warm}; border: 1px solid ${POS.border}; border-radius: 24px;
+          padding: 18px; box-shadow: 0 10px 30px rgba(0,0,0,.06); transition: transform 200ms ease, box-shadow 200ms ease;
+          display: flex; flex-direction: column; min-height: 300px;
+        }
+        .pos-card:hover { transform: translateY(-3px) scale(1.01); box-shadow: 0 16px 40px rgba(0,0,0,.10); }
+        .pos-info-btn {
+          position: absolute; top: 14px; right: 14px; width: 28px; height: 28px; border-radius: 9px;
+          border: 1px solid ${POS.border}; background: #fff; color: ${POS.gray}; display: flex; align-items: center;
+          justify-content: center; cursor: pointer; transition: all 200ms ease; z-index: 3;
+        }
+        .pos-info-btn:hover { background: ${POS.chipBg}; color: ${POS.navy}; }
+        .pos-stepper { display: flex; align-items: center; border: 1px solid ${POS.border}; border-radius: 14px; overflow: hidden; background: #fff; }
+        .pos-stepper button { width: 38px; height: 46px; border: none; background: #fff; color: ${POS.navy}; font-size: 17px; cursor: pointer; transition: background 200ms ease; }
+        .pos-stepper button:hover { background: ${POS.chipBg}; }
+        .pos-stepper span { min-width: 26px; text-align: center; font-weight: 700; font-size: 14px; color: ${POS.navy}; }
+        .pos-add-btn {
+          flex: 1; height: 48px; border-radius: 16px; border: none; background: ${POS.primary}; color: #fff;
+          font-size: 14.5px; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 6px;
+          cursor: pointer; transition: background 200ms ease, transform 200ms ease;
+        }
+        .pos-add-btn:hover:not(:disabled) { background: ${POS.primaryDark}; transform: translateY(-1px); }
+        .pos-add-btn:active:not(:disabled) { transform: scale(0.97); }
+        .pos-add-btn:disabled { background: #E6DFD3; color: #A99C8A; cursor: not-allowed; }
+        .pos-warn-btn { display: flex; align-items: center; gap: 5px; width: 100%; text-align: left; border: 1px solid #FBD5B5; background: #FFF4EA; color: #B45309; border-radius: 10px; padding: 6px 10px; font-size: 11.5px; font-weight: 600; cursor: pointer; transition: background 200ms ease; }
+        .pos-warn-btn:hover { background: #FEE9D6; }
+        .pos-cart { position: sticky; top: 10px; background: ${POS.warm}; border: 1px solid ${POS.border}; border-radius: 24px; padding: 18px; box-shadow: 0 10px 30px rgba(0,0,0,.06); display: flex; flex-direction: column; max-height: calc(100vh - 40px); }
+      `}</style>
+
+      {/* หัวข้อหน้า + สถิติวันนี้ + จำนวนในตะกร้า — ข้อมูลจริงทั้งหมดจาก data.sales/ตะกร้าปัจจุบัน ไม่มีตัวเลขสมมติ */}
+      <div style={{
+        display: "flex", flexWrap: "wrap", gap: 14, alignItems: "center", justifyContent: "space-between",
+        background: "#fff", border: `1px solid ${POS.border}`, borderRadius: 22, padding: "16px 20px", marginBottom: 18,
+      }}>
+        <div>
+          <div style={{ fontSize: 13, color: POS.gray, fontWeight: 600 }}>วันนี้</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: POS.navy, marginTop: 2, fontFamily: "var(--f-display)" }}>ขายเครื่องดื่ม</div>
+        </div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <PosStatPill icon="receipt" label="ออเดอร์วันนี้" value={`${todayOrderCount} รายการ`} />
+          <PosStatPill icon="cash" label="ยอดขายวันนี้" value={`฿${money(todayRevenue)}`} accent />
+          <PosStatPill icon="shopping-cart" label="ในตะกร้า" value={`${cartCups} แก้ว`} />
+        </div>
+      </div>
+
+      {/* ช่องทางขายกลาง — เปลี่ยนตรงนี้ทีเดียว มีผลกับทุกการ์ดที่ยังไม่ได้หยิบใส่ตะกร้า */}
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14, marginBottom: 20 }}>
+        <Segmented
+          options={Object.entries(CHANNELS).map(([k, label]) => ({
+            value: k, label, disabled: k === "delivery" && data.settings.platforms.length === 0,
+            title: k === "delivery" && data.settings.platforms.length === 0 ? "เพิ่มแพลตฟอร์มในแท็บตั้งค่าก่อน" : undefined,
+          }))}
+          value={channel}
+          onChange={setChannel}
+        />
+        {channel === "delivery" && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <select value={platformId} onChange={(e) => setPlatformId(e.target.value)} style={{
+              padding: "9px 12px", borderRadius: 12, border: `1px solid ${POS.border}`, fontSize: 13.5, background: "#fff", color: POS.navy, fontWeight: 500,
+            }}>
+              {data.settings.platforms.map((p) => <option key={p.id} value={p.id}>{p.name} (GP {p.gpPercent}%)</option>)}
+            </select>
+            <input
+              type="number" placeholder="ส่วนลดโปร (บาท)" value={promo || ""} onChange={(e) => setPromo(Number(e.target.value) || 0)}
+              style={{ width: 160, padding: "9px 12px", borderRadius: 12, border: `1px solid ${POS.border}`, fontSize: 13.5 }}
+            />
+            {platform && <span style={{ fontSize: 11, color: POS.gray }}>หัก GP {platform.gpPercent}% อัตโนมัติ</span>}
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div className="pos-grid" style={{ flex: "3 1 600px", minWidth: 0 }}>
           {data.menus.map((menu) => {
             const groups = groupsForMenu(menu, data.optionGroups);
             const qty = get(menu.id, "qty", 1);
-            const channel = get(menu.id, "channel", "store");
             const options = get(menu.id, "options") || defaultOptionsFor(groups);
             const optionsArr = Object.values(options);
             const substitutions = resolveIngredientAdjustmentsFromOptions(menu, optionsArr, ingredientsById);
             const upcharge = optionsArr.reduce((s, o) => s + (o.priceDelta || 0), 0);
-            const promo = get(menu.id, "promo", 0);
-            const platformId = get(menu.id, "platformId", data.settings.platforms[0]?.id);
-            const platform = data.settings.platforms.find((p) => p.id === platformId);
             const { ingredientCost } = calcRecipeCost(menu, ingredientsById, substitutions);
             const ok = stockOk(menu, substitutions, qty);
             const basePrice = channel === "delivery" ? menu.priceDelivery : menu.priceStore;
             const unitPrice = basePrice + upcharge;
             const missingRequired = groups.some((g) => g.required && !options[g.id]);
+            const margin = unitPrice > 0 ? Math.round(((unitPrice - ingredientCost) / unitPrice) * 100) : 0;
+            const primaryGroups = groups.slice(0, 2);
+            const advancedGroups = groups.slice(2);
+            const showAdvToggle = advancedGroups.length > 0;
+            const isAdvOpen = !!advOpen[menu.id];
+            const isWarnOpen = !!warnOpen[menu.id];
 
             function pick(g, c) {
               set(menu.id, { options: { ...options, [g.id]: { ...c, groupId: g.id, groupName: g.name } } });
             }
 
             return (
-              <div key={menu.id} style={glass({ borderRadius: 12, padding: 14 })}>
-                <div style={{ fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 16, color: "var(--espresso-5)" }}>{menu.name}</div>
-                <div style={{ fontSize: 12, color: "var(--espresso-2)", margin: "3px 0 10px" }}>
-                  ต้นทุนวัตถุดิบ ฿{money(ingredientCost)} · ราคาขาย ฿{money(unitPrice)}
-                </div>
-
-                <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-                  {Object.entries(CHANNELS).map(([k, label]) => {
-                    const disabled = k === "delivery" && data.settings.platforms.length === 0;
-                    return (
-                      <button key={k} className="cbtn" disabled={disabled} title={disabled ? "เพิ่มแพลตฟอร์มในแท็บตั้งค่าก่อน" : undefined}
-                        style={{ flex: 1, padding: "6px 8px", fontSize: 12, opacity: disabled ? 0.5 : 1, background: channel === k ? "var(--sage-light)" : undefined, borderColor: channel === k ? "var(--sage)" : undefined }}
-                        onClick={() => !disabled && set(menu.id, { channel: k })}>{label}</button>
-                    );
-                  })}
-                </div>
-
-                {groups.length > 0 && <OptionGroupPicker groups={groups} selections={options} onPick={pick} />}
-
-                {channel === "delivery" && (
-                  <div style={{ marginBottom: 8 }}>
-                    <label style={{ fontSize: 11, color: "var(--espresso-2)" }}>แพลตฟอร์ม</label>
-                    <select className="cfield" value={platformId} onChange={(e) => set(menu.id, { platformId: e.target.value })} style={{ marginBottom: 6 }}>
-                      {data.settings.platforms.map((p) => <option key={p.id} value={p.id}>{p.name} (GP {p.gpPercent}%)</option>)}
-                    </select>
-                    <label style={{ fontSize: 11, color: "var(--espresso-2)" }}>ส่วนลดโปรโมชั่น (บาท, ถ้ามี)</label>
-                    <input className="cfield" type="number" value={promo} onChange={(e) => set(menu.id, { promo: Number(e.target.value) })} />
-                    {platform && <p style={{ fontSize: 10.5, color: "var(--espresso-2)", margin: "3px 0 0" }}>หัก GP {platform.name} {platform.gpPercent}% อัตโนมัติ</p>}
+              <div key={menu.id} className="pos-card">
+                <button className="pos-info-btn" onClick={() => setInfoFor(infoFor === menu.id ? null : menu.id)} title="ต้นทุน/กำไร">
+                  <Icon name="info-circle" size={14} />
+                </button>
+                {infoFor === menu.id && (
+                  <div style={{
+                    position: "absolute", top: 46, right: 14, zIndex: 5, background: "#fff", border: `1px solid ${POS.border}`,
+                    borderRadius: 14, padding: "10px 14px", boxShadow: "0 10px 30px rgba(0,0,0,.14)", fontSize: 12,
+                    color: "#374151", display: "flex", flexDirection: "column", gap: 3, minWidth: 170,
+                  }}>
+                    <div>ต้นทุนวัตถุดิบ: ฿{money(ingredientCost)}</div>
+                    <div>ราคาขาย: ฿{money(unitPrice)}</div>
+                    <div>กำไรขั้นต้น: {margin}%</div>
                   </div>
                 )}
 
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                  <button className="cbtn" style={{ padding: "4px 10px" }} onClick={() => set(menu.id, { qty: Math.max(1, qty - 1) })}>−</button>
-                  <span style={{ minWidth: 20, textAlign: "center", fontWeight: 600 }}>{qty}</span>
-                  <button className="cbtn" style={{ padding: "4px 10px" }} onClick={() => set(menu.id, { qty: qty + 1 })}>+</button>
+                <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
+                  <PosProductThumb src={menu.imageUrl} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 17, fontWeight: 700, color: POS.navy, lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{menu.name}</div>
+                    <div style={{ fontSize: 16, fontWeight: 600, color: POS.primary, marginTop: 3 }}>฿{money(unitPrice)}</div>
+                  </div>
                 </div>
-                {!ok && <p style={{ fontSize: 11.5, color: "var(--danger)", margin: "0 0 8px" }}><Icon name="alert-circle" size={13} /> สต็อกวัตถุดิบไม่พอ (รวมของในตะกร้าแล้ว ยังหยิบเพิ่มได้ แต่สต็อกจะติดลบ)</p>}
-                {missingRequired && <p style={{ fontSize: 11.5, color: "var(--danger)", margin: "0 0 8px" }}><Icon name="alert-circle" size={13} /> กรุณาเลือกตัวเลือกที่จำเป็นให้ครบ</p>}
-                <button
-                  className="cbtn cbtn-accent" style={{ width: "100%", opacity: missingRequired ? 0.5 : 1, cursor: missingRequired ? "not-allowed" : "pointer" }}
-                  disabled={missingRequired}
-                  onClick={() => addToCart(menu, { qty, channel, options, platformId, promo })}
-                >
-                  <Icon name="shopping-cart-plus" size={14} /> หยิบใส่ตะกร้า ({channel === "delivery" ? (platform ? platform.name : "เดลิเวอรี่") : "หน้าร้าน"})
-                </button>
+
+                <div style={{ flex: 1 }}>
+                  {primaryGroups.map((g) => <PosOptionGroup key={g.id} group={g} selected={options[g.id]} onPick={pick} />)}
+                  {showAdvToggle && (
+                    <>
+                      <button
+                        onClick={() => setAdvOpen((p) => ({ ...p, [menu.id]: !p[menu.id] }))}
+                        style={{ border: "none", background: "none", color: POS.gray, fontSize: 11.5, fontWeight: 600, padding: "2px 0 8px", cursor: "pointer", display: "flex", alignItems: "center", gap: 3 }}
+                      >
+                        <Icon name={isAdvOpen ? "chevron-up" : "chevron-down"} size={12} />
+                        {isAdvOpen ? "ซ่อนตัวเลือกเพิ่มเติม" : `ตัวเลือกเพิ่มเติม (${advancedGroups.length})`}
+                      </button>
+                      {isAdvOpen && advancedGroups.map((g) => <PosOptionGroup key={g.id} group={g} selected={options[g.id]} onPick={pick} />)}
+                    </>
+                  )}
+                </div>
+
+                {(!ok || missingRequired) && (
+                  <div style={{ marginBottom: 10 }}>
+                    <button className="pos-warn-btn" onClick={() => setWarnOpen((p) => ({ ...p, [menu.id]: !p[menu.id] }))}>
+                      <Icon name="alert-triangle" size={13} />
+                      {!ok && missingRequired ? "สต็อกไม่พอ + เลือกไม่ครบ" : !ok ? "สต็อกไม่พอ" : "เลือกตัวเลือกไม่ครบ"}
+                      <Icon name={isWarnOpen ? "chevron-up" : "chevron-down"} size={12} style={{ marginLeft: "auto" }} />
+                    </button>
+                    {isWarnOpen && (
+                      <div style={{ fontSize: 11, color: "#92400E", marginTop: 4, paddingLeft: 4, lineHeight: 1.5 }}>
+                        {!ok && <div>สต็อกวัตถุดิบไม่พอ (รวมของในตะกร้าแล้ว ยังหยิบเพิ่มได้ แต่สต็อกจะติดลบ)</div>}
+                        {missingRequired && <div>กรุณาเลือกตัวเลือกที่จำเป็นให้ครบก่อนหยิบใส่ตะกร้า</div>}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div className="pos-stepper">
+                    <button onClick={() => set(menu.id, { qty: Math.max(1, qty - 1) })}>−</button>
+                    <span>{qty}</span>
+                    <button onClick={() => set(menu.id, { qty: qty + 1 })}>+</button>
+                  </div>
+                  <button
+                    className="pos-add-btn" disabled={missingRequired}
+                    onClick={() => addToCart(menu, { qty, channel, options, platformId, promo })}
+                  >
+                    <Icon name="shopping-cart-plus" size={16} /> เพิ่มลงตะกร้า
+                  </button>
+                </div>
               </div>
             );
           })}
         </div>
 
-        <div style={{
-          flex: "1 1 280px", maxWidth: 340, minWidth: 260, position: "sticky", top: 10,
-          ...glass({ borderRadius: 16, padding: 16 }),
-          display: "flex", flexDirection: "column", maxHeight: "calc(100vh - 40px)",
-        }}>
+        <div className="pos-cart" style={{ flex: "1 1 300px", maxWidth: 360, minWidth: 280 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-            <Icon name="shopping-cart" size={18} style={{ color: "var(--sage-dark)" }} />
-            <span style={{ fontWeight: 700, fontSize: 15, color: "var(--espresso-5)" }}>ตะกร้า</span>
+            <Icon name="shopping-cart" size={18} style={{ color: POS.primary }} />
+            <span style={{ fontWeight: 700, fontSize: 16, color: POS.navy }}>ตะกร้า</span>
             {cartCups > 0 && (
-              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--espresso-2)", background: "var(--cream-2)", borderRadius: 999, padding: "1px 9px" }}>{cartCups} แก้ว</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: POS.navy, background: POS.chipBg, borderRadius: 999, padding: "2px 10px" }}>{cartCups} แก้ว</span>
             )}
           </div>
 
           {cart.length === 0 ? (
-            <EmptyNote text="ยังไม่มีรายการในตะกร้า — กด “หยิบใส่ตะกร้า” จากเมนูด้านซ้าย" />
+            <EmptyNote text="ยังไม่มีรายการในตะกร้า — กด “เพิ่มลงตะกร้า” จากเมนูด้านซ้าย" />
           ) : (
             <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10, marginBottom: 12, paddingRight: 2 }}>
               {cart.map((line) => (
-                <div key={line.cartId} style={{ borderBottom: "1px dashed var(--line)", paddingBottom: 9 }}>
+                <div key={line.cartId} style={{ background: "#fff", border: `1px solid ${POS.border}`, borderRadius: 14, padding: 10 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 6 }}>
-                    <span style={{ fontWeight: 700, fontSize: 13.5, color: "var(--espresso-4)" }}>{line.menuName}</span>
+                    <span style={{ fontWeight: 700, fontSize: 13.5, color: POS.navy }}>{line.menuName}</span>
                     <button onClick={() => removeFromCart(line.cartId)} style={{ border: "none", background: "none", color: "var(--danger)", cursor: "pointer", padding: 2, flexShrink: 0 }} title="เอาออกจากตะกร้า">
                       <Icon name="x" size={14} />
                     </button>
                   </div>
-                  <div style={{ fontSize: 11, color: "var(--espresso-2)" }}>
+                  <div style={{ fontSize: 11, color: POS.gray, marginTop: 2 }}>
                     {CHANNELS[line.channel]}{line.platformName ? ` · ${line.platformName}` : ""}{line.optionsLabel ? ` · ${line.optionsLabel}` : ""}
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <button className="cbtn" style={{ padding: "2px 9px", fontSize: 13 }} onClick={() => updateCartQty(line.cartId, line.qty - 1)}>−</button>
                       <span style={{ minWidth: 16, textAlign: "center", fontSize: 13, fontWeight: 600 }}>{line.qty}</span>
                       <button className="cbtn" style={{ padding: "2px 9px", fontSize: 13 }} onClick={() => updateCartQty(line.cartId, line.qty + 1)}>+</button>
                     </div>
-                    <span style={{ fontWeight: 700, fontFamily: "var(--f-body)", fontSize: 14 }}>฿{money(line.unitPrice * line.qty - (line.promo || 0))}</span>
+                    <span style={{ fontWeight: 700, fontFamily: "var(--f-body)", fontSize: 14, color: POS.primary }}>฿{money(line.unitPrice * line.qty - (line.promo || 0))}</span>
                   </div>
                 </div>
               ))}
             </div>
           )}
 
-          <label style={{ fontSize: 11, color: "var(--espresso-2)", marginBottom: 4 }}>หมายเหตุ (ถ้ามี)</label>
+          <label style={{ fontSize: 11, color: POS.gray, marginBottom: 4, fontWeight: 600 }}>หมายเหตุ (ถ้ามี)</label>
           <textarea
-            className="cfield" value={cartNote} onChange={(e) => setCartNote(e.target.value)}
-            placeholder="เช่น ลูกค้าขอพิเศษ..." style={{ resize: "vertical", minHeight: 50, marginBottom: 10, fontFamily: "inherit" }}
+            value={cartNote} onChange={(e) => setCartNote(e.target.value)}
+            placeholder="เช่น ลูกค้าขอพิเศษ..."
+            style={{ resize: "vertical", minHeight: 50, marginBottom: 10, fontFamily: "inherit", padding: "9px 11px", borderRadius: 12, border: `1px solid ${POS.border}`, fontSize: 13.5 }}
           />
 
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontWeight: 700, fontSize: 18, fontFamily: "var(--f-body)", borderTop: "1px solid var(--line)", paddingTop: 10, marginBottom: 10 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--espresso-3)" }}>รวมทั้งหมด</span><span>฿{money(cartTotal)}</span>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontWeight: 700, fontSize: 20, fontFamily: "var(--f-body)", borderTop: `1px solid ${POS.border}`, paddingTop: 12, marginBottom: 12 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: POS.gray }}>รวมทั้งหมด</span><span style={{ color: POS.navy }}>฿{money(cartTotal)}</span>
           </div>
-          <button className="cbtn cbtn-accent" style={{ width: "100%", padding: "11px 14px", fontSize: 14, opacity: cart.length === 0 ? 0.5 : 1, cursor: cart.length === 0 ? "not-allowed" : "pointer" }} disabled={cart.length === 0} onClick={checkout}>
-            <Icon name="check" size={15} /> ยืนยันออเดอร์ / ชำระเงิน
+          <button className="pos-add-btn" style={{ width: "100%", opacity: cart.length === 0 ? 0.5 : 1 }} disabled={cart.length === 0} onClick={checkout}>
+            <Icon name="check" size={16} /> ยืนยันออเดอร์ / ชำระเงิน
           </button>
         </div>
       </div>
