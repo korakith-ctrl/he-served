@@ -419,6 +419,7 @@ export default function CustomerOrder({ shopUid }) {
   const [pickingMenu, setPickingMenu] = useState(null);
   const [pickingPromo, setPickingPromo] = useState(null);
   const [pickingChoicePromo, setPickingChoicePromo] = useState(null);
+  const [choiceFlow, setChoiceFlow] = useState(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [note, setNote] = useState("");
@@ -641,24 +642,54 @@ export default function CustomerOrder({ shopUid }) {
     setBundleQty(promo, bundleQtyInCart(promo) + 1);
   }
 
-  function addChoiceSet(promo, chosenMenus) {
+  function addChoiceSet(promo, chosenMenus, optionsByMenuId) {
     const setId = promo.id + "_" + Math.random().toString(36).slice(2, 8);
     const prices = splitChoicePrices(promo, chosenMenus);
     setCart((c) => [
       ...c,
-      ...prices.map((p) => ({
-        lineId: genLineId(), menuId: p.menuId, name: p.name, unitPrice: p.unitPrice, qty: 1, options: [],
-        promoId: setId, promoKind: "choice", promoGroupId: promo.id,
-      })),
+      ...prices.map((p) => {
+        const opts = (optionsByMenuId && optionsByMenuId[p.menuId]) || [];
+        const optionDelta = opts.reduce((s, o) => s + (o.priceDelta || 0), 0);
+        return {
+          lineId: genLineId(), menuId: p.menuId, name: p.name, unitPrice: p.unitPrice + optionDelta, options: opts, qty: 1,
+          promoId: setId, promoKind: "choice", promoGroupId: promo.id,
+        };
+      }),
     ]);
   }
 
-  function removeChoiceSet(setId) {
-    setCart((c) => c.filter((l) => l.promoId !== setId));
+  function startChoiceFlow(promo, chosenMenus) {
+    const needsOptions = chosenMenus.filter((m) => groupsForMenu(m).length > 0);
+    if (needsOptions.length === 0) {
+      addChoiceSet(promo, chosenMenus);
+      return;
+    }
+    setChoiceFlow({ promo, chosenMenus, queue: needsOptions, index: 0, optionsByMenuId: {} });
+  }
+
+  function confirmChoiceFlowStep(qty, options) {
+    if (!choiceFlow) return;
+    const menu = choiceFlow.queue[choiceFlow.index];
+    const nextOptions = { ...choiceFlow.optionsByMenuId, [menu.id]: options };
+    const nextIndex = choiceFlow.index + 1;
+    if (nextIndex >= choiceFlow.queue.length) {
+      addChoiceSet(choiceFlow.promo, choiceFlow.chosenMenus, nextOptions);
+      setChoiceFlow(null);
+    } else {
+      setChoiceFlow({ ...choiceFlow, index: nextIndex, optionsByMenuId: nextOptions });
+    }
   }
 
   function removeLine(lineId) {
     setCart((c) => c.filter((l) => l.lineId !== lineId));
+  }
+
+  function removeCartLine(line) {
+    if (line.promoKind === "bundle" || line.promoKind === "choice") {
+      setCart((c) => c.filter((l) => l.promoId !== line.promoId));
+    } else {
+      removeLine(line.lineId);
+    }
   }
 
   function setLineQty(lineId, qty) {
@@ -994,7 +1025,7 @@ export default function CustomerOrder({ shopUid }) {
           total={total}
           onClose={() => setShowCart(false)}
           onSetQty={setLineQty}
-          onRemove={removeLine}
+          onRemove={removeCartLine}
           onCheckout={() => setShowCart(false)}
         />
       </div>
@@ -1359,7 +1390,7 @@ export default function CustomerOrder({ shopUid }) {
         total={total}
         onClose={() => setShowCart(false)}
         onSetQty={setLineQty}
-        onRemove={removeLine}
+        onRemove={removeCartLine}
         onCheckout={() => { setShowCart(false); setError(""); setStep("phone"); }}
       />
 
@@ -1385,9 +1416,18 @@ export default function CustomerOrder({ shopUid }) {
         menusById={menusById}
         onCancel={() => setPickingChoicePromo(null)}
         onConfirm={(chosenMenus) => {
-          addChoiceSet(pickingChoicePromo, chosenMenus);
+          startChoiceFlow(pickingChoicePromo, chosenMenus);
           setPickingChoicePromo(null);
         }}
+      />
+
+      <OptionPickerModal
+        visible={!!choiceFlow}
+        menu={choiceFlow ? choiceFlow.queue[choiceFlow.index] : null}
+        groups={choiceFlow ? groupsForMenu(choiceFlow.queue[choiceFlow.index]) : []}
+        hideQty
+        onCancel={() => setChoiceFlow(null)}
+        onConfirm={(qty, options) => confirmChoiceFlowStep(qty, options)}
       />
     </div>
   );
@@ -1486,7 +1526,7 @@ function CartDrawer({ visible, cart, total, onClose, onSetQty, onRemove, onCheck
                     <button style={{ ...btn, padding: "4px 10px" }} onClick={() => onSetQty(l.lineId, l.qty + 1)}>+</button>
                   </>
                 )}
-                <button style={{ ...btn, padding: "4px 8px", color: COLORS.danger, borderColor: COLORS.danger }} onClick={() => onRemove(l.lineId)}>
+                <button style={{ ...btn, padding: "4px 8px", color: COLORS.danger, borderColor: COLORS.danger }} onClick={() => onRemove(l)}>
                   <i className="ti ti-trash" style={{ fontSize: 14 }} aria-hidden="true"></i>
                 </button>
               </div>
@@ -1507,7 +1547,7 @@ function CartDrawer({ visible, cart, total, onClose, onSetQty, onRemove, onCheck
   );
 }
 
-function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm }) {
+function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm, hideQty }) {
   const { mounted, shown } = useSheetTransition(visible);
   const cachedRef = useRef({ menu, groups });
   if (menu) cachedRef.current = { menu, groups };
@@ -1541,7 +1581,7 @@ function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm }) {
       .map((grp) => selections[grp.id])
       .filter(Boolean)
       .map((c) => ({ groupId: c.groupId, groupName: c.groupName, choiceId: c.id, label: c.label, priceDelta: c.priceDelta || 0 }));
-    onConfirm(qty, options);
+    onConfirm(hideQty ? 1 : qty, options);
   }
 
   if (!mounted) return null;
@@ -1581,14 +1621,16 @@ function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm }) {
           </div>
         ))}
 
-        <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "6px 0 16px" }}>
-          <span style={{ fontSize: 13 }}>จำนวน</span>
-          <button style={{ ...btn, padding: "4px 10px" }} onClick={() => setQty((q) => Math.max(1, q - 1))}>−</button>
-          <span style={{ minWidth: 18, textAlign: "center" }}><AnimatedQty value={qty} /></span>
-          <button style={{ ...btn, padding: "4px 10px" }} onClick={() => setQty((q) => q + 1)}>+</button>
-        </div>
+        {!hideQty && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "6px 0 16px" }}>
+            <span style={{ fontSize: 13 }}>จำนวน</span>
+            <button style={{ ...btn, padding: "4px 10px" }} onClick={() => setQty((q) => Math.max(1, q - 1))}>−</button>
+            <span style={{ minWidth: 18, textAlign: "center" }}><AnimatedQty value={qty} /></span>
+            <button style={{ ...btn, padding: "4px 10px" }} onClick={() => setQty((q) => q + 1)}>+</button>
+          </div>
+        )}
 
-        {err && <p style={{ fontSize: 12, color: COLORS.danger, margin: "0 0 10px" }}>{err}</p>}
+        {err && <p style={{ fontSize: 12, color: COLORS.danger, margin: "10px 0 10px" }}>{err}</p>}
 
         <div style={{ display: "flex", gap: 8 }}>
           <button style={btn} onClick={onCancel}>ยกเลิก</button>
