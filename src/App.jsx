@@ -1077,7 +1077,9 @@ const STATUS_COLORS = {
   done: { dot: "#16A34A", bg: "#16A34A", color: "#fff", solid: true },
   cancelled: { dot: "#DC2626", bg: "rgba(220,38,38,0.16)", color: "#B91C1C" },
 };
-const PAYMENT_METHOD_LABEL = { cash: "เงินสด", promptpay: "พร้อมเพย์" };
+const PAYMENT_METHOD_LABEL = { cash: "เงินสด", promptpay: "พร้อมเพย์", thaihelpthai: "ไทยช่วยไทย" };
+// วิธีชำระที่จ่ายหน้าร้านโดยตรง ไม่มีสลิปให้ตรวจสอบ — พฤติกรรมเหมือนเงินสดทุกอย่าง
+const CASH_LIKE_PAYMENT_METHODS = new Set(["cash", "thaihelpthai"]);
 
 function StatusBadge({ status, big }) {
   const c = STATUS_COLORS[status] || { dot: "#8B98A5", bg: "var(--cream-2)", color: "var(--espresso-3)" };
@@ -1106,7 +1108,7 @@ function OrderMeta({ paymentMethod, pickupDate, paymentVerified, paymentVerified
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "6px 0" }}>
       {paymentMethod && (
         <span className="chpill" style={{ background: "var(--cream-2)", color: "var(--espresso-3)", fontWeight: 600 }}>
-          {paymentMethod === "cash" ? <Icon name="cash" size={11} /> : <Icon name="qrcode" size={11} />} {PAYMENT_METHOD_LABEL[paymentMethod] || paymentMethod}
+          {CASH_LIKE_PAYMENT_METHODS.has(paymentMethod) ? <Icon name="cash" size={11} /> : <Icon name="qrcode" size={11} />} {PAYMENT_METHOD_LABEL[paymentMethod] || paymentMethod}
         </span>
       )}
       {pickupDate && (

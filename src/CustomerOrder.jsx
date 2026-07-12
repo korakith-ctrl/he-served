@@ -25,6 +25,15 @@ const STATUS_TEXT = {
   cancelled: "ออเดอร์นี้ถูกยกเลิก",
 };
 
+// วิธีชำระที่จ่ายหน้าร้านโดยตรง ไม่ต้องสแกน/แนบสลิป — ทำงานเหมือนกันหมด ต่างกันแค่ข้อความที่โชว์ลูกค้า
+const PAY_AT_STORE_TEXT = {
+  cash: { title: "ชำระเงินสดที่ร้าน", instruction: "กรุณาชำระเงินสดตอนมารับที่ร้าน" },
+  thaihelpthai: { title: "ชำระผ่านโครงการไทยช่วยไทยที่ร้าน", instruction: "กรุณาแจ้งพนักงานว่าชำระผ่านโครงการไทยช่วยไทยตอนมารับที่ร้าน" },
+};
+function isCashLikeMethod(method) {
+  return Object.prototype.hasOwnProperty.call(PAY_AT_STORE_TEXT, method);
+}
+
 const COLORS = {
   cream: "#F5F0EA", cream2: "#EDE3D2", surface: "#FFFFFF",
   espresso5: "#063360", espresso4: "#0B4A7A", espresso3: "#3A5570", espresso2: "#7189A3",
@@ -1129,7 +1138,8 @@ export default function CustomerOrder({ shopUid }) {
 
   if (step === "pay" && order) {
     const isPending = order.status === "pending";
-    const isCash = order.paymentMethod === "cash";
+    const isCash = isCashLikeMethod(order.paymentMethod);
+    const payAtStoreText = PAY_AT_STORE_TEXT[order.paymentMethod] || PAY_AT_STORE_TEXT.cash;
     return (
       <div className="corder" style={centerWrap}>
         <style>{GLOBAL_CSS}</style>
@@ -1137,14 +1147,14 @@ export default function CustomerOrder({ shopUid }) {
         <div style={{ ...centerCard, textAlign: "center" }}>
           <p style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: COLORS.sageDark, fontWeight: 500, margin: 0 }}>{shopName}</p>
           <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, margin: "4px 0 14px" }}>
-            {isPending ? (isCash ? "ชำระเงินสดที่ร้าน" : "สแกนจ่ายผ่าน PromptPay") : "สถานะออเดอร์"}
+            {isPending ? (isCash ? payAtStoreText.title : "สแกนจ่ายผ่าน PromptPay") : "สถานะออเดอร์"}
           </h1>
           {isPending ? (
             isCash ? (
               <div style={{ padding: "10px 0" }}>
                 <p style={{ fontSize: 40, margin: 0 }}>💵</p>
                 <p style={{ fontSize: 22, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif", margin: "10px 0 4px" }}>{money(order.total)}</p>
-                <p style={{ fontSize: 12, color: COLORS.espresso2, margin: "0 0 14px" }}>กรุณาชำระเงินสดตอนมารับที่ร้าน</p>
+                <p style={{ fontSize: 12, color: COLORS.espresso2, margin: "0 0 14px" }}>{payAtStoreText.instruction}</p>
               </div>
             ) : (
               <>
@@ -1246,7 +1256,7 @@ export default function CustomerOrder({ shopUid }) {
 
           <label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>วิธีชำระเงิน</label>
           <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-            {[["promptpay", "พร้อมเพย์ (QR)"], ["cash", "เงินสด"]].map(([val, label]) => (
+            {[["promptpay", "พร้อมเพย์ (QR)"], ["cash", "เงินสด"], ["thaihelpthai", "ไทยช่วยไทย"]].map(([val, label]) => (
               <button
                 key={val}
                 onClick={() => setPaymentMethod(val)}
