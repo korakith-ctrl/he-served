@@ -3116,11 +3116,83 @@ function ReportsPanel({ data }) {
   );
 }
 
+// โทนสีเฉพาะหน้าตัวเลือกเสริม — ระบบสีความหมาย (semantic) แยกจากหน้าอื่น ให้ใช้น้ำเงินเป็นสีหลัก
+// เขียว/แดง/ส้มมีความหมายตายตัว (สำเร็จ/อันตราย/เตือน) ไม่ใช้สีพร่ำเพรื่อ
+const OPTG = {
+  primary: "#2563EB", primaryDark: "#1D4ED8", primarySoft: "rgba(37,99,235,.08)",
+  danger: "#DC2626", dangerSoft: "#FDEBEB",
+  gold: "#D97706", goldSoft: "#FFF4E5",
+  border: "#ECE8E2", gray: "#6B7280", ink: "#1F2937", warm: "#FAF7F2",
+};
+
+function OptgToggle({ checked, onChange, label }) {
+  return (
+    <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none" }}>
+      <span
+        onClick={() => onChange(!checked)}
+        style={{
+          width: 36, height: 21, borderRadius: 999, background: checked ? OPTG.primary : "#D9D4C9",
+          position: "relative", transition: "background 200ms ease", flexShrink: 0,
+        }}
+      >
+        <span style={{
+          position: "absolute", top: 2, left: checked ? 17 : 2, width: 17, height: 17, borderRadius: "50%",
+          background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,.25)", transition: "left 200ms ease",
+        }} />
+      </span>
+      {label && <span style={{ fontSize: 12.5, fontWeight: 600, color: OPTG.gray }}>{label}</span>}
+    </label>
+  );
+}
+
+function OptgKebab({ items }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ position: "relative", flexShrink: 0 }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title="ตัวเลือกเพิ่มเติม"
+        style={{
+          width: 30, height: 30, borderRadius: 9, border: `1px solid ${OPTG.border}`, background: "#fff",
+          color: OPTG.gray, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+        }}
+      ><Icon name="dots-vertical" size={15} /></button>
+      {open && (
+        <div style={{
+          position: "absolute", top: 34, right: 0, zIndex: 8, background: "#fff", border: `1px solid ${OPTG.border}`,
+          borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.14)", padding: 5, minWidth: 160, display: "flex", flexDirection: "column", gap: 1,
+        }}>
+          {items.map((it, i) => (
+            <button
+              key={i}
+              onClick={() => { setOpen(false); it.onClick(); }}
+              style={{
+                display: "flex", alignItems: "center", gap: 8, border: "none", background: "none", textAlign: "left",
+                padding: "8px 10px", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+                color: it.danger ? OPTG.danger : OPTG.ink,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = it.danger ? OPTG.dangerSoft : "#F3F4F6"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
+            ><Icon name={it.icon} size={13} />{it.label}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OptionGroupsPanel({ data, updateData, showToast }) {
+  const [collapsed, setCollapsed] = useState({});
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [activeGroupId, setActiveGroupId] = useState(data.optionGroups[0]?.id || null);
+  const groupRefs = useRef({});
+
   function addGroup() {
+    const id = genId("opt");
     updateData((next) => {
-      next.optionGroups.push({ id: genId("opt"), name: "ตัวเลือกใหม่", required: false, choices: [] });
+      next.optionGroups.push({ id, name: "ตัวเลือกใหม่", required: false, choices: [] });
     });
+    setActiveGroupId(id);
   }
   function removeGroup(groupId) {
     updateData((next) => {
@@ -3185,115 +3257,231 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
     });
   }
 
+  function toggleCollapse(groupId) {
+    setCollapsed((p) => ({ ...p, [groupId]: !p[groupId] }));
+  }
+  function jumpTo(groupId) {
+    setActiveGroupId(groupId);
+    setCollapsed((p) => ({ ...p, [groupId]: false }));
+    groupRefs.current[groupId]?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  const totalGroups = data.optionGroups.length;
+  const totalOptions = data.optionGroups.reduce((s, g) => s + g.choices.length, 0);
+  const requiredGroups = data.optionGroups.filter((g) => g.required).length;
+  const defaultOptions = data.optionGroups.reduce((s, g) => s + g.choices.filter((c) => c.isDefault).length, 0);
+  const activeGroup = data.optionGroups.find((g) => g.id === activeGroupId) || data.optionGroups[0];
+
   return (
-    <div style={{ maxWidth: 640 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-        <SectionTitle icon="list-details" text="ตัวเลือกเสริมสำหรับลูกค้า (เช่น เมล็ดกาแฟ, ความหวาน, นม)" />
+    <div>
+      <style>{`
+        .optg-shell { display: grid; grid-template-columns: 1fr 320px; gap: 24px; align-items: start; }
+        @media (max-width: 980px) { .optg-shell { grid-template-columns: 1fr; } }
+        .optg-card { background: #fff; border: 1px solid ${OPTG.border}; border-radius: 16px; margin-bottom: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.05); }
+        .optg-card-head { display: flex; align-items: center; gap: 10px; padding: 16px 18px; }
+        .optg-name-input { border: none; background: transparent; font-size: 17px; font-weight: 700; color: ${OPTG.ink}; padding: 4px 6px; border-radius: 8px; flex: 1; min-width: 0; }
+        .optg-name-input:focus { outline: 2px solid ${OPTG.primary}; background: #fff; }
+        .optg-collapse-btn { width: 30px; height: 30px; border-radius: 9px; border: 1px solid ${OPTG.border}; background: #fff; color: ${OPTG.gray}; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+        .optg-badge { font-size: 11px; font-weight: 700; color: ${OPTG.primaryDark}; background: ${OPTG.primarySoft}; border-radius: 999px; padding: 3px 9px; white-space: nowrap; }
+        .optg-body { padding: 0 18px 18px; }
+        .optg-row-head { display: grid; grid-template-columns: 1.1fr 1.3fr .7fr 1.3fr 70px 78px; gap: 10px; padding: 0 10px; margin-bottom: 6px; }
+        .optg-row-head span { font-size: 11px; font-weight: 700; color: ${OPTG.gray}; text-transform: uppercase; letter-spacing: .03em; }
+        @media (max-width: 760px) { .optg-row-head { display: none; } }
+        .optg-choice-row { display: grid; grid-template-columns: 1.1fr 1.3fr .7fr 1.3fr 70px 78px; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 12px; transition: background 150ms ease; }
+        .optg-choice-row:hover { background: ${OPTG.warm}; }
+        @media (max-width: 760px) { .optg-choice-row { grid-template-columns: 1fr; gap: 6px; padding: 10px; border: 1px solid ${OPTG.border}; margin-bottom: 8px; } }
+        .optg-input { width: 100%; border: 1px solid transparent; background: #F3F4F6; border-radius: 9px; padding: 7px 10px; font-size: 13px; color: ${OPTG.ink}; transition: background 150ms ease, border-color 150ms ease; }
+        .optg-input:focus { outline: none; background: #fff; border-color: ${OPTG.primary}; }
+        .optg-fav-btn { width: 30px; height: 30px; border-radius: 9px; border: 1px solid ${OPTG.border}; background: #fff; color: #C9C2B4; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 150ms ease; }
+        .optg-fav-btn.active { background: ${OPTG.goldSoft}; border-color: #F2CB8A; color: ${OPTG.gold}; }
+        .optg-add-choice { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; border: 1.5px dashed #C7CEDD; background: ${OPTG.primarySoft}; color: ${OPTG.primaryDark}; border-radius: 12px; padding: 10px; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 150ms ease; margin-top: 6px; }
+        .optg-add-choice:hover { border-color: ${OPTG.primary}; background: rgba(37,99,235,.14); }
+        .optg-extra-toggle { border: none; background: none; color: ${OPTG.gray}; font-size: 11.5px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 4px; padding: 4px 6px; }
+        .optg-extra-toggle:hover { color: ${OPTG.primaryDark}; }
+        .optg-sidebar { position: sticky; top: 10px; display: flex; flex-direction: column; gap: 16px; }
+        .optg-side-card { background: #fff; border: 1px solid ${OPTG.border}; border-radius: 16px; padding: 18px; box-shadow: 0 10px 30px rgba(0,0,0,.05); }
+        .optg-stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .optg-stat { background: ${OPTG.warm}; border-radius: 12px; padding: 10px 12px; }
+        .optg-stat b { display: block; font-size: 22px; font-weight: 700; color: ${OPTG.ink}; }
+        .optg-stat span { font-size: 11px; color: ${OPTG.gray}; font-weight: 600; }
+        .optg-nav-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; border: none; background: none; text-align: left; padding: 8px 9px; border-radius: 9px; font-size: 12.5px; font-weight: 600; color: ${OPTG.ink}; cursor: pointer; }
+        .optg-nav-item:hover { background: ${OPTG.warm}; }
+        .optg-nav-item.active { background: ${OPTG.primarySoft}; color: ${OPTG.primaryDark}; }
+        .optg-preview-choice { padding: 7px 13px; border-radius: 10px; border: 1px solid ${OPTG.border}; background: #fff; font-size: 12.5px; font-weight: 600; color: ${OPTG.ink}; }
+        .optg-preview-choice.default { background: ${OPTG.primary}; border-color: ${OPTG.primary}; color: #fff; }
+      `}</style>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 4 }}>
+        <div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: OPTG.ink, fontFamily: "var(--f-display)" }}>ตัวเลือกเสริม</div>
+          <div style={{ fontSize: 12.5, color: OPTG.gray, marginTop: 2 }}>ตัวเลือกเสริมสำหรับลูกค้า เช่น เมล็ดกาแฟ ความหวาน นม</div>
+        </div>
         <button className="cbtn cbtn-accent" onClick={addGroup}><Icon name="plus" size={14} /> เพิ่มกลุ่มตัวเลือก</button>
       </div>
-      <p style={{ fontSize: 11.5, color: "var(--espresso-2)", margin: "0 0 14px" }}>
-        ตั้งค่าที่นี่ครั้งเดียว แล้วไปติ๊กเลือกว่าเมนูไหนใช้กลุ่มตัวเลือกไหนได้ในแท็บ "เมนู & สูตร" ตอนแก้ไขเมนู
-        ถ้าตัวเลือกไหนแทนวัตถุดิบ (เช่น เลือกเมล็ด/นมคนละแบบ) ให้เลือก "วัตถุดิบที่ใช้แทน" ระบบจะตัดสต็อกตามที่ลูกค้าเลือกจริงแทนสูตรตั้งต้น
-        (วัตถุดิบต้นทางและตัวเลือกต้องตั้ง "กลุ่มทางเลือก" ให้ตรงกันในแท็บวัตถุดิบก่อน)
-        เลือกวัตถุดิบเดิมของสูตรแล้วปรับ "% ที่ใช้" ได้ด้วย เช่น กลุ่ม "ความหวาน" เลือกไซรัปแล้วตั้งหวานปกติ 100%, หวานน้อย 50%, ไม่หวาน 0% ระบบจะตัดสต็อกและคิดต้นทุนตามปริมาณจริงที่ใช้
-        ถ้าตัวเลือกเดียวต้องปรับหลายวัตถุดิบพร้อมกัน (เช่น ลดความหวานแล้วต้องเติมนมสดชดเชยปริมาณของเหลว) ให้กด "ปรับปริมาณวัตถุดิบอื่นพร้อมกัน" เพิ่มได้ทีละรายการ ไม่จำกัดจำนวน และไม่ต้องตั้งกลุ่มทางเลือก
-        กดไอคอนดาว ★ เพื่อตั้งตัวเลือกเริ่มต้น ลูกค้าจะไม่ต้องกดเลือกเองถ้าไม่ต้องการเปลี่ยน
-      </p>
 
-      {data.optionGroups.length === 0 && <EmptyNote text={'ยังไม่มีกลุ่มตัวเลือก กด "เพิ่มกลุ่มตัวเลือก" เพื่อเริ่ม'} />}
+      <button
+        onClick={() => setHelpOpen((v) => !v)}
+        style={{ display: "flex", alignItems: "center", gap: 6, border: "none", background: "none", color: OPTG.primaryDark, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: "10px 0", minHeight: 44 }}
+      >
+        <Icon name="info-circle" size={14} /> วิธีใช้งาน{helpOpen ? "ซ่อน" : ""}
+        <Icon name={helpOpen ? "chevron-up" : "chevron-down"} size={13} />
+      </button>
+      {helpOpen && (
+        <div style={{ background: OPTG.primarySoft, border: `1px solid rgba(37,99,235,.18)`, borderRadius: 14, padding: "14px 16px", fontSize: 12.5, color: OPTG.ink, lineHeight: 1.7, marginBottom: 16 }}>
+          ตั้งค่าที่นี่ครั้งเดียว แล้วไปติ๊กเลือกว่าเมนูไหนใช้กลุ่มตัวเลือกไหนได้ในแท็บ "เมนู & สูตร" ตอนแก้ไขเมนู<br />
+          ถ้าตัวเลือกไหนแทนวัตถุดิบ (เช่น เลือกเมล็ด/นมคนละแบบ) ให้เลือก "วัตถุดิบเชื่อมโยง" ระบบจะตัดสต็อกตามที่ลูกค้าเลือกจริงแทนสูตรตั้งต้น (วัตถุดิบต้นทางและตัวเลือกต้องตั้ง "กลุ่มทางเลือก" ให้ตรงกันในแท็บวัตถุดิบก่อน)<br />
+          เลือกวัตถุดิบเดิมของสูตรแล้วปรับ "% ที่ใช้" ได้ด้วย เช่น กลุ่ม "ความหวาน" เลือกไซรัปแล้วตั้งหวานปกติ 100%, หวานน้อย 50%, ไม่หวาน 0%<br />
+          ถ้าตัวเลือกเดียวต้องปรับหลายวัตถุดิบพร้อมกัน ให้กด "ปรับวัตถุดิบอื่นพร้อมกัน" เพิ่มได้ไม่จำกัด ไม่ต้องตั้งกลุ่มทางเลือก<br />
+          กดไอคอนดาว ★ เพื่อตั้งตัวเลือกเริ่มต้น ลูกค้าจะไม่ต้องกดเลือกเองถ้าไม่ต้องการเปลี่ยน
+        </div>
+      )}
 
-      {data.optionGroups.map((g) => (
-        <div key={g.id} style={glass({ borderRadius: 12, padding: 14, marginBottom: 12 })}>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
-            <input className="cfield" value={g.name} onChange={(e) => patchGroup(g.id, { name: e.target.value })} style={{ flex: 1 }} />
-            <label style={{ fontSize: 12, color: "var(--espresso-2)", display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>
-              <input type="checkbox" checked={g.required} onChange={(e) => patchGroup(g.id, { required: e.target.checked })} />
-              บังคับเลือก
-            </label>
-            <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => removeGroup(g.id)} title="ลบกลุ่มตัวเลือกนี้"><Icon name="trash" size={13} /></button>
+      <div className="optg-shell">
+        <div style={{ minWidth: 0 }}>
+          {data.optionGroups.length === 0 && <EmptyNote text={'ยังไม่มีกลุ่มตัวเลือก กด "เพิ่มกลุ่มตัวเลือก" เพื่อเริ่ม'} />}
+
+          {data.optionGroups.map((g) => {
+            const isCollapsed = !!collapsed[g.id];
+            return (
+              <div key={g.id} className="optg-card" ref={(el) => { groupRefs.current[g.id] = el; }} onClick={() => setActiveGroupId(g.id)}>
+                <div className="optg-card-head">
+                  <button className="optg-collapse-btn" onClick={(e) => { e.stopPropagation(); toggleCollapse(g.id); }} title={isCollapsed ? "ขยาย" : "ย่อ"}>
+                    <Icon name={isCollapsed ? "chevron-down" : "chevron-up"} size={15} />
+                  </button>
+                  <input className="optg-name-input" value={g.name} onChange={(e) => patchGroup(g.id, { name: e.target.value })} />
+                  <span className="optg-badge">{g.choices.length} ตัวเลือก</span>
+                  <OptgToggle checked={g.required} onChange={(v) => patchGroup(g.id, { required: v })} label="บังคับเลือก" />
+                  <OptgKebab items={[{ icon: "trash", label: "ลบกลุ่มนี้", danger: true, onClick: () => removeGroup(g.id) }]} />
+                </div>
+
+                {!isCollapsed && (
+                  <div className="optg-body">
+                    <div className="optg-row-head">
+                      <span>ชื่อตัวเลือก</span><span>คำอธิบาย</span><span>ราคาเพิ่ม</span><span>วัตถุดิบเชื่อมโยง</span><span>ค่าเริ่มต้น</span><span></span>
+                    </div>
+                    {g.choices.map((c) => (
+                      <div key={c.id}>
+                        <div className="optg-choice-row">
+                          <input className="optg-input" value={c.label} onChange={(e) => patchChoice(g.id, c.id, { label: e.target.value })} placeholder="ชื่อตัวเลือก" />
+                          <input className="optg-input" value={c.note} onChange={(e) => patchChoice(g.id, c.id, { note: e.target.value })} placeholder="คำอธิบาย (ถ้ามี)" />
+                          <input className="optg-input" type="number" value={c.priceDelta} onChange={(e) => patchChoice(g.id, c.id, { priceDelta: Number(e.target.value) })} title="ราคาเพิ่ม (บาท)" />
+                          <div style={{ display: "flex", gap: 6, alignItems: "center", minWidth: 0 }}>
+                            <select
+                              className="optg-input"
+                              value={c.ingredientId || ""}
+                              onChange={(e) => patchChoice(g.id, c.id, { ingredientId: e.target.value || null })}
+                              title="วัตถุดิบที่ใช้แทนเมื่อลูกค้าเลือกตัวเลือกนี้"
+                            >
+                              <option value="">ไม่เชื่อมโยง</option>
+                              {data.ingredients.filter((i) => i.altGroup).map((i) => (
+                                <option key={i.id} value={i.id}>{i.name} ({i.altGroup})</option>
+                              ))}
+                            </select>
+                            {c.ingredientId && (
+                              <input
+                                className="optg-input"
+                                type="number"
+                                value={c.qtyPercent != null ? c.qtyPercent : 100}
+                                onChange={(e) => patchChoice(g.id, c.id, { qtyPercent: Number(e.target.value) })}
+                                style={{ width: 58, flexShrink: 0 }}
+                                title="ปริมาณที่ใช้ (% ของสูตรตั้งต้น)"
+                              />
+                            )}
+                          </div>
+                          <button
+                            className={"optg-fav-btn" + (c.isDefault ? " active" : "")}
+                            onClick={() => setDefaultChoice(g.id, c.id)}
+                            title={c.isDefault ? "เป็นค่าเริ่มต้นอยู่ (กดอีกครั้งเพื่อยกเลิก)" : "ตั้งเป็นค่าเริ่มต้น"}
+                          ><Icon name="star" size={14} /></button>
+                          <OptgKebab items={[{ icon: "trash", label: "ลบตัวเลือกนี้", danger: true, onClick: () => removeChoice(g.id, c.id) }]} />
+                        </div>
+
+                        {(c.extraAdjustments || []).length > 0 && (
+                          <div style={{ marginLeft: 10, paddingLeft: 12, borderLeft: `2px solid ${OPTG.border}` }}>
+                            {c.extraAdjustments.map((a, idx) => (
+                              <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6, flexWrap: "wrap" }}>
+                                <span style={{ fontSize: 11, color: OPTG.gray, whiteSpace: "nowrap" }}>ปรับเพิ่ม:</span>
+                                <select
+                                  className="optg-input"
+                                  style={{ flex: 1, minWidth: 140 }}
+                                  value={a.ingredientId || ""}
+                                  onChange={(e) => patchExtraAdjustment(g.id, c.id, idx, { ingredientId: e.target.value || null })}
+                                >
+                                  <option value="">เลือกวัตถุดิบ</option>
+                                  {data.ingredients.map((i) => (
+                                    <option key={i.id} value={i.id}>{i.name}</option>
+                                  ))}
+                                </select>
+                                <input
+                                  className="optg-input"
+                                  type="number"
+                                  value={a.qtyPercent != null ? a.qtyPercent : 100}
+                                  onChange={(e) => patchExtraAdjustment(g.id, c.id, idx, { qtyPercent: Number(e.target.value) })}
+                                  style={{ width: 58 }}
+                                  title="ปริมาณที่ใช้ (% ของสูตรตั้งต้นของวัตถุดิบนี้ในเมนู)"
+                                />
+                                <button className="optg-fav-btn" style={{ color: OPTG.danger, borderColor: OPTG.dangerSoft }} onClick={() => removeExtraAdjustment(g.id, c.id, idx)} title="ลบรายการนี้"><Icon name="x" size={13} /></button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <button className="optg-extra-toggle" style={{ marginLeft: 10 }} onClick={() => addExtraAdjustment(g.id, c.id)}>
+                          <Icon name="plus" size={11} /> ปรับวัตถุดิบอื่นพร้อมกัน
+                        </button>
+                      </div>
+                    ))}
+                    <button className="optg-add-choice" onClick={() => addChoice(g.id)}><Icon name="plus" size={14} /> เพิ่มตัวเลือกย่อย</button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="optg-sidebar">
+          <div className="optg-side-card">
+            <div style={{ fontSize: 13, fontWeight: 700, color: OPTG.ink, marginBottom: 12 }}>สรุปภาพรวม</div>
+            <div className="optg-stat-grid">
+              <div className="optg-stat"><b>{totalGroups}</b><span>กลุ่มทั้งหมด</span></div>
+              <div className="optg-stat"><b>{totalOptions}</b><span>ตัวเลือกทั้งหมด</span></div>
+              <div className="optg-stat"><b>{requiredGroups}</b><span>กลุ่มบังคับเลือก</span></div>
+              <div className="optg-stat"><b>{defaultOptions}</b><span>ตั้งค่าเริ่มต้นแล้ว</span></div>
+            </div>
           </div>
 
-          {g.choices.map((c) => (
-            <div key={c.id} style={{ marginBottom: 8, paddingLeft: 12 }}>
-              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                <input className="cfield" value={c.label} onChange={(e) => patchChoice(g.id, c.id, { label: e.target.value })} placeholder="ชื่อตัวเลือก" style={{ flex: 1.2, minWidth: 110 }} />
-                <input className="cfield" value={c.note} onChange={(e) => patchChoice(g.id, c.id, { note: e.target.value })} placeholder="คำอธิบาย (ถ้ามี)" style={{ flex: 1.5, minWidth: 110 }} />
-                <input className="cfield" type="number" value={c.priceDelta} onChange={(e) => patchChoice(g.id, c.id, { priceDelta: Number(e.target.value) })} style={{ width: 70 }} title="ราคาเพิ่ม (บาท)" />
-                <select
-                  className="cfield"
-                  style={{ flex: 1.3, minWidth: 150 }}
-                  value={c.ingredientId || ""}
-                  onChange={(e) => patchChoice(g.id, c.id, { ingredientId: e.target.value || null })}
-                  title="วัตถุดิบที่ใช้แทนเมื่อลูกค้าเลือกตัวเลือกนี้"
-                >
-                  <option value="">ไม่ตัดสต็อกแทนวัตถุดิบ</option>
-                  {data.ingredients.filter((i) => i.altGroup).map((i) => (
-                    <option key={i.id} value={i.id}>{i.name} ({i.altGroup})</option>
-                  ))}
-                </select>
-                {c.ingredientId && (
-                  <input
-                    className="cfield"
-                    type="number"
-                    value={c.qtyPercent != null ? c.qtyPercent : 100}
-                    onChange={(e) => patchChoice(g.id, c.id, { qtyPercent: Number(e.target.value) })}
-                    style={{ width: 66 }}
-                    title="ปริมาณที่ใช้ (% ของสูตรตั้งต้น) เช่น หวานน้อยลง 50%, ไม่หวาน 0%"
-                  />
-                )}
-                <button
-                  className="cbtn"
-                  style={{
-                    padding: "6px 8px",
-                    background: c.isDefault ? "var(--sage-light)" : undefined,
-                    borderColor: c.isDefault ? "var(--sage)" : undefined,
-                    color: c.isDefault ? "var(--sage-dark)" : undefined,
-                  }}
-                  onClick={() => setDefaultChoice(g.id, c.id)}
-                  title={c.isDefault ? "เป็นค่าเริ่มต้นอยู่ (กดอีกครั้งเพื่อยกเลิก)" : "ตั้งเป็นค่าเริ่มต้น (ลูกค้าไม่ต้องกดเลือกเอง)"}
-                >
-                  <Icon name="star" size={13} />
-                </button>
-                <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => removeChoice(g.id, c.id)} title="ลบตัวเลือกย่อยนี้"><Icon name="x" size={13} /></button>
-              </div>
-
-              {(c.extraAdjustments || []).length > 0 && (
-                <div style={{ marginTop: 4, paddingLeft: 14, borderLeft: "2px solid var(--line)" }}>
-                  {c.extraAdjustments.map((a, idx) => (
-                    <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4, flexWrap: "wrap" }}>
-                      <span style={{ fontSize: 11, color: "var(--espresso-2)", whiteSpace: "nowrap" }}>ปรับเพิ่ม:</span>
-                      <select
-                        className="cfield"
-                        style={{ flex: 1, minWidth: 140 }}
-                        value={a.ingredientId || ""}
-                        onChange={(e) => patchExtraAdjustment(g.id, c.id, idx, { ingredientId: e.target.value || null })}
-                      >
-                        <option value="">เลือกวัตถุดิบ</option>
-                        {data.ingredients.map((i) => (
-                          <option key={i.id} value={i.id}>{i.name}</option>
-                        ))}
-                      </select>
-                      <input
-                        className="cfield"
-                        type="number"
-                        value={a.qtyPercent != null ? a.qtyPercent : 100}
-                        onChange={(e) => patchExtraAdjustment(g.id, c.id, idx, { qtyPercent: Number(e.target.value) })}
-                        style={{ width: 66 }}
-                        title="ปริมาณที่ใช้ (% ของสูตรตั้งต้นของวัตถุดิบนี้ในเมนู)"
-                      />
-                      <button className="cbtn cbtn-danger" style={{ padding: "5px 7px" }} onClick={() => removeExtraAdjustment(g.id, c.id, idx)} title="ลบรายการนี้"><Icon name="x" size={12} /></button>
-                    </div>
+          {activeGroup && (
+            <div className="optg-side-card">
+              <div style={{ fontSize: 13, fontWeight: 700, color: OPTG.ink, marginBottom: 3 }}>ตัวอย่างที่ลูกค้าเห็น</div>
+              <div style={{ fontSize: 11.5, color: OPTG.gray, marginBottom: 12 }}>{activeGroup.name}{activeGroup.required ? " (บังคับเลือก)" : ""}</div>
+              {activeGroup.choices.length === 0 ? (
+                <EmptyNote text="กลุ่มนี้ยังไม่มีตัวเลือกย่อย" />
+              ) : (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+                  {activeGroup.choices.map((c) => (
+                    <span key={c.id} className={"optg-preview-choice" + (c.isDefault ? " default" : "")}>
+                      {c.label || "…"}{c.priceDelta ? ` +฿${c.priceDelta}` : ""}
+                    </span>
                   ))}
                 </div>
               )}
-              <button className="cbtn" style={{ marginTop: 4, marginLeft: 14, padding: "4px 8px", fontSize: 11 }} onClick={() => addExtraAdjustment(g.id, c.id)}>
-                <Icon name="plus" size={11} /> ปรับปริมาณวัตถุดิบอื่นพร้อมกัน
-              </button>
             </div>
-          ))}
-          <button className="cbtn" style={{ marginLeft: 12 }} onClick={() => addChoice(g.id)}><Icon name="plus" size={13} /> เพิ่มตัวเลือกย่อย</button>
+          )}
+
+          {data.optionGroups.length > 1 && (
+            <div className="optg-side-card">
+              <div style={{ fontSize: 13, fontWeight: 700, color: OPTG.ink, marginBottom: 8 }}>ไปยังกลุ่ม</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                {data.optionGroups.map((g) => (
+                  <button key={g.id} className={"optg-nav-item" + (g.id === activeGroupId ? " active" : "")} onClick={() => jumpTo(g.id)}>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.name || "(ไม่มีชื่อ)"}</span>
+                    <span style={{ color: OPTG.gray, fontWeight: 500, flexShrink: 0 }}>{g.choices.length}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
-      ))}
+      </div>
     </div>
   );
 }
