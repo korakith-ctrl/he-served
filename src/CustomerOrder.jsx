@@ -1331,7 +1331,7 @@ export default function CustomerOrder({ shopUid }) {
                           title = promo.name || `เลือก ${promo.chooseCount} จาก ${pool.length} รายการ`;
                           subtitle = pool.map((m) => m.name).join(", ");
                           priceNode = (
-                            <span style={{ fontSize: 15, fontWeight: 700, color: COLORS.danger }}>
+                            <span style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.danger }}>
                               {promo.discountType === "percent" ? `ลด ${promo.discountValue}%` : `ชุดละ ${money(promo.discountValue)}`}
                             </span>
                           );
@@ -1347,9 +1347,9 @@ export default function CustomerOrder({ shopUid }) {
                           title = promo.name || menu.name;
                           subtitle = `${money(menu.priceStore)}/ชิ้น`;
                           priceNode = (
-                            <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                              <span style={{ fontSize: 12.5, color: COLORS.espresso2, textDecoration: "line-through" }}>{money(menu.priceStore * promo.minQty)}</span>
-                              <span style={{ fontSize: 15, fontWeight: 700, color: COLORS.danger }}>{money(setPrice)}</span>
+                            <span style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+                              <span style={{ fontSize: 10.5, color: COLORS.espresso2, textDecoration: "line-through" }}>{money(menu.priceStore * promo.minQty)}</span>
+                              <span style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.danger }}>{money(setPrice)}</span>
                             </span>
                           );
                           onCardClick = () => openMenu(menu, promo);
@@ -1364,9 +1364,9 @@ export default function CustomerOrder({ shopUid }) {
                           title = promo.name || prices.map((p) => p.name).join(" + ");
                           subtitle = prices.map((p) => p.name).join(", ");
                           priceNode = (
-                            <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                              <span style={{ fontSize: 12.5, color: COLORS.espresso2, textDecoration: "line-through" }}>{money(originalTotal)}</span>
-                              <span style={{ fontSize: 15, fontWeight: 700, color: COLORS.danger }}>{money(promoTotal)}</span>
+                            <span style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+                              <span style={{ fontSize: 10.5, color: COLORS.espresso2, textDecoration: "line-through" }}>{money(originalTotal)}</span>
+                              <span style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.danger }}>{money(promoTotal)}</span>
                             </span>
                           );
                           onCardClick = () => startBundleFlow(promo);
@@ -1381,9 +1381,9 @@ export default function CustomerOrder({ shopUid }) {
                           title = promo.name || menu.name;
                           subtitle = null;
                           priceNode = (
-                            <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                              <span style={{ fontSize: 12.5, color: COLORS.espresso2, textDecoration: "line-through" }}>{money(menu.priceStore)}</span>
-                              <span style={{ fontSize: 15, fontWeight: 700, color: COLORS.danger }}>{money(promoPrice)}</span>
+                            <span style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+                              <span style={{ fontSize: 10.5, color: COLORS.espresso2, textDecoration: "line-through" }}>{money(menu.priceStore)}</span>
+                              <span style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.danger }}>{money(promoPrice)}</span>
                             </span>
                           );
                           onCardClick = () => openMenu(menu, promo);
@@ -1396,24 +1396,36 @@ export default function CustomerOrder({ shopUid }) {
                               className="offer-card"
                               onClick={() => { triggerOfferRipple(promo.id); onCardClick(); }}
                               style={{
-                                display: "flex", alignItems: "center", gap: 16, background: "#fff", borderRadius: 20,
-                                padding: 20, boxShadow: "0 6px 20px rgba(43,29,20,0.10)", position: "relative", cursor: "pointer",
+                                ...GLASS_PANEL,
+                                display: "flex", alignItems: "center", gap: 10, borderRadius: 16,
+                                padding: 10, height: 84, position: "relative", cursor: "pointer",
                               }}
                             >
-                              <div ref={(el) => { menuThumbRefs.current[refKey] = el; }} style={{ flex: "0 0 30%", maxWidth: 116 }}>
-                                <PromoImageGrid images={images} size={104} />
+                              <div ref={(el) => { menuThumbRefs.current[refKey] = el; }} style={{ flex: "0 0 64px" }}>
+                                <PromoImageGrid images={images} size={64} />
                               </div>
                               <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 11, fontWeight: 600, color: "#F97316", textTransform: "uppercase", letterSpacing: ".04em" }}>{label}</div>
-                                <div style={{ fontSize: 19, fontWeight: 700, color: COLORS.espresso5, marginTop: 4, lineHeight: 1.25 }}>{title}</div>
-                                {subtitle && <div style={{ fontSize: 12, color: COLORS.espresso2, marginTop: 3 }}>{subtitle}</div>}
-                                <div style={{ marginTop: 8 }}>{priceNode}</div>
+                                <div style={{
+                                  fontSize: 9.5, fontWeight: 600, color: "#F97316", textTransform: "uppercase", letterSpacing: ".03em",
+                                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                                }}>{label}</div>
+                                <div style={{
+                                  fontSize: 14, fontWeight: 700, color: COLORS.espresso5, marginTop: 2, lineHeight: 1.2,
+                                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                                }}>{title}</div>
+                                {subtitle && (
+                                  <div style={{
+                                    fontSize: 10.5, color: COLORS.espresso2, marginTop: 1,
+                                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                                  }}>{subtitle}</div>
+                                )}
+                                <div style={{ marginTop: 3, fontSize: 12.5 }}>{priceNode}</div>
                               </div>
                               {qty > 0 && (
                                 <div style={{
-                                  position: "absolute", top: 12, right: 12, background: COLORS.sage, color: "#fff",
-                                  fontSize: 11, fontWeight: 700, borderRadius: 999, minWidth: 22, height: 22,
-                                  display: "flex", alignItems: "center", justifyContent: "center", padding: "0 6px",
+                                  position: "absolute", top: 8, right: 8, background: COLORS.sage, color: "#fff",
+                                  fontSize: 10, fontWeight: 700, borderRadius: 999, minWidth: 19, height: 19,
+                                  display: "flex", alignItems: "center", justifyContent: "center", padding: "0 5px",
                                 }}>
                                   <AnimatedQty value={qty} />
                                 </div>
