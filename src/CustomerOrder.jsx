@@ -438,12 +438,13 @@ function OfferCard({ images, label, title, subtitle, priceNode, qty, rippling, o
       onClick={onClick}
       style={{
         ...GLASS_PANEL,
-        display: "flex", alignItems: "center", gap: 14, borderRadius: 18,
-        padding: 16, height: 116, position: "relative", cursor: "pointer",
+        display: "flex", alignItems: "center", gap: 10, borderRadius: 18,
+        padding: 14, height: 116, position: "relative", cursor: "pointer",
+        width: "calc(100% - 20px)", maxWidth: 330, flexShrink: 0,
       }}
     >
-      <div ref={thumbRef} style={{ flex: "0 0 92px" }}>
-        <PromoImageGrid images={images} size={92} />
+      <div ref={thumbRef} style={{ flex: "0 0 72px" }}>
+        <PromoImageGrid images={images} size={72} />
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{
