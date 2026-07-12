@@ -21,6 +21,7 @@ const STATUS_TEXT = {
   paid: "ร้านได้รับเงินแล้ว กำลังเตรียมคิว...",
   preparing: "กำลังชงเครื่องดื่มของคุณ...",
   ready: "พร้อมรับแล้ว! มารับที่หน้าร้านได้เลย",
+  done: "รับออเดอร์เรียบร้อยแล้ว ขอบคุณที่ใช้บริการ",
   cancelled: "ออเดอร์นี้ถูกยกเลิก",
 };
 
@@ -1010,7 +1011,7 @@ export default function CustomerOrder({ shopUid }) {
     let cancelled = false;
     Promise.allSettled(ids.map((id) => get(ref(db, `orders/${shopUid}/${id}/status`)))).then((results) => {
       if (cancelled) return;
-      const active = results.some((r) => r.status === "fulfilled" && r.value.exists() && r.value.val() !== "ready" && r.value.val() !== "cancelled");
+      const active = results.some((r) => r.status === "fulfilled" && r.value.exists() && r.value.val() !== "done" && r.value.val() !== "cancelled");
       setHasActiveOrder(active);
     });
     return () => { cancelled = true; };

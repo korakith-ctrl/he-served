@@ -937,13 +937,21 @@ function SellPanel({ data, ingredientsById, recordSale }) {
   );
 }
 
-const ORDER_STATUS_LABEL = { pending: "รอตรวจ", paid: "จ่ายแล้ว", preparing: "กำลังทำ", ready: "พร้อมรับ", cancelled: "ยกเลิก" };
+// เวิร์กโฟลว์การ์ด 4 สถานะหลัก (คอลัมน์ Kanban) — "ยกเลิก" เป็นสถานะพิเศษนอกบอร์ด
+const KANBAN_COLUMNS = [
+  { id: "pending", label: "รอยืนยัน", icon: "receipt" },
+  { id: "preparing", label: "กำลังดำเนินการ", icon: "cup" },
+  { id: "ready", label: "พร้อมเสิร์ฟ", icon: "bell" },
+  { id: "done", label: "เสร็จ", icon: "circle-check" },
+];
+const ORDER_STATUS_LABEL = { pending: "รอยืนยัน", paid: "จ่ายแล้ว", preparing: "กำลังดำเนินการ", ready: "พร้อมเสิร์ฟ", done: "เสร็จ", cancelled: "ยกเลิก" };
 // สีนำ ข้อความรอง — ให้บาริสต้ามองจากระยะไกลแล้วรู้สถานะทันทีจากสี ไม่ต้องเพ่งอ่านตัวหนังสือ
 const STATUS_COLORS = {
   pending: { dot: "#F59E0B", bg: "rgba(245,158,11,0.16)", color: "#B45309" },
   paid: { dot: "#16A34A", bg: "rgba(22,163,74,0.16)", color: "#15803D" },
   preparing: { dot: "#2563EB", bg: "rgba(37,99,235,0.16)", color: "#1D4ED8" },
-  ready: { dot: "#16A34A", bg: "#16A34A", color: "#fff", solid: true },
+  ready: { dot: "#7C3AED", bg: "rgba(124,58,237,0.16)", color: "#6D28D9" },
+  done: { dot: "#16A34A", bg: "#16A34A", color: "#fff", solid: true },
   cancelled: { dot: "#DC2626", bg: "rgba(220,38,38,0.16)", color: "#B91C1C" },
 };
 const PAYMENT_METHOD_LABEL = { cash: "เงินสด", promptpay: "พร้อมเพย์" };
@@ -1020,26 +1028,32 @@ function OrderItemLines({ items, note }) {
   );
 }
 
+const KANBAN_NEXT_LABEL = { pending: "ยืนยันรับเงินแล้ว", preparing: "พร้อมเสิร์ฟ", ready: "เสร็จ / ลูกค้ารับแล้ว" };
+
 function OrdersPanel({ uid, orders, recordSale, showToast, data, ingredientsById }) {
   const prevStatusRef = useRef({});
-  const [justPaidIds, setJustPaidIds] = useState(new Set());
+  const [justMovedIds, setJustMovedIds] = useState(new Set());
+  const [dragId, setDragId] = useState(null);
+  const [dragPos, setDragPos] = useState(null);
+  const [overCol, setOverCol] = useState(null);
+  const dragInfoRef = useRef(null);
 
   useEffect(() => {
-    const newlyPaid = [];
+    const changed = [];
     for (const o of orders) {
-      const prevStatus = prevStatusRef.current[o.id];
-      if (prevStatus && prevStatus !== "paid" && o.status === "paid") newlyPaid.push(o.id);
+      const prev = prevStatusRef.current[o.id];
+      if (prev && prev !== o.status) changed.push(o.id);
       prevStatusRef.current[o.id] = o.status;
     }
-    if (newlyPaid.length === 0) return;
-    setJustPaidIds((s) => new Set([...s, ...newlyPaid]));
+    if (changed.length === 0) return;
+    setJustMovedIds((s) => new Set([...s, ...changed]));
     const t = setTimeout(() => {
-      setJustPaidIds((s) => {
+      setJustMovedIds((s) => {
         const next = new Set(s);
-        newlyPaid.forEach((id) => next.delete(id));
+        changed.forEach((id) => next.delete(id));
         return next;
       });
-    }, 1800);
+    }, 1400);
     return () => clearTimeout(t);
   }, [orders]);
 
@@ -1048,7 +1062,7 @@ function OrdersPanel({ uid, orders, recordSale, showToast, data, ingredientsById
   }
 
   function confirmPaid(order) {
-    setStatus(order, "paid");
+    setStatus(order, "preparing");
     for (const item of order.items) {
       const upcharge = (item.options || []).reduce((s, o) => s + (o.priceDelta || 0), 0);
       const itemMenu = data.menus.find((m) => m.id === item.menuId);
@@ -1058,73 +1072,169 @@ function OrdersPanel({ uid, orders, recordSale, showToast, data, ingredientsById
     showToast(`ยืนยันออเดอร์ ${order.customerName || order.customerPhone} แล้ว บันทึกยอดขายให้อัตโนมัติ`);
   }
 
-  const pending = orders.filter((o) => o.status === "pending");
-  const inProgress = orders.filter((o) => o.status === "paid" || o.status === "preparing");
-  const history = orders.filter((o) => o.status === "ready" || o.status === "cancelled").slice(0, 20);
+  function advance(order) {
+    if (order.status === "pending") confirmPaid(order);
+    else if (order.status === "preparing") setStatus(order, "ready");
+    else if (order.status === "ready") setStatus(order, "done");
+  }
+
+  function moveTo(order, colId) {
+    if (colId === order.status) return;
+    if (order.status === "pending" && (colId === "preparing" || colId === "ready" || colId === "done")) {
+      confirmPaid(order);
+      if (colId !== "preparing") setTimeout(() => setStatus(order, colId), 0);
+    } else {
+      setStatus(order, colId);
+    }
+  }
+
+  const columns = useMemo(() => {
+    const map = { pending: [], preparing: [], ready: [], done: [] };
+    for (const o of orders) {
+      if (map[o.status]) map[o.status].push(o);
+    }
+    for (const k of Object.keys(map)) map[k].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+    return map;
+  }, [orders]);
+
+  const today = todayStr();
+  const cancelledToday = orders
+    .filter((o) => o.status === "cancelled" && new Date(o.createdAt).toISOString().slice(0, 10) === today)
+    .slice(0, 20);
+
+  function onCardPointerDown(e, order) {
+    if (e.button !== undefined && e.button !== 0) return;
+    if (e.target.closest("button")) return; // let taps on the card's own buttons work normally, not start a drag
+    const card = e.currentTarget;
+    card.setPointerCapture(e.pointerId);
+    dragInfoRef.current = { id: order.id, pointerId: e.pointerId, moved: false, startX: e.clientX, startY: e.clientY };
+    setDragPos({ x: e.clientX, y: e.clientY });
+  }
+
+  function onCardPointerMove(e) {
+    const info = dragInfoRef.current;
+    if (!info) return;
+    // small movement threshold before treating this as a drag, so simple taps on the buttons still work
+    if (!info.moved && (Math.abs(e.clientX - info.startX) > 6 || Math.abs(e.clientY - info.startY) > 6)) {
+      info.moved = true;
+      setDragId(info.id);
+    }
+    if (!info.moved) return;
+    setDragPos({ x: e.clientX, y: e.clientY });
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const colEl = el && el.closest("[data-kanban-col]");
+    setOverCol(colEl ? colEl.getAttribute("data-kanban-col") : null);
+  }
+
+  function onCardPointerUp(e) {
+    const info = dragInfoRef.current;
+    if (!info) return;
+    if (info.moved && overCol) {
+      const order = orders.find((o) => o.id === info.id);
+      if (order) moveTo(order, overCol);
+    }
+    dragInfoRef.current = null;
+    setDragId(null);
+    setDragPos(null);
+    setOverCol(null);
+  }
+
+  const draggedOrder = dragId ? orders.find((o) => o.id === dragId) : null;
 
   return (
     <div>
-      <SectionTitle icon="receipt" text={`ออเดอร์รอยืนยัน (${pending.length})`} />
-      {pending.length === 0 ? <EmptyNote text="ยังไม่มีออเดอร์ใหม่" /> : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(310px, 1fr))", gap: 14, marginBottom: 24 }}>
-          {pending.map((o) => (
-            <div key={o.id} style={glass({
-              borderRadius: 16, padding: 16,
-              borderLeft: `5px solid ${STATUS_COLORS[o.status]?.dot || "var(--line)"}`,
-            })}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 14, fontWeight: 700, color: "var(--espresso-4)" }}>
-                <span>{o.customerName ? `${o.customerName} · ${o.customerPhone}` : o.customerPhone}</span>
-                <StatusBadge status={o.status} big />
-              </div>
-              <div style={{ fontSize: 11.5, color: "var(--espresso-2)", marginTop: 2 }}>
-                {new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}
-              </div>
-              <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} paymentVerified={o.paymentVerified} paymentVerifiedBy={o.paymentVerifiedBy} />
-              <OrderItemLines items={o.items} note={o.note} />
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontWeight: 700, fontSize: 17, fontFamily: "var(--f-body)", borderTop: "1px dashed var(--line)", paddingTop: 8, marginBottom: 10 }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: "var(--espresso-3)" }}>รวม</span><span>฿{money(o.total)}</span>
-              </div>
-              <div style={{ display: "flex", gap: 6 }}>
-                <button className="cbtn cbtn-accent" style={{ flex: 1, fontSize: 14, padding: "10px 14px" }} onClick={() => confirmPaid(o)}>ยืนยันรับเงินแล้ว</button>
-                <button className="cbtn cbtn-danger" onClick={() => setStatus(o, "cancelled")} title="ยกเลิกออเดอร์"><Icon name="x" size={13} /></button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <SectionTitle icon="cup" text={`กำลังทำ (${inProgress.length})`} />
-      {inProgress.length === 0 ? <EmptyNote text="ไม่มีออเดอร์ที่กำลังทำอยู่" /> : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(310px, 1fr))", gap: 14, marginBottom: 24 }}>
-          {inProgress.map((o) => (
+      <SectionTitle icon="layout-kanban" text="บอร์ดออเดอร์ — ลากการ์ดข้ามคอลัมน์เพื่ออัปเดตสถานะ" />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(260px, 1fr))", gap: 14, overflowX: "auto", paddingBottom: 8, marginBottom: 26 }}>
+        {KANBAN_COLUMNS.map((col) => {
+          const list = columns[col.id];
+          const isOver = overCol === col.id && dragId;
+          const c = STATUS_COLORS[col.id];
+          return (
             <div
-              key={o.id}
-              style={glass({
-                borderRadius: 16, padding: 16,
-                borderLeft: `5px solid ${STATUS_COLORS[o.status]?.dot || "var(--line)"}`,
-                animation: justPaidIds.has(o.id) ? "paidFlash 1.8s ease" : undefined,
-              })}
+              key={col.id}
+              data-kanban-col={col.id}
+              style={{
+                ...glass({ borderRadius: 18, padding: "10px 8px 14px" }),
+                outline: isOver ? `2px dashed ${c.dot}` : "2px dashed transparent",
+                outlineOffset: -3,
+                transition: "outline .12s ease",
+                display: "flex", flexDirection: "column", gap: 10, minHeight: 220,
+              }}
             >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 14, fontWeight: 700, color: "var(--espresso-4)" }}>
-                <span>{o.customerName ? `${o.customerName} · ${o.customerPhone}` : o.customerPhone}</span>
-                <StatusBadge status={o.status} big />
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "3px 8px 8px", borderBottom: "1px solid var(--line-soft)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, fontWeight: 700, fontSize: 13.5, color: "var(--espresso-4)" }}>
+                  <span className="status-dot" style={{ background: c.dot, width: 10, height: 10 }} />
+                  {col.label}
+                </div>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "var(--espresso-2)", background: "var(--cream-2)", borderRadius: 999, padding: "1px 9px" }}>{list.length}</span>
               </div>
-              <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} paymentVerified={o.paymentVerified} paymentVerifiedBy={o.paymentVerifiedBy} />
-              <OrderItemLines items={o.items} note={o.note} />
-              {o.status === "paid" && <button className="cbtn cbtn-accent" style={{ width: "100%", fontSize: 14, padding: "10px 14px" }} onClick={() => setStatus(o, "preparing")}>เริ่มชง</button>}
-              {o.status === "preparing" && <button className="cbtn cbtn-accent" style={{ width: "100%", fontSize: 14, padding: "10px 14px" }} onClick={() => setStatus(o, "ready")}>พร้อมรับแล้ว</button>}
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, minHeight: 60 }}>
+                {list.length === 0 ? (
+                  <p style={{ fontSize: 12, color: "var(--espresso-2)", textAlign: "center", padding: "18px 6px", fontStyle: "italic", margin: 0 }}>ไม่มีออเดอร์</p>
+                ) : list.map((o) => (
+                  <div
+                    key={o.id}
+                    onPointerDown={(e) => onCardPointerDown(e, o)}
+                    onPointerMove={onCardPointerMove}
+                    onPointerUp={onCardPointerUp}
+                    onPointerCancel={onCardPointerUp}
+                    style={glass({
+                      borderRadius: 14, padding: 12,
+                      borderLeft: `5px solid ${c.dot}`,
+                      cursor: "grab", touchAction: "none",
+                      opacity: dragId === o.id ? 0.35 : 1,
+                      animation: justMovedIds.has(o.id) ? "paidFlash 1.4s ease" : undefined,
+                    })}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, fontWeight: 700, color: "var(--espresso-4)", gap: 6 }}>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.customerName ? `${o.customerName} · ${o.customerPhone}` : o.customerPhone}</span>
+                      <Icon name="grip-vertical" size={14} style={{ color: "var(--espresso-2)", flexShrink: 0 }} />
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--espresso-2)", marginTop: 2 }}>
+                      {new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}
+                    </div>
+                    <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} paymentVerified={o.paymentVerified} paymentVerifiedBy={o.paymentVerifiedBy} />
+                    <OrderItemLines items={o.items} note={o.note} />
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontWeight: 700, fontSize: 16, fontFamily: "var(--f-body)", borderTop: "1px dashed var(--line)", paddingTop: 7, marginBottom: col.id !== "done" ? 9 : 0 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: "var(--espresso-3)" }}>รวม</span><span>฿{money(o.total)}</span>
+                    </div>
+                    {col.id !== "done" && (
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button className="cbtn cbtn-accent" style={{ flex: 1, fontSize: 12.5, padding: "8px 10px" }} onClick={() => advance(o)}>{KANBAN_NEXT_LABEL[col.id]}</button>
+                        {col.id === "pending" && (
+                          <button className="cbtn cbtn-danger" style={{ padding: "8px 9px" }} onClick={() => setStatus(o, "cancelled")} title="ยกเลิกออเดอร์"><Icon name="x" size={13} /></button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
-          ))}
+          );
+        })}
+      </div>
+
+      {draggedOrder && dragPos && (
+        <div style={{
+          position: "fixed", left: dragPos.x, top: dragPos.y, transform: "translate(-50%, -50%) rotate(-2deg)",
+          zIndex: 100, pointerEvents: "none",
+          background: STATUS_COLORS[draggedOrder.status]?.dot || "var(--sage)", color: "#fff",
+          padding: "10px 18px", borderRadius: 14, fontWeight: 700, fontSize: 13.5,
+          boxShadow: "0 12px 30px rgba(0,0,0,0.25)", whiteSpace: "nowrap",
+        }}>
+          <Icon name="grip-vertical" size={13} style={{ marginRight: 6 }} />
+          {draggedOrder.customerName || draggedOrder.customerPhone} · ฿{money(draggedOrder.total)}
         </div>
       )}
 
-      <SectionTitle icon="history" text="ประวัติล่าสุด" />
-      {history.length === 0 ? <EmptyNote text="ยังไม่มีประวัติ" /> : (
+      <SectionTitle icon="ban" text={`ยกเลิกวันนี้ (${cancelledToday.length})`} />
+      {cancelledToday.length === 0 ? <EmptyNote text="ไม่มีออเดอร์ที่ถูกยกเลิกวันนี้" /> : (
         <div className="table-scroll">
           <table className="cdata">
             <thead><tr><th>เวลา</th><th>ลูกค้า</th><th>รายการ</th><th>วันรับ</th><th>ชำระ</th><th>ยอด</th><th>สถานะ</th></tr></thead>
             <tbody>
-              {history.map((o) => (
+              {cancelledToday.map((o) => (
                 <tr key={o.id}>
                   <td style={{ whiteSpace: "nowrap" }}>{new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</td>
                   <td>{o.customerName ? `${o.customerName} · ${o.customerPhone}` : o.customerPhone}</td>
