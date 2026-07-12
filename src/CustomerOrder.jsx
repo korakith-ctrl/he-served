@@ -390,6 +390,22 @@ function useDominantColor(imageUrl) {
   return color;
 }
 
+function hslToRgb(h, s, l) {
+  s /= 100; l /= 100;
+  const k = (n) => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return { r: Math.round(255 * f(0)), g: Math.round(255 * f(8)), b: Math.round(255 * f(4)) };
+}
+
+function hashColorFromText(text) {
+  const str = text || "drink";
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  const hue = Math.abs(hash) % 360;
+  return hslToRgb(hue, 58, 58);
+}
+
 function MenuThumb({ imageUrl, size = 60 }) {
   const [failed, setFailed] = useState(false);
   return (
@@ -459,10 +475,9 @@ function PromoImageGrid({ images, size = 72 }) {
 }
 
 function OfferCard({ images, label, title, subtitle, priceNode, qty, rippling, onClick, thumbRef }) {
-  const dominant = useDominantColor(images && images[0]);
-  const glassBg = dominant
-    ? `linear-gradient(135deg, rgba(${dominant.r},${dominant.g},${dominant.b},0.42) 0%, rgba(${dominant.r},${dominant.g},${dominant.b},0.14) 55%, rgba(255,255,255,0.32) 100%), rgba(255,255,255,0.28)`
-    : GLASS_PANEL.background;
+  const sampled = useDominantColor(images && images[0]);
+  const dominant = sampled || hashColorFromText(title);
+  const glassBg = `linear-gradient(135deg, rgba(${dominant.r},${dominant.g},${dominant.b},0.42) 0%, rgba(${dominant.r},${dominant.g},${dominant.b},0.14) 55%, rgba(255,255,255,0.32) 100%), rgba(255,255,255,0.28)`;
 
   return (
     <div
