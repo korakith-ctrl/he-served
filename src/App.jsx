@@ -326,6 +326,29 @@ function Icon({ name, size = 18, style }) {
   return <i className={"ti ti-" + name} style={{ fontSize: size, ...style }} aria-hidden="true"></i>;
 }
 
+function SidebarLogo({ title, size = 34 }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <div style={{
+        width: size, height: size, borderRadius: 10, background: "var(--sage)", color: "#fff",
+        display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+      }} title={title}>
+        <Icon name="coffee" size={Math.round(size * 0.53)} />
+      </div>
+    );
+  }
+  return (
+    <img
+      src="/logo.png"
+      alt={title || "โลโก้ร้าน"}
+      title={title}
+      onError={() => setFailed(true)}
+      style={{ height: size, width: "auto", maxWidth: size * 3.2, objectFit: "contain", flexShrink: 0, display: "block" }}
+    />
+  );
+}
+
 // Buffers the field's own display value locally and only pushes it up to
 // parent state once composition ends, so a controlled re-render can't
 // interrupt an in-progress Thai tone-mark composition and drop characters.
@@ -574,28 +597,7 @@ function ShopApp({ uid, user }) {
           position: "sticky", top: 0, height: "100vh", overflow: "hidden", zIndex: 5,
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 4px 18px", justifyContent: sidebarCollapsed ? "center" : "space-between" }}>
-            {!sidebarCollapsed && (
-              <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                <div style={{
-                  width: 34, height: 34, borderRadius: 10, background: "var(--sage)", color: "#fff",
-                  display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-                }}>
-                  <Icon name="coffee" size={18} />
-                </div>
-                <div style={{ minWidth: 0 }}>
-                  <p style={{ margin: 0, fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 15, color: "var(--espresso-5)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{data.settings.shopName}</p>
-                  <p style={{ margin: 0, fontSize: 10.5, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--espresso-2)" }}>ระบบหลังบ้าน</p>
-                </div>
-              </div>
-            )}
-            {sidebarCollapsed && (
-              <div style={{
-                width: 34, height: 34, borderRadius: 10, background: "var(--sage)", color: "#fff",
-                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-              }} title={data.settings.shopName}>
-                <Icon name="coffee" size={18} />
-              </div>
-            )}
+            <SidebarLogo title={data.settings.shopName} size={sidebarCollapsed ? 30 : 34} />
             {!sidebarCollapsed && (
               <button className="sidebar-toggle" onClick={() => setSidebarCollapsed(true)} title="ย่อเมนู">
                 <Icon name="chevron-left" size={15} />
