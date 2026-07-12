@@ -788,9 +788,9 @@ function ShopApp({ uid, user }) {
             display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 14, marginBottom: 22,
             ...glass({ borderRadius: 20, padding: "16px 22px" }),
           }}>
-            <div>
-              <p style={{ margin: 0, fontSize: 11.5, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--espresso-2)" }}>{data.settings.shopName}</p>
-              <h1 style={{ margin: "2px 0 0", fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 27, color: "var(--espresso-5)" }}>{activeTabInfo?.label}</h1>
+            <div style={{ minWidth: 0 }}>
+              <p style={{ margin: 0, fontSize: 11.5, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--espresso-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{data.settings.shopName}</p>
+              <h1 style={{ margin: "2px 0 0", fontFamily: "var(--f-display)", fontWeight: 600, fontSize: "clamp(19px, 5vw, 27px)", color: "var(--espresso-5)", whiteSpace: "nowrap" }}>{activeTabInfo?.label}</h1>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               {pendingOrderCount > 0 && (
@@ -1413,8 +1413,8 @@ function OrdersPanel({ uid, orders, recordSale, showToast, data, ingredientsById
       <SectionTitle icon="layout-kanban" text="บอร์ดออเดอร์ — ลากการ์ดข้ามคอลัมน์เพื่ออัปเดตสถานะ" />
       <div style={{
         display: "grid",
-        gridTemplateColumns: compact ? "repeat(4, minmax(0, 1fr))" : "repeat(4, minmax(260px, 1fr))",
-        gap: compact ? 7 : 14, overflowX: compact ? "visible" : "auto", paddingBottom: 8, marginBottom: 26,
+        gridTemplateColumns: compact ? "repeat(4, minmax(150px, 1fr))" : "repeat(4, minmax(260px, 1fr))",
+        gap: compact ? 7 : 14, overflowX: "auto", paddingBottom: 8, marginBottom: 26,
       }}>
         {KANBAN_COLUMNS.map((col) => {
           const list = columns[col.id];
