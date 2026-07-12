@@ -586,6 +586,15 @@ function ShopApp({ uid, user }) {
     return m;
   }, [data]);
 
+  // ยอดขาย/สถิติที่แสดงผลทุกจุด (ภาพรวม, สถิติในหน้าขาย, รายงาน) นับเฉพาะยอดขายที่ผูกกับออเดอร์ที่ไม่ได้ถูกยกเลิก —
+  // กันออเดอร์เก่าที่เคยถูกยกเลิกก่อนจะมีระบบคืนยอด/สต็อกอัตโนมัติ (ยอดขายเก่ายังค้างอยู่ใน data.sales แต่ไม่ควรถูกนับ)
+  // ยอดขายที่ไม่มี orderId (บันทึกมาก่อนมีระบบนี้ หรือไม่ผูกกับออเดอร์) ยังคงนับตามเดิม เพราะเช็คสถานะย้อนหลังไม่ได้
+  const cancelledOrderIds = useMemo(() => new Set(orders.filter((o) => o.status === "cancelled").map((o) => o.id)), [orders]);
+  const dataForDisplay = useMemo(() => {
+    if (!data) return data;
+    return { ...data, sales: data.sales.filter((s) => !s.orderId || !cancelledOrderIds.has(s.orderId)) };
+  }, [data, cancelledOrderIds]);
+
   if (!data) {
     return (
       <div style={{ padding: "3rem", textAlign: "center", color: "#0B4A7A", fontFamily: "sans-serif" }}>
@@ -855,13 +864,13 @@ function ShopApp({ uid, user }) {
             </div>
           </div>
 
-          {tab === "dashboard" && <Dashboard data={data} setTab={setTab} />}
-          {tab === "sell" && <SellPanel data={data} ingredientsById={ingredientsById} recordSale={recordSale} createInstoreOrder={createInstoreOrder} />}
+          {tab === "dashboard" && <Dashboard data={dataForDisplay} setTab={setTab} />}
+          {tab === "sell" && <SellPanel data={dataForDisplay} ingredientsById={ingredientsById} recordSale={recordSale} createInstoreOrder={createInstoreOrder} />}
           {tab === "orders" && <OrdersPanel uid={uid} orders={orders} recordSale={recordSale} cancelOrder={cancelOrder} showToast={showToast} data={data} ingredientsById={ingredientsById} />}
           {tab === "menus" && <MenusPanel data={data} ingredientsById={ingredientsById} updateData={updateData} showToast={showToast} />}
           {tab === "promotions" && <PromotionsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} />}
-          {tab === "reports" && <ReportsPanel data={data} />}
+          {tab === "reports" && <ReportsPanel data={dataForDisplay} />}
           {tab === "options" && <OptionGroupsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "settings" && <SettingsPanel data={data} updateData={updateData} showToast={showToast} uid={uid} />}
         </main>
