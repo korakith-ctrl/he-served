@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth, signInAnonymously } from "firebase/auth";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 import { getDatabase, ref, onValue, get, push, set } from "firebase/database";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import QRCode from "qrcode";
@@ -630,10 +630,18 @@ export default function CustomerOrder({ shopUid }) {
     return () => clearTimeout(t);
   }, []);
 
+  // ฟัง auth state ตลอด ไม่ใช่ sign-in ครั้งเดียวตอนเปิดหน้า — เบราว์เซอร์บางตัว (เช่น in-app browser ของ LINE,
+  // Safari private mode) ล้าง session ที่ persist ไว้กลางคันได้ ถ้า authUid ค้างค่าเก่าไว้ใน state เฉยๆ
+  // ตอนกดยืนยันคำสั่งซื้อ auth.uid จริงบนฝั่ง server จะไม่ตรงกับ customerUid ที่ส่งไป ทำให้เจอ PERMISSION_DENIED
   useEffect(() => {
-    signInAnonymously(auth)
-      .then((cred) => setAuthUid(cred.user.uid))
-      .catch((e) => setError("เข้าสู่ระบบไม่สำเร็จ: " + e.message));
+    const unsub = onAuthStateChanged(auth, (u) => {
+      if (u) {
+        setAuthUid(u.uid);
+      } else {
+        signInAnonymously(auth).catch((e) => setError("เข้าสู่ระบบไม่สำเร็จ: " + e.message));
+      }
+    });
+    return () => unsub();
   }, []);
 
   useEffect(() => {
@@ -983,9 +991,17 @@ export default function CustomerOrder({ shopUid }) {
     if (paymentMethod === "promptpay" && !promptpayId) { setError("ร้านนี้ยังไม่เปิดรับชำระผ่าน QR (ยังไม่ได้ตั้งค่า PromptPay)"); return; }
     setSubmitting(true);
     try {
+      // เช็ค session สดๆ ก่อนเขียนจริงเสมอ เผื่อ auth หลุดไปกลางคันโดยที่ authUid ใน state ยังค้างค่าเก่า
+      // (พบได้ใน in-app browser บางตัว / private mode ที่ persist auth ไม่เสถียร)
+      let uidToUse = auth.currentUser?.uid;
+      if (!uidToUse) {
+        const cred = await signInAnonymously(auth);
+        uidToUse = cred.user.uid;
+        setAuthUid(uidToUse);
+      }
       const newRef = push(ref(db, `orders/${shopUid}`));
       const orderData = {
-        customerUid: authUid,
+        customerUid: uidToUse,
         customerName: name.trim(),
         customerPhone: phone.trim(),
         note: note.trim(),
@@ -1008,7 +1024,10 @@ export default function CustomerOrder({ shopUid }) {
       setOrder({ id: newRef.key, ...orderData });
       setStep("pay");
     } catch (e) {
-      setError("สั่งซื้อไม่สำเร็จ: " + e.message);
+      const isAuthIssue = e.code === "PERMISSION_DENIED" || /permission_denied/i.test(e.message || "");
+      setError(isAuthIssue
+        ? "ระบบยืนยันตัวตนมีปัญหาชั่วคราว กรุณารีเฟรชหน้าเว็บแล้วลองสั่งซื้อใหม่อีกครั้ง"
+        : "สั่งซื้อไม่สำเร็จ: " + e.message);
     } finally {
       setSubmitting(false);
     }
