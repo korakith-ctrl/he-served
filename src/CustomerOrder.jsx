@@ -626,7 +626,7 @@ export default function CustomerOrder({ shopUid }) {
   const [offerRippleId, setOfferRippleId] = useState(null);
 
   useEffect(() => {
-    const t = setTimeout(() => setSplashDone(true), 5000);
+    const t = setTimeout(() => setSplashDone(true), 3000);
     return () => clearTimeout(t);
   }, []);
 
@@ -1283,7 +1283,6 @@ export default function CustomerOrder({ shopUid }) {
             style={{ ...field, resize: "vertical", minHeight: 60, fontFamily: "inherit" }}
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="เช่น หวานน้อย ไม่ใส่หลอด แยกน้ำแข็ง"
           />
 
           {error && <p style={{ fontSize: 12, color: COLORS.danger, margin: "10px 0 0" }}>{error}</p>}

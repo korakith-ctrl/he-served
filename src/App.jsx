@@ -1916,6 +1916,17 @@ function PromotionsPanel({ data, updateData, showToast }) {
     showToast("ลบโปรโมชั่นแล้ว");
   }
 
+  // ลำดับในอาเรย์คือลำดับที่แสดงในหมวด "ดีลพิเศษ" หน้าลูกค้า สลับตำแหน่งกับตัวข้างเคียงแล้วบันทึกทันที
+  function movePromo(id, dir) {
+    updateData((next) => {
+      const list = next.promotions || [];
+      const idx = list.findIndex((p) => p.id === id);
+      const swapIdx = idx + dir;
+      if (idx === -1 || swapIdx < 0 || swapIdx >= list.length) return;
+      [list[idx], list[swapIdx]] = [list[swapIdx], list[idx]];
+    });
+  }
+
   if (editing) {
     return <PromoEditor promo={editing} menus={data.menus} onSave={savePromo} onCancel={() => setEditing(null)} />;
   }
@@ -1933,7 +1944,7 @@ function PromotionsPanel({ data, updateData, showToast }) {
       </p>
       {promotions.length === 0 ? <EmptyNote text='ยังไม่มีโปรโมชั่น กด "เพิ่มโปรโมชั่น" เพื่อเริ่ม' /> : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
-          {promotions.map((promo) => {
+          {promotions.map((promo, idx) => {
             const type = promo.type || "single";
             const promoWin = promoActiveWindow(promo);
             const typeLabel = type === "bundle" ? `เซ็ตคอมโบ ${promo.menuIds.length} รายการ`
@@ -2003,6 +2014,8 @@ function PromotionsPanel({ data, updateData, showToast }) {
                     )}
                   </div>
                   <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                    <button className="cbtn" disabled={idx === 0} onClick={() => movePromo(promo.id, -1)} title="เลื่อนขึ้น" style={{ padding: "4px 6px", opacity: idx === 0 ? 0.35 : 1, cursor: idx === 0 ? "not-allowed" : "pointer" }}><Icon name="chevron-up" size={13} /></button>
+                    <button className="cbtn" disabled={idx === promotions.length - 1} onClick={() => movePromo(promo.id, 1)} title="เลื่อนลง" style={{ padding: "4px 6px", opacity: idx === promotions.length - 1 ? 0.35 : 1, cursor: idx === promotions.length - 1 ? "not-allowed" : "pointer" }}><Icon name="chevron-down" size={13} /></button>
                     <button className="cbtn" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => toggleActive(promo)}>{promo.active === false ? "เปิดใช้งาน" : "ปิดใช้งาน"}</button>
                     <button className="cbtn cbtn-edit" style={{ padding: "4px 8px" }} onClick={() => setEditing(promo)} title="แก้ไขโปรโมชั่น"><Icon name="edit" size={13} /></button>
                     <button className="cbtn cbtn-danger" style={{ padding: "4px 8px" }} onClick={() => deletePromo(promo.id)} title="ลบโปรโมชั่น"><Icon name="trash" size={13} /></button>
