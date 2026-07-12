@@ -163,13 +163,15 @@ function defaultState() {
 
 function normalizeData(raw) {
   return {
-    ingredients: (raw.ingredients || []).map((i) => ({ ...i, components: i.components || [] })),
-    menus: (raw.menus || []).map((m) => ({
-      ...m, ingredients: m.ingredients || [], optionGroupIds: m.optionGroupIds || [],
+    // Firebase คืนอาเรย์ที่มี index ขาดหายเป็นช่องว่าง null ได้ (เช่นลบ element กลางอาเรย์) — กรอง null/undefined
+    // ทิ้งก่อนเสมอ ไม่งั้น .map()/for-of ตัวไหนก็ตายเมื่อเจอ element ที่หายไปกลางอาเรย์
+    ingredients: (raw.ingredients || []).filter(Boolean).map((i) => ({ ...i, components: i.components || [] })),
+    menus: (raw.menus || []).filter(Boolean).map((m) => ({
+      ...m, ingredients: (m.ingredients || []).filter(Boolean), optionGroupIds: (m.optionGroupIds || []).filter(Boolean),
       available: m.available ?? true, category: m.category || "อื่นๆ", imageUrl: m.imageUrl || "",
     })),
-    sales: raw.sales || [],
-    purchases: raw.purchases || [],
+    sales: (raw.sales || []).filter(Boolean),
+    purchases: (raw.purchases || []).filter(Boolean),
     settings: {
       overheadPerCup: raw.settings?.overheadPerCup ?? 3.1,
       shopName: raw.settings?.shopName ?? "ร้านกาแฟของฉัน",
@@ -182,14 +184,14 @@ function normalizeData(raw) {
       categoryOrder: raw.settings?.categoryOrder || [],
       defaultPackagingLines: raw.settings?.defaultPackagingLines || [],
     },
-    optionGroups: (raw.optionGroups || []).map((g) => ({
+    optionGroups: (raw.optionGroups || []).filter(Boolean).map((g) => ({
       ...g,
-      choices: (g.choices || []).map((c) => ({
+      choices: (g.choices || []).filter(Boolean).map((c) => ({
         ...c, ingredientId: c.ingredientId || null, qtyPercent: c.qtyPercent != null ? c.qtyPercent : 100, isDefault: c.isDefault || false,
-        extraAdjustments: (c.extraAdjustments || []).map((a) => ({ ingredientId: a.ingredientId || null, qtyPercent: a.qtyPercent != null ? a.qtyPercent : 100 })),
+        extraAdjustments: (c.extraAdjustments || []).filter(Boolean).map((a) => ({ ingredientId: a.ingredientId || null, qtyPercent: a.qtyPercent != null ? a.qtyPercent : 100 })),
       })),
     })),
-    promotions: (raw.promotions || []).map((p) => ({
+    promotions: (raw.promotions || []).filter(Boolean).map((p) => ({
       ...p,
       menuIds: p.menuIds || [],
       active: p.active ?? true,
