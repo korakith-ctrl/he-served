@@ -232,6 +232,10 @@ const GLOBAL_CSS = `
   .offer-arrow-btn:active { transform: scale(0.94); }
   @keyframes offerRipple { 0% { transform: scale(0); opacity: .5; } 100% { transform: scale(2.4); opacity: 0; } }
   .offer-ripple { position: absolute; inset: 0; border-radius: inherit; background: rgba(6,51,96,0.18); animation: offerRipple .5s ease-out; pointer-events: none; }
+  .zone-header { transition: box-shadow .25s ease; }
+  .zone-icon-btn { transition: transform .25s ease, box-shadow .25s ease; }
+  .zone-icon-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,0.14); }
+  .zone-icon-btn:active { transform: translateY(0) scale(0.94); }
   @keyframes pulseCup { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.08); opacity: .75; } }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
   @keyframes logoReveal {
@@ -602,6 +606,8 @@ export default function CustomerOrder({ shopUid }) {
   const [activeCategory, setActiveCategory] = useState(null);
   const [showCart, setShowCart] = useState(false);
   const [splashDone, setSplashDone] = useState(false);
+  const [hasActiveOrder, setHasActiveOrder] = useState(false);
+  const [headerRipple, setHeaderRipple] = useState(false);
 
   const mainRef = useRef(null);
   const sectionRefs = useRef({});
@@ -689,6 +695,11 @@ export default function CustomerOrder({ shopUid }) {
     (menus || []).forEach((x) => { m[x.id] = x; });
     return m;
   }, [menus]);
+
+  const shopNameParts = useMemo(() => {
+    const [first, ...rest] = (shopName || "").split(" - ");
+    return [first, rest.join(" - ").trim()];
+  }, [shopName]);
 
   const activePromotions = useMemo(() => {
     return (promotions || []).filter((p) => {
@@ -990,6 +1001,24 @@ export default function CustomerOrder({ shopUid }) {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  useEffect(() => {
+    if (!authUid || step !== "menu") return;
+    const ids = loadMyOrderIds(shopUid);
+    if (ids.length === 0) { setHasActiveOrder(false); return; }
+    let cancelled = false;
+    Promise.allSettled(ids.map((id) => get(ref(db, `orders/${shopUid}/${id}/status`)))).then((results) => {
+      if (cancelled) return;
+      const active = results.some((r) => r.status === "fulfilled" && r.value.exists() && r.value.val() !== "ready" && r.value.val() !== "cancelled");
+      setHasActiveOrder(active);
+    });
+    return () => { cancelled = true; };
+  }, [authUid, shopUid, step]);
+
+  function triggerHeaderRipple() {
+    setHeaderRipple(true);
+    setTimeout(() => setHeaderRipple(false), 500);
   }
 
   async function openMyOrders() {
@@ -1315,14 +1344,49 @@ export default function CustomerOrder({ shopUid }) {
         />
       ))}
 
-      <div style={{ ...GLASS_PANEL, margin: "10px 10px 0", borderRadius: 18, padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <BrandLogo height={34} />
-          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 18, margin: 0, color: COLORS.espresso5 }}>{shopName}</h1>
+      <div className="zone-header" style={{
+        margin: "10px 10px 0", height: 74, padding: "0 16px", borderRadius: 28,
+        background: "#F8F6F2", boxShadow: "0 8px 30px rgba(0,0,0,0.08)",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+          <div style={{
+            width: 44, height: 44, borderRadius: 14, background: "#fff", border: "1px solid #ECE8E2",
+            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden",
+          }}>
+            <BrandLogo height={28} />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", lineHeight: 1.15, minWidth: 0 }}>
+            <span style={{
+              fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 700, color: "#163B73",
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            }}>{shopNameParts[0]}</span>
+            {shopNameParts[1] && (
+              <span style={{
+                fontSize: 12, letterSpacing: "0.12em", fontWeight: 500, color: "#7B7B7B", textTransform: "uppercase",
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+              }}>{shopNameParts[1]}</span>
+            )}
+          </div>
         </div>
         {loadMyOrderIds(shopUid).length > 0 && (
-          <button style={{ ...btn, background: "rgba(255,255,255,0.55)", border: "1px solid rgba(255,255,255,0.7)", fontSize: 11.5, padding: "6px 10px" }} onClick={openMyOrders}>
-            <i className="ti ti-receipt" style={{ fontSize: 13, marginRight: 4 }} aria-hidden="true"></i>ออเดอร์ของฉัน
+          <button
+            className="zone-icon-btn"
+            onClick={() => { triggerHeaderRipple(); openMyOrders(); }}
+            style={{
+              width: 44, height: 44, borderRadius: 22, background: "#fff", border: "1px solid #ECE8E2",
+              boxShadow: "0 4px 14px rgba(0,0,0,0.06)", display: "flex", alignItems: "center", justifyContent: "center",
+              position: "relative", flexShrink: 0,
+            }}
+          >
+            <i className="ti ti-receipt" style={{ fontSize: 19, color: "#163B73" }} aria-hidden="true"></i>
+            {hasActiveOrder && (
+              <span style={{
+                position: "absolute", top: 3, right: 3, width: 11, height: 11, borderRadius: "50%",
+                background: "#FF7A00", border: "2px solid #fff",
+              }} />
+            )}
+            {headerRipple && <span className="offer-ripple" />}
           </button>
         )}
       </div>
