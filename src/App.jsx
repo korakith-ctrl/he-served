@@ -487,6 +487,15 @@ function ShopApp({ uid, user }) {
     () => typeof window !== "undefined" && window.matchMedia("(max-width: 1024px)").matches
   );
   const [orders, setOrders] = useState([]);
+  // เช็คแค่ตอน mount ครั้งเดียวไม่พอ — ถ้าหน้าจอเปลี่ยนขนาดทีหลัง (resize, หมุนแท็บเล็ต) โดยไม่ reload หน้า
+  // sidebarCollapsed จะค้างค่าตอน mount ตลอด ทำให้ sidebar เต็มบีบเนื้อหาแคบเกินจนอ่านไม่ออกบนจอมือถือจริง
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1024px)");
+    const onChange = (e) => setSidebarCollapsed(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  const [lastUpdated, setLastUpdated] = useState(null);
   const prevPendingCount = useRef(0);
   const isFirstOrdersSnapshot = useRef(true);
   const autoRecordedRef = useRef(new Set());
@@ -520,6 +529,7 @@ function ShopApp({ uid, user }) {
         setData(seeded);
       }
       isFirstSnapshot.current = false;
+      setLastUpdated(new Date());
     }, (err) => {
       showToast("เชื่อมต่อฐานข้อมูลไม่สำเร็จ: " + err.message);
       setData(defaultState());
@@ -663,9 +673,9 @@ function ShopApp({ uid, user }) {
         .cbtn-edit:hover { background: var(--info); color: #fff; }
         .cfield { border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font-size: 13px; background: #fff; color: var(--espresso-4); width: 100%; }
         .cfield:focus { outline: 2px solid var(--sage); outline-offset: 1px; }
-        .navitem { border: none; background: transparent; color: var(--espresso-3); padding: 10px 14px; font-size: 13.5px; font-weight: 500; border-radius: 10px; display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; transition: background .15s ease, color .15s ease; }
-        .navitem:hover { background: var(--cream-2); }
-        .navitem.active { background: var(--sage-light); color: var(--sage-dark); font-weight: 600; }
+        .navitem { border: none; border-left: 3px solid transparent; background: transparent; color: var(--espresso-3); padding: 11px 14px 11px 12px; margin: 1px 0; font-size: 13.5px; font-weight: 500; border-radius: 10px; display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; transition: background .15s ease, color .15s ease, border-color .15s ease; }
+        .navitem:hover { background: rgba(37,99,235,.06); color: #1D4ED8; }
+        .navitem.active { background: rgba(37,99,235,.08); border-left-color: #2563EB; color: #1D4ED8; font-weight: 700; }
         table.cdata { width: 100%; border-collapse: collapse; font-size: 13px; }
         table.cdata th { text-align: left; font-weight: 500; color: var(--espresso-2); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
         table.cdata td { padding: 8px; border-bottom: 1px solid var(--line-soft); }
@@ -719,27 +729,33 @@ function ShopApp({ uid, user }) {
             </button>
           )}
 
-          <nav style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, overflowY: "auto" }}>
-            {TABS.map((t) => {
+          <nav style={{ display: "flex", flexDirection: "column", gap: 3, flex: 1, overflowY: "auto" }}>
+            {TABS.map((t, idx) => {
               const pendingCount = t.id === "orders" ? pendingOrderCount : 0;
+              // เว้นเส้นบางๆ คั่นกลุ่มเมนู: ปฏิบัติการขายวันนี้ / จัดการร้าน / ข้อมูลเชิงลึก — ไว้ scan สายตาง่ายขึ้น ไม่ผูกกับ data ใดๆ
+              const groupBreakBefore = t.id === "menus" || t.id === "reports";
               return (
-                <button
-                  key={t.id}
-                  className={"navitem" + (tab === t.id ? " active" : "")}
-                  onClick={() => setTab(t.id)}
-                  title={sidebarCollapsed ? t.label : undefined}
-                  style={sidebarCollapsed ? { justifyContent: "center", padding: "10px", position: "relative" } : undefined}
-                >
-                  <Icon name={t.icon} size={17} />
-                  {!sidebarCollapsed && <span style={{ flex: 1 }}>{t.label}</span>}
-                  {pendingCount > 0 && (
-                    <span style={{
-                      background: "var(--danger)", color: "#fff", fontSize: 10, fontWeight: 600, lineHeight: 1,
-                      borderRadius: 999, padding: "3px 6px",
-                      ...(sidebarCollapsed ? { position: "absolute", top: 4, right: 4, padding: "2px 5px" } : {}),
-                    }}>{sidebarCollapsed ? "" : pendingCount}</span>
+                <div key={t.id}>
+                  {groupBreakBefore && (
+                    <div style={{ height: 1, background: "var(--line-soft)", margin: sidebarCollapsed ? "6px 8px" : "8px 6px" }} />
                   )}
-                </button>
+                  <button
+                    className={"navitem" + (tab === t.id ? " active" : "")}
+                    onClick={() => setTab(t.id)}
+                    title={sidebarCollapsed ? t.label : undefined}
+                    style={sidebarCollapsed ? { justifyContent: "center", padding: "10px", position: "relative" } : undefined}
+                  >
+                    <Icon name={t.icon} size={17} />
+                    {!sidebarCollapsed && <span style={{ flex: 1 }}>{t.label}</span>}
+                    {pendingCount > 0 && (
+                      <span style={{
+                        background: "var(--danger)", color: "#fff", fontSize: 10, fontWeight: 600, lineHeight: 1,
+                        borderRadius: 999, padding: "3px 6px",
+                        ...(sidebarCollapsed ? { position: "absolute", top: 4, right: 4, padding: "2px 5px" } : {}),
+                      }}>{sidebarCollapsed ? "" : pendingCount}</span>
+                    )}
+                  </button>
+                </div>
               );
             })}
           </nav>
@@ -805,7 +821,7 @@ function ShopApp({ uid, user }) {
                   <Icon name="bell-ringing" size={15} /> {pendingOrderCount} ออเดอร์รอยืนยัน
                 </button>
               )}
-              <HeaderClock />
+              <HeaderClock lastUpdated={lastUpdated} />
             </div>
           </div>
 
@@ -850,6 +866,120 @@ function ChannelPill({ channel }) {
   return <span className="chpill" style={style}>{CHANNELS[channel]}</span>;
 }
 
+// โทนสีเฉพาะหน้าภาพรวม (Dashboard) — ระบบสีความหมาย (semantic) แยกจาก --sage/--gold ของแท็บอื่นที่จริงๆ เป็นสีส้มล้วน
+// ตามที่ตั้งใจให้หน้านี้ลดการใช้สีส้มลง ใช้น้ำเงินเป็นสีหลักของปุ่ม/สถานะ interactive แทน
+const DASH = {
+  primary: "#2563EB", primaryDark: "#1D4ED8", primarySoft: "rgba(37,99,235,.08)",
+  success: "#16A34A", successSoft: "#EAF7EE",
+  warning: "#D97706", warningSoft: "#FFF4E5",
+  danger: "#DC2626", dangerSoft: "#FDEBEB",
+  caution: "#CA8A04", cautionSoft: "#FEF9E7",
+  neutral: "#374151", neutralSoft: "#F3F4F6",
+  gray: "#6B7280", border: "#ECE8E2",
+};
+
+function DashSectionHeader({ icon, text, hint }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ width: 26, height: 26, borderRadius: 8, background: DASH.neutralSoft, color: DASH.neutral, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <Icon name={icon} size={14} />
+        </div>
+        <span style={{ fontSize: 15, fontWeight: 700, color: "#111827" }}>{text}</span>
+      </div>
+      {hint && <p style={{ fontSize: 12, color: DASH.gray, margin: "4px 0 0 34px", lineHeight: 1.5 }}>{hint}</p>}
+    </div>
+  );
+}
+
+function DashKpiCard({ icon, label, value, sub, tone, big }) {
+  const tones = {
+    primary: { fg: DASH.primaryDark, iconBg: "#fff", iconFg: DASH.primary, bg: DASH.primarySoft, border: "rgba(37,99,235,.18)" },
+    success: { fg: DASH.success, iconBg: DASH.successSoft, iconFg: DASH.success, bg: "#fff", border: DASH.border },
+    warning: { fg: DASH.warning, iconBg: DASH.warningSoft, iconFg: DASH.warning, bg: "#fff", border: DASH.border },
+    danger: { fg: DASH.danger, iconBg: DASH.dangerSoft, iconFg: DASH.danger, bg: "#fff", border: DASH.border },
+    neutral: { fg: DASH.neutral, iconBg: DASH.neutralSoft, iconFg: DASH.neutral, bg: "#fff", border: DASH.border },
+  };
+  const t = tones[tone] || tones.neutral;
+  return (
+    <div style={{
+      background: t.bg, border: `1px solid ${t.border}`, borderRadius: 16, padding: "18px 20px",
+      boxShadow: "0 10px 30px rgba(0,0,0,.05)", display: "flex", flexDirection: "column", justifyContent: "space-between",
+      gap: 10, minHeight: 116, transition: "box-shadow 200ms ease",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+        <div style={{ width: 30, height: 30, borderRadius: 9, background: t.iconBg, color: t.iconFg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <Icon name={icon} size={15} />
+        </div>
+        <span style={{ fontSize: 13, fontWeight: 600, color: DASH.gray }}>{label}</span>
+      </div>
+      <div>
+        <div style={{ fontSize: big ? 32 : 24, fontWeight: 700, color: t.fg, lineHeight: 1.15, fontFamily: "var(--f-body)" }}>{value}</div>
+        {sub && <div style={{ fontSize: 12, color: DASH.gray, marginTop: 3 }}>{sub}</div>}
+      </div>
+    </div>
+  );
+}
+
+function DashStockAlertCard({ ing }) {
+  const ratio = ing.stockQty / (ing.lowStockThreshold || 1);
+  const tier = ing.stockQty <= 0 ? "critical" : ratio <= 0.5 ? "low" : "normal";
+  const tones = {
+    critical: { bg: DASH.dangerSoft, color: "#B91C1C", icon: "alert-octagon", label: "วิกฤต" },
+    low: { bg: DASH.warningSoft, color: "#B45309", icon: "alert-triangle", label: "ต่ำ" },
+    normal: { bg: DASH.cautionSoft, color: "#92702A", icon: "alert-circle", label: "ใกล้หมด" },
+  };
+  const t = tones[tier];
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, background: t.bg, borderRadius: 12, padding: "9px 12px" }}>
+      <Icon name={t.icon} size={15} style={{ color: t.color, flexShrink: 0 }} />
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "#1F2937", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ing.name}</div>
+        <div style={{ fontSize: 11.5, color: t.color, fontWeight: 600 }}>เหลือ {ing.stockQty} {UNITS[ing.unit]}</div>
+      </div>
+      <span style={{ fontSize: 10, fontWeight: 700, color: t.color, background: "rgba(255,255,255,.6)", borderRadius: 999, padding: "2px 8px", flexShrink: 0 }}>{t.label}</span>
+    </div>
+  );
+}
+
+function DashRankCard({ rank, name, qty, maxQty }) {
+  const medals = ["🥇", "🥈", "🥉"];
+  const barTones = [DASH.primary, "#7C9CF0", "#B7C6F5"];
+  const pct = maxQty > 0 ? Math.max(8, Math.round((qty / maxQty) * 100)) : 0;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0" }}>
+      <span style={{ fontSize: 19, flexShrink: 0, width: 26, textAlign: "center" }}>{medals[rank] || rank + 1}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 13.5, fontWeight: 600, color: "#1F2937", marginBottom: 5 }}>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
+          <span style={{ color: DASH.gray, fontWeight: 500, fontSize: 12, flexShrink: 0, marginLeft: 8 }}>{qty} แก้ว</span>
+        </div>
+        <div style={{ height: 7, borderRadius: 999, background: DASH.neutralSoft, overflow: "hidden" }}>
+          <div style={{ height: "100%", width: pct + "%", borderRadius: 999, background: barTones[rank] || "#C7D2E8", transition: "width 400ms ease" }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DashTrendChart({ days }) {
+  const max = Math.max(1, ...days.map((d) => d.value));
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 110, padding: "0 2px" }}>
+      {days.map((d, i) => (
+        <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, minWidth: 0 }}>
+          <span style={{ fontSize: 10, color: DASH.gray, fontWeight: 600 }}>{d.value > 0 ? money(d.value) : ""}</span>
+          <div title={`฿${money(d.value)}`} style={{
+            width: "100%", maxWidth: 30, height: Math.max(4, (d.value / max) * 62), borderRadius: 6,
+            background: i === days.length - 1 ? DASH.primary : "#C7D6FB", transition: "height 300ms ease",
+          }} />
+          <span style={{ fontSize: 10.5, color: DASH.gray }}>{d.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Dashboard({ data, ingredientsById, setTab, recordSale }) {
   const today = todayStr();
   const todaySales = data.sales.filter((s) => s.timestamp.slice(0, 10) === today);
@@ -857,57 +987,103 @@ function Dashboard({ data, ingredientsById, setTab, recordSale }) {
   const cost = todaySales.reduce((a, s) => a + s.totalCost, 0);
   const profit = revenue - cost;
   const cups = todaySales.reduce((a, s) => a + s.qty, 0);
+  const avgPerCup = cups > 0 ? revenue / cups : 0;
 
   const lowStock = data.ingredients.filter((i) => i.stockQty <= i.lowStockThreshold);
+  const sortedLowStock = [...lowStock].sort((a, b) => (a.stockQty / (a.lowStockThreshold || 1)) - (b.stockQty / (b.lowStockThreshold || 1)));
+  const visibleLowStock = sortedLowStock.slice(0, 6);
 
   const menuCount = {};
   for (const s of data.sales) menuCount[s.menuName] = (menuCount[s.menuName] || 0) + s.qty;
   const topMenus = Object.entries(menuCount).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  const topMax = topMenus.length ? topMenus[0][1] : 0;
+
+  // ยอดขายสุทธิ 7 วันล่าสุด (รวม netRevenue ต่อวันจาก data.sales) — เติมพื้นที่ว่างด้านล่างซ้ายด้วยข้อมูลจริงที่มีอยู่แล้ว ไม่ต้องพึ่งข้อมูลใหม่
+  const trendDays = Array.from({ length: 7 }).map((_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (6 - i));
+    const key = d.toISOString().slice(0, 10);
+    const value = data.sales.filter((s) => s.timestamp.slice(0, 10) === key).reduce((a, s) => a + s.netRevenue, 0);
+    return { label: d.toLocaleDateString("th-TH", { weekday: "short" }), value };
+  });
 
   return (
     <div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 22 }}>
-        <MetricCard label="ยอดขายวันนี้ (สุทธิ)" value={"฿" + money(revenue)} sub={cups + " แก้ว"} />
-        <MetricCard label="ต้นทุนวันนี้" value={"฿" + money(cost)} />
-        <MetricCard label="กำไรวันนี้" value={"฿" + money(profit)} accent={profit >= 0 ? "var(--sage-dark)" : "var(--danger)"} />
-        <MetricCard label="วัตถุดิบใกล้หมด" value={lowStock.length} accent={lowStock.length ? "var(--gold)" : undefined} />
+      <style>{`
+        .dash-kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 24px; }
+        @media (max-width: 900px) { .dash-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 480px) { .dash-kpi-grid { grid-template-columns: minmax(0, 1fr); } }
+        .dash-main-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 20px; align-items: start; }
+        @media (max-width: 900px) { .dash-main-grid { grid-template-columns: minmax(0, 1fr); } }
+        .dash-col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+        .dash-card { background: #fff; border: 1px solid ${DASH.border}; border-radius: 16px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,.05); }
+        .dash-qs-btn {
+          display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; min-height: 64px;
+          padding: 12px 14px; border-radius: 14px; border: 1px solid ${DASH.border}; background: #fff; cursor: pointer;
+          transition: border-color 200ms ease, box-shadow 200ms ease, transform 200ms ease;
+        }
+        .dash-qs-btn:hover { border-color: ${DASH.primary}; box-shadow: 0 6px 16px rgba(37,99,235,.12); transform: translateY(-1px); }
+        .dash-qs-btn:active { transform: scale(0.98); }
+        .dash-qs-name { font-size: 13.5px; font-weight: 600; color: #1F2937; }
+        .dash-qs-row { display: flex; align-items: center; justify-content: space-between; width: 100%; }
+        .dash-qs-price { font-size: 13px; font-weight: 700; color: ${DASH.primary}; }
+        .dash-qs-plus { display: flex; align-items: center; gap: 2px; font-size: 11px; font-weight: 700; color: ${DASH.gray}; background: ${DASH.neutralSoft}; border-radius: 999px; padding: 2px 7px; }
+        .dash-link-btn { display: inline-flex; align-items: center; gap: 4px; border: none; background: none; color: ${DASH.primary}; font-size: 12.5px; font-weight: 700; cursor: pointer; padding: 6px 0; min-height: 44px; }
+        .dash-link-btn:hover { color: ${DASH.primaryDark}; }
+      `}</style>
+
+      <div className="dash-kpi-grid">
+        <DashKpiCard icon="cash" label="ยอดขายวันนี้ (สุทธิ)" value={"฿" + money(revenue)} sub={`${cups} แก้ว · เฉลี่ย ฿${money(avgPerCup)}/แก้ว`} tone="primary" big />
+        <DashKpiCard icon="receipt-2" label="ต้นทุนวันนี้" value={"฿" + money(cost)} tone="neutral" />
+        <DashKpiCard icon="trending-up" label="กำไรวันนี้" value={"฿" + money(profit)} tone={profit >= 0 ? "success" : "danger"} />
+        <DashKpiCard icon="alert-triangle" label="วัตถุดิบใกล้หมด" value={lowStock.length} sub={lowStock.length ? "ต้องเติมสต็อก" : "สต็อกปกติ"} tone={lowStock.length ? "warning" : "neutral"} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 16 }}>
-        <div>
-          <SectionTitle icon="bolt" text="ขายด่วน (หน้าร้าน)" />
-          <p style={{ fontSize: 11.5, color: "var(--espresso-2)", margin: "-6px 0 10px" }}>สำหรับขายแบบละเอียด (เลือกช่องทาง/นมทางเลือก) ไปที่แท็บ "ขายเครื่องดื่ม"</p>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 10 }}>
-            {data.menus.map((m) => (
-              <button key={m.id} className="cbtn cbtn-accent" style={{ textAlign: "left", padding: "10px 12px" }}
-                onClick={() => recordSale(m.id, 1, "store", {})}>
-                <div style={{ fontWeight: 600, fontSize: 13 }}>{m.name}</div>
-                <div style={{ fontSize: 11.5, opacity: 0.9 }}>฿{money(m.priceStore)} · แตะเพื่อขาย +1</div>
-              </button>
-            ))}
+      <div className="dash-main-grid">
+        <div className="dash-col">
+          <div className="dash-card">
+            <DashSectionHeader icon="bolt" text="ขายด่วน" hint='สำหรับขายแบบละเอียด (เลือกช่องทาง/ตัวเลือกเสริม) ไปที่แท็บ "ขายเครื่องดื่ม"' />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10 }}>
+              {data.menus.map((m) => (
+                <button key={m.id} className="dash-qs-btn" onClick={() => recordSale(m.id, 1, "store", {})}>
+                  <span className="dash-qs-name">{m.name}</span>
+                  <span className="dash-qs-row">
+                    <span className="dash-qs-price">฿{money(m.priceStore)}</span>
+                    <span className="dash-qs-plus"><Icon name="plus" size={10} />1</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="dash-card">
+            <DashSectionHeader icon="chart-bar" text="ยอดขายสุทธิ 7 วันล่าสุด" />
+            <DashTrendChart days={trendDays} />
           </div>
         </div>
-        <div>
-          <SectionTitle icon="alert-triangle" text="แจ้งเตือนสต็อก" />
-          {lowStock.length === 0 ? (
-            <EmptyNote text="สต็อกทุกรายการยังเพียงพอ" />
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {lowStock.map((i) => (
-                <div key={i.id} style={{ background: "var(--gold-light)", border: "1px solid var(--gold)", borderRadius: 9, padding: "8px 10px", fontSize: 12.5 }}>
-                  <strong>{i.name}</strong> เหลือ {i.stockQty} {UNITS[i.unit]}
-                </div>
-              ))}
-              <button className="cbtn" onClick={() => setTab("ingredients")}>ไปเติมสต็อก →</button>
-            </div>
-          )}
 
-          <div style={{ marginTop: 18 }}>
-            <SectionTitle icon="trophy" text="เมนูขายดี (สะสม)" />
+        <div className="dash-col">
+          <div className="dash-card">
+            <DashSectionHeader icon="alert-triangle" text="แจ้งเตือนสต็อก" />
+            {lowStock.length === 0 ? (
+              <EmptyNote text="สต็อกทุกรายการยังเพียงพอ" />
+            ) : (
+              <>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
+                  {visibleLowStock.map((i) => <DashStockAlertCard key={i.id} ing={i} />)}
+                </div>
+                {sortedLowStock.length > visibleLowStock.length && (
+                  <p style={{ fontSize: 11.5, color: DASH.gray, margin: "0 0 6px" }}>และอีก {sortedLowStock.length - visibleLowStock.length} รายการ</p>
+                )}
+                <button className="dash-link-btn" onClick={() => setTab("ingredients")}>ไปเติมสต็อก →</button>
+              </>
+            )}
+          </div>
+
+          <div className="dash-card">
+            <DashSectionHeader icon="trophy" text="เมนูขายดี (สะสม)" />
             {topMenus.length === 0 ? <EmptyNote text="ยังไม่มีข้อมูลการขาย" /> : (
-              <ol style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
-                {topMenus.map(([name, q]) => <li key={name}>{name} — {q} แก้ว</li>)}
-              </ol>
+              <div>{topMenus.map(([name, q], idx) => <DashRankCard key={name} rank={idx} name={name} qty={q} maxQty={topMax} />)}</div>
             )}
           </div>
         </div>
@@ -916,12 +1092,14 @@ function Dashboard({ data, ingredientsById, setTab, recordSale }) {
   );
 }
 
-function HeaderClock() {
+function HeaderClock({ lastUpdated }) {
   const [now, setNow] = useState(new Date());
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 30000);
     return () => clearInterval(t);
   }, []);
+  const updatedSecondsAgo = lastUpdated ? Math.round((now - lastUpdated) / 1000) : null;
+  const updatedLabel = updatedSecondsAgo == null ? "" : updatedSecondsAgo < 60 ? "อัปเดตล่าสุดเมื่อสักครู่" : `อัปเดตล่าสุด ${Math.round(updatedSecondsAgo / 60)} นาทีที่แล้ว`;
   return (
     <div style={{
       display: "flex", flexDirection: "column", alignItems: "flex-end", lineHeight: 1.25,
@@ -933,6 +1111,12 @@ function HeaderClock() {
       <span style={{ fontSize: 10.5, color: "var(--espresso-2)" }}>
         {now.toLocaleDateString("th-TH", { weekday: "short", day: "numeric", month: "short" })}
       </span>
+      {updatedLabel && (
+        <span style={{ fontSize: 9.5, color: "#16A34A", fontWeight: 600, marginTop: 2, display: "flex", alignItems: "center", gap: 3 }}>
+          <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#16A34A", display: "inline-block" }} />
+          {updatedLabel}
+        </span>
+      )}
     </div>
   );
 }
