@@ -432,7 +432,9 @@ function ShopApp({ uid, user }) {
           const substitutions = itemMenu ? resolveIngredientAdjustmentsFromOptions(itemMenu, item.options, ingredientsById) : {};
           recordSale(item.menuId, item.qty, "online", { upcharge, substitutions, milkLabel: (item.options || []).map((x) => x.label).join(", ") || null });
         }
-        update(ref(db, `orders/${uid}/${o.id}`), { saleRecorded: true }).catch(() => {});
+        // สลิปยืนยันอัตโนมัติทำให้ order ค้างที่ status "paid" ซึ่งไม่ใช่หนึ่งใน 4 คอลัมน์ Kanban แล้ว
+        // ต้องเลื่อนเข้า "preparing" ทันที เหมือนตอนบาริสต้ากดยืนยันรับเงินสดเอง ไม่งั้นการ์ดจะหายไปจากบอร์ด
+        update(ref(db, `orders/${uid}/${o.id}`), { status: "preparing", saleRecorded: true }).catch(() => {});
         showToast(`สลิปยืนยันอัตโนมัติ: ออเดอร์ ${o.customerName || o.customerPhone} ชำระเงินแล้ว`);
       }
     }
@@ -1005,23 +1007,23 @@ function OrderMeta({ paymentMethod, pickupDate, paymentVerified, paymentVerified
   );
 }
 
-function OrderItemLines({ items, note }) {
+function OrderItemLines({ items, note, compact }) {
   return (
-    <div style={{ margin: "10px 0" }}>
+    <div style={{ margin: compact ? "6px 0" : "10px 0" }}>
       {items.map((i, idx) => (
-        <div key={idx} style={{ marginBottom: 9, paddingBottom: 9, borderBottom: idx < items.length - 1 ? "1px dashed var(--line-soft)" : "none" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
-            <span style={{ fontSize: 16, fontWeight: 700, color: "var(--espresso-5)", lineHeight: 1.3 }}>{i.name} <span style={{ color: "var(--sage-dark)" }}>x{i.qty}</span></span>
-            <span style={{ fontSize: 15, fontWeight: 700, fontFamily: "var(--f-body)", textAlign: "right", whiteSpace: "nowrap" }}>฿{money(i.unitPrice * i.qty)}</span>
+        <div key={idx} style={{ marginBottom: compact ? 5 : 9, paddingBottom: compact ? 5 : 9, borderBottom: idx < items.length - 1 ? "1px dashed var(--line-soft)" : "none" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: compact ? 5 : 10 }}>
+            <span style={{ fontSize: compact ? 11.5 : 16, fontWeight: 700, color: "var(--espresso-5)", lineHeight: 1.25 }}>{i.name} <span style={{ color: "var(--sage-dark)" }}>x{i.qty}</span></span>
+            <span style={{ fontSize: compact ? 10.5 : 15, fontWeight: 700, fontFamily: "var(--f-body)", textAlign: "right", whiteSpace: "nowrap" }}>฿{money(i.unitPrice * i.qty)}</span>
           </div>
-          {i.options?.length > 0 && (
+          {i.options?.length > 0 && !compact && (
             <div style={{ fontSize: 13, color: "var(--espresso-3)", marginTop: 3, lineHeight: 1.5 }}>{i.options.map((o) => o.label).join(", ")}</div>
           )}
         </div>
       ))}
       {note && (
-        <div style={{ marginTop: 6, background: "rgba(245,158,11,0.14)", border: "1px solid rgba(245,158,11,0.4)", borderRadius: 8, padding: "7px 10px", fontSize: 13, fontWeight: 600, color: "#92400E" }}>
-          <Icon name="message-2" size={13} style={{ marginRight: 4 }} />{note}
+        <div style={{ marginTop: 6, background: "rgba(245,158,11,0.14)", border: "1px solid rgba(245,158,11,0.4)", borderRadius: 8, padding: compact ? "4px 6px" : "7px 10px", fontSize: compact ? 10.5 : 13, fontWeight: 600, color: "#92400E" }}>
+          {!compact && <Icon name="message-2" size={13} style={{ marginRight: 4 }} />}{note}
         </div>
       )}
     </div>
@@ -1037,6 +1039,14 @@ function OrdersPanel({ uid, orders, recordSale, showToast, data, ingredientsById
   const [dragPos, setDragPos] = useState(null);
   const [overCol, setOverCol] = useState(null);
   const dragInfoRef = useRef(null);
+  // จอแคบ (เช่น iPad) ให้ทั้ง 4 คอลัมน์อัดพอดีจอโดยไม่ต้องเลื่อนแนวนอน แทนที่จะปล่อยให้ล้นแล้วสกอลล์
+  const [compact, setCompact] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 1080px)").matches);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1080px)");
+    const handler = (e) => setCompact(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
 
   useEffect(() => {
     const changed = [];
@@ -1091,7 +1101,10 @@ function OrdersPanel({ uid, orders, recordSale, showToast, data, ingredientsById
   const columns = useMemo(() => {
     const map = { pending: [], preparing: [], ready: [], done: [] };
     for (const o of orders) {
-      if (map[o.status]) map[o.status].push(o);
+      // "paid" ไม่ใช่ 1 ใน 4 สถานะ Kanban แล้ว (รวมเข้ากับ "preparing") — กันไว้เผื่อ order ค้างที่ paid
+      // ชั่วคราวจาก race condition ของสลิปยืนยันอัตโนมัติ ไม่ให้การ์ดหายไปจากบอร์ด
+      const col = o.status === "paid" ? "preparing" : o.status;
+      if (map[col]) map[col].push(o);
     }
     for (const k of Object.keys(map)) map[k].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
     return map;
@@ -1144,7 +1157,11 @@ function OrdersPanel({ uid, orders, recordSale, showToast, data, ingredientsById
   return (
     <div>
       <SectionTitle icon="layout-kanban" text="บอร์ดออเดอร์ — ลากการ์ดข้ามคอลัมน์เพื่ออัปเดตสถานะ" />
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(260px, 1fr))", gap: 14, overflowX: "auto", paddingBottom: 8, marginBottom: 26 }}>
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: compact ? "repeat(4, minmax(0, 1fr))" : "repeat(4, minmax(260px, 1fr))",
+        gap: compact ? 7 : 14, overflowX: compact ? "visible" : "auto", paddingBottom: 8, marginBottom: 26,
+      }}>
         {KANBAN_COLUMNS.map((col) => {
           const list = columns[col.id];
           const isOver = overCol === col.id && dragId;
@@ -1154,24 +1171,24 @@ function OrdersPanel({ uid, orders, recordSale, showToast, data, ingredientsById
               key={col.id}
               data-kanban-col={col.id}
               style={{
-                ...glass({ borderRadius: 18, padding: "10px 8px 14px" }),
+                ...glass({ borderRadius: compact ? 12 : 18, padding: compact ? "7px 5px 9px" : "10px 8px 14px" }),
                 outline: isOver ? `2px dashed ${c.dot}` : "2px dashed transparent",
                 outlineOffset: -3,
                 transition: "outline .12s ease",
-                display: "flex", flexDirection: "column", gap: 10, minHeight: 220,
+                display: "flex", flexDirection: "column", gap: compact ? 6 : 10, minHeight: compact ? 140 : 220, minWidth: 0,
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "3px 8px 8px", borderBottom: "1px solid var(--line-soft)" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 7, fontWeight: 700, fontSize: 13.5, color: "var(--espresso-4)" }}>
-                  <span className="status-dot" style={{ background: c.dot, width: 10, height: 10 }} />
-                  {col.label}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: compact ? "2px 3px 6px" : "3px 8px 8px", borderBottom: "1px solid var(--line-soft)", gap: 4 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: compact ? 4 : 7, fontWeight: 700, fontSize: compact ? 11 : 13.5, color: "var(--espresso-4)", minWidth: 0, overflow: "hidden" }}>
+                  <span className="status-dot" style={{ background: c.dot, width: compact ? 7 : 10, height: compact ? 7 : 10, flexShrink: 0 }} />
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{col.label}</span>
                 </div>
-                <span style={{ fontSize: 12, fontWeight: 700, color: "var(--espresso-2)", background: "var(--cream-2)", borderRadius: 999, padding: "1px 9px" }}>{list.length}</span>
+                <span style={{ fontSize: compact ? 10.5 : 12, fontWeight: 700, color: "var(--espresso-2)", background: "var(--cream-2)", borderRadius: 999, padding: compact ? "1px 6px" : "1px 9px", flexShrink: 0 }}>{list.length}</span>
               </div>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 10, minHeight: 60 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: compact ? 6 : 10, minHeight: 60 }}>
                 {list.length === 0 ? (
-                  <p style={{ fontSize: 12, color: "var(--espresso-2)", textAlign: "center", padding: "18px 6px", fontStyle: "italic", margin: 0 }}>ไม่มีออเดอร์</p>
+                  <p style={{ fontSize: compact ? 10.5 : 12, color: "var(--espresso-2)", textAlign: "center", padding: compact ? "10px 3px" : "18px 6px", fontStyle: "italic", margin: 0 }}>ไม่มีออเดอร์</p>
                 ) : list.map((o) => (
                   <div
                     key={o.id}
@@ -1180,30 +1197,32 @@ function OrdersPanel({ uid, orders, recordSale, showToast, data, ingredientsById
                     onPointerUp={onCardPointerUp}
                     onPointerCancel={onCardPointerUp}
                     style={glass({
-                      borderRadius: 14, padding: 12,
-                      borderLeft: `5px solid ${c.dot}`,
+                      borderRadius: compact ? 10 : 14, padding: compact ? 7 : 12,
+                      borderLeft: `${compact ? 3 : 5}px solid ${c.dot}`,
                       cursor: "grab", touchAction: "none",
                       opacity: dragId === o.id ? 0.35 : 1,
                       animation: justMovedIds.has(o.id) ? "paidFlash 1.4s ease" : undefined,
                     })}
                   >
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, fontWeight: 700, color: "var(--espresso-4)", gap: 6 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: compact ? 11 : 13, fontWeight: 700, color: "var(--espresso-4)", gap: 4 }}>
                       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.customerName ? `${o.customerName} · ${o.customerPhone}` : o.customerPhone}</span>
-                      <Icon name="grip-vertical" size={14} style={{ color: "var(--espresso-2)", flexShrink: 0 }} />
+                      {!compact && <Icon name="grip-vertical" size={14} style={{ color: "var(--espresso-2)", flexShrink: 0 }} />}
                     </div>
-                    <div style={{ fontSize: 11, color: "var(--espresso-2)", marginTop: 2 }}>
-                      {new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}
-                    </div>
-                    <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} paymentVerified={o.paymentVerified} paymentVerifiedBy={o.paymentVerifiedBy} />
-                    <OrderItemLines items={o.items} note={o.note} />
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontWeight: 700, fontSize: 16, fontFamily: "var(--f-body)", borderTop: "1px dashed var(--line)", paddingTop: 7, marginBottom: col.id !== "done" ? 9 : 0 }}>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: "var(--espresso-3)" }}>รวม</span><span>฿{money(o.total)}</span>
+                    {!compact && (
+                      <div style={{ fontSize: 11, color: "var(--espresso-2)", marginTop: 2 }}>
+                        {new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}
+                      </div>
+                    )}
+                    {!compact && <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} paymentVerified={o.paymentVerified} paymentVerifiedBy={o.paymentVerifiedBy} />}
+                    <OrderItemLines items={o.items} note={o.note} compact={compact} />
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontWeight: 700, fontSize: compact ? 13 : 16, fontFamily: "var(--f-body)", borderTop: "1px dashed var(--line)", paddingTop: compact ? 4 : 7, marginBottom: col.id !== "done" ? (compact ? 6 : 9) : 0 }}>
+                      <span style={{ fontSize: compact ? 10.5 : 12, fontWeight: 600, color: "var(--espresso-3)" }}>รวม</span><span>฿{money(o.total)}</span>
                     </div>
                     {col.id !== "done" && (
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button className="cbtn cbtn-accent" style={{ flex: 1, fontSize: 12.5, padding: "8px 10px" }} onClick={() => advance(o)}>{KANBAN_NEXT_LABEL[col.id]}</button>
+                      <div style={{ display: "flex", gap: compact ? 4 : 6 }}>
+                        <button className="cbtn cbtn-accent" style={{ flex: 1, fontSize: compact ? 10.5 : 12.5, padding: compact ? "6px 4px" : "8px 10px" }} onClick={() => advance(o)}>{compact ? "→ ถัดไป" : KANBAN_NEXT_LABEL[col.id]}</button>
                         {col.id === "pending" && (
-                          <button className="cbtn cbtn-danger" style={{ padding: "8px 9px" }} onClick={() => setStatus(o, "cancelled")} title="ยกเลิกออเดอร์"><Icon name="x" size={13} /></button>
+                          <button className="cbtn cbtn-danger" style={{ padding: compact ? "6px 6px" : "8px 9px" }} onClick={() => setStatus(o, "cancelled")} title="ยกเลิกออเดอร์"><Icon name="x" size={13} /></button>
                         )}
                       </div>
                     )}
