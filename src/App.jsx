@@ -184,7 +184,10 @@ function normalizeData(raw) {
     },
     optionGroups: (raw.optionGroups || []).map((g) => ({
       ...g,
-      choices: (g.choices || []).map((c) => ({ ...c, ingredientId: c.ingredientId || null, qtyPercent: c.qtyPercent != null ? c.qtyPercent : 100, isDefault: c.isDefault || false })),
+      choices: (g.choices || []).map((c) => ({
+        ...c, ingredientId: c.ingredientId || null, qtyPercent: c.qtyPercent != null ? c.qtyPercent : 100, isDefault: c.isDefault || false,
+        extraAdjustments: (c.extraAdjustments || []).map((a) => ({ ingredientId: a.ingredientId || null, qtyPercent: a.qtyPercent != null ? a.qtyPercent : 100 })),
+      })),
     })),
     promotions: (raw.promotions || []).map((p) => ({
       ...p,
@@ -264,17 +267,31 @@ function milkChoiceFor(menu, ingredientsById) {
 function resolveIngredientAdjustmentsFromOptions(menu, options, ingredientsById) {
   const adjustments = {};
   for (const opt of options || []) {
-    if (!opt.ingredientId) continue;
-    const chosenIng = ingredientsById[opt.ingredientId];
-    if (!chosenIng || !chosenIng.altGroup) continue;
-    const origLine = menu.ingredients.find((l) => {
-      const li = ingredientsById[l.ingredientId];
-      return li && li.altGroup === chosenIng.altGroup;
-    });
-    if (!origLine) continue;
-    const qtyPercent = opt.qtyPercent != null ? opt.qtyPercent : 100;
-    if (origLine.ingredientId === opt.ingredientId && qtyPercent === 100) continue;
-    adjustments[origLine.ingredientId] = { ingredientId: opt.ingredientId, qtyPercent };
+    // การแทนวัตถุดิบแบบเดิม (ผ่าน "กลุ่มทางเลือก" เช่น สลับชนิดนม) — ปรับได้ทีละ 1 รายการ
+    if (opt.ingredientId) {
+      const chosenIng = ingredientsById[opt.ingredientId];
+      if (chosenIng && chosenIng.altGroup) {
+        const origLine = menu.ingredients.find((l) => {
+          const li = ingredientsById[l.ingredientId];
+          return li && li.altGroup === chosenIng.altGroup;
+        });
+        if (origLine) {
+          const qtyPercent = opt.qtyPercent != null ? opt.qtyPercent : 100;
+          if (!(origLine.ingredientId === opt.ingredientId && qtyPercent === 100)) {
+            adjustments[origLine.ingredientId] = { ingredientId: opt.ingredientId, qtyPercent };
+          }
+        }
+      }
+    }
+    // ปรับปริมาณวัตถุดิบอื่นๆ ในสูตรพร้อมกันได้หลายรายการ ไม่ต้องแทนที่ ไม่ต้องตั้งกลุ่มทางเลือก
+    // (เช่น ลดความหวานแล้วต้องเพิ่มนมสดชดเชยปริมาณของเหลวในแก้ว)
+    for (const extra of opt.extraAdjustments || []) {
+      if (!extra.ingredientId) continue;
+      const hasLine = menu.ingredients.some((l) => l.ingredientId === extra.ingredientId);
+      if (!hasLine) continue;
+      const qtyPercent = extra.qtyPercent != null ? extra.qtyPercent : 100;
+      adjustments[extra.ingredientId] = { ingredientId: extra.ingredientId, qtyPercent };
+    }
   }
   return adjustments;
 }
@@ -2412,7 +2429,31 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
   function addChoice(groupId) {
     updateData((next) => {
       const g = next.optionGroups.find((x) => x.id === groupId);
-      if (g) g.choices.push({ id: genId("choice"), label: "ตัวเลือกใหม่", note: "", priceDelta: 0, ingredientId: null, qtyPercent: 100, isDefault: false });
+      if (g) g.choices.push({ id: genId("choice"), label: "ตัวเลือกใหม่", note: "", priceDelta: 0, ingredientId: null, qtyPercent: 100, isDefault: false, extraAdjustments: [] });
+    });
+  }
+  function addExtraAdjustment(groupId, choiceId) {
+    updateData((next) => {
+      const g = next.optionGroups.find((x) => x.id === groupId);
+      const c = g?.choices.find((x) => x.id === choiceId);
+      if (c) {
+        if (!c.extraAdjustments) c.extraAdjustments = [];
+        c.extraAdjustments.push({ ingredientId: null, qtyPercent: 100 });
+      }
+    });
+  }
+  function patchExtraAdjustment(groupId, choiceId, idx, patch) {
+    updateData((next) => {
+      const g = next.optionGroups.find((x) => x.id === groupId);
+      const c = g?.choices.find((x) => x.id === choiceId);
+      if (c && c.extraAdjustments[idx]) Object.assign(c.extraAdjustments[idx], patch);
+    });
+  }
+  function removeExtraAdjustment(groupId, choiceId, idx) {
+    updateData((next) => {
+      const g = next.optionGroups.find((x) => x.id === groupId);
+      const c = g?.choices.find((x) => x.id === choiceId);
+      if (c) c.extraAdjustments.splice(idx, 1);
     });
   }
   function patchChoice(groupId, choiceId, patch) {
@@ -2447,6 +2488,7 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
         ถ้าตัวเลือกไหนแทนวัตถุดิบ (เช่น เลือกเมล็ด/นมคนละแบบ) ให้เลือก "วัตถุดิบที่ใช้แทน" ระบบจะตัดสต็อกตามที่ลูกค้าเลือกจริงแทนสูตรตั้งต้น
         (วัตถุดิบต้นทางและตัวเลือกต้องตั้ง "กลุ่มทางเลือก" ให้ตรงกันในแท็บวัตถุดิบก่อน)
         เลือกวัตถุดิบเดิมของสูตรแล้วปรับ "% ที่ใช้" ได้ด้วย เช่น กลุ่ม "ความหวาน" เลือกไซรัปแล้วตั้งหวานปกติ 100%, หวานน้อย 50%, ไม่หวาน 0% ระบบจะตัดสต็อกและคิดต้นทุนตามปริมาณจริงที่ใช้
+        ถ้าตัวเลือกเดียวต้องปรับหลายวัตถุดิบพร้อมกัน (เช่น ลดความหวานแล้วต้องเติมนมสดชดเชยปริมาณของเหลว) ให้กด "ปรับปริมาณวัตถุดิบอื่นพร้อมกัน" เพิ่มได้ทีละรายการ ไม่จำกัดจำนวน และไม่ต้องตั้งกลุ่มทางเลือก
         กดไอคอนดาว ★ เพื่อตั้งตัวเลือกเริ่มต้น ลูกค้าจะไม่ต้องกดเลือกเองถ้าไม่ต้องการเปลี่ยน
       </p>
 
@@ -2464,46 +2506,81 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
           </div>
 
           {g.choices.map((c) => (
-            <div key={c.id} style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center", paddingLeft: 12, flexWrap: "wrap" }}>
-              <input className="cfield" value={c.label} onChange={(e) => patchChoice(g.id, c.id, { label: e.target.value })} placeholder="ชื่อตัวเลือก" style={{ flex: 1.2, minWidth: 110 }} />
-              <input className="cfield" value={c.note} onChange={(e) => patchChoice(g.id, c.id, { note: e.target.value })} placeholder="คำอธิบาย (ถ้ามี)" style={{ flex: 1.5, minWidth: 110 }} />
-              <input className="cfield" type="number" value={c.priceDelta} onChange={(e) => patchChoice(g.id, c.id, { priceDelta: Number(e.target.value) })} style={{ width: 70 }} title="ราคาเพิ่ม (บาท)" />
-              <select
-                className="cfield"
-                style={{ flex: 1.3, minWidth: 150 }}
-                value={c.ingredientId || ""}
-                onChange={(e) => patchChoice(g.id, c.id, { ingredientId: e.target.value || null })}
-                title="วัตถุดิบที่ใช้แทนเมื่อลูกค้าเลือกตัวเลือกนี้"
-              >
-                <option value="">ไม่ตัดสต็อกแทนวัตถุดิบ</option>
-                {data.ingredients.filter((i) => i.altGroup).map((i) => (
-                  <option key={i.id} value={i.id}>{i.name} ({i.altGroup})</option>
-                ))}
-              </select>
-              {c.ingredientId && (
-                <input
+            <div key={c.id} style={{ marginBottom: 8, paddingLeft: 12 }}>
+              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                <input className="cfield" value={c.label} onChange={(e) => patchChoice(g.id, c.id, { label: e.target.value })} placeholder="ชื่อตัวเลือก" style={{ flex: 1.2, minWidth: 110 }} />
+                <input className="cfield" value={c.note} onChange={(e) => patchChoice(g.id, c.id, { note: e.target.value })} placeholder="คำอธิบาย (ถ้ามี)" style={{ flex: 1.5, minWidth: 110 }} />
+                <input className="cfield" type="number" value={c.priceDelta} onChange={(e) => patchChoice(g.id, c.id, { priceDelta: Number(e.target.value) })} style={{ width: 70 }} title="ราคาเพิ่ม (บาท)" />
+                <select
                   className="cfield"
-                  type="number"
-                  value={c.qtyPercent != null ? c.qtyPercent : 100}
-                  onChange={(e) => patchChoice(g.id, c.id, { qtyPercent: Number(e.target.value) })}
-                  style={{ width: 66 }}
-                  title="ปริมาณที่ใช้ (% ของสูตรตั้งต้น) เช่น หวานน้อยลง 50%, ไม่หวาน 0%"
-                />
+                  style={{ flex: 1.3, minWidth: 150 }}
+                  value={c.ingredientId || ""}
+                  onChange={(e) => patchChoice(g.id, c.id, { ingredientId: e.target.value || null })}
+                  title="วัตถุดิบที่ใช้แทนเมื่อลูกค้าเลือกตัวเลือกนี้"
+                >
+                  <option value="">ไม่ตัดสต็อกแทนวัตถุดิบ</option>
+                  {data.ingredients.filter((i) => i.altGroup).map((i) => (
+                    <option key={i.id} value={i.id}>{i.name} ({i.altGroup})</option>
+                  ))}
+                </select>
+                {c.ingredientId && (
+                  <input
+                    className="cfield"
+                    type="number"
+                    value={c.qtyPercent != null ? c.qtyPercent : 100}
+                    onChange={(e) => patchChoice(g.id, c.id, { qtyPercent: Number(e.target.value) })}
+                    style={{ width: 66 }}
+                    title="ปริมาณที่ใช้ (% ของสูตรตั้งต้น) เช่น หวานน้อยลง 50%, ไม่หวาน 0%"
+                  />
+                )}
+                <button
+                  className="cbtn"
+                  style={{
+                    padding: "6px 8px",
+                    background: c.isDefault ? "var(--sage-light)" : undefined,
+                    borderColor: c.isDefault ? "var(--sage)" : undefined,
+                    color: c.isDefault ? "var(--sage-dark)" : undefined,
+                  }}
+                  onClick={() => setDefaultChoice(g.id, c.id)}
+                  title={c.isDefault ? "เป็นค่าเริ่มต้นอยู่ (กดอีกครั้งเพื่อยกเลิก)" : "ตั้งเป็นค่าเริ่มต้น (ลูกค้าไม่ต้องกดเลือกเอง)"}
+                >
+                  <Icon name="star" size={13} />
+                </button>
+                <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => removeChoice(g.id, c.id)} title="ลบตัวเลือกย่อยนี้"><Icon name="x" size={13} /></button>
+              </div>
+
+              {(c.extraAdjustments || []).length > 0 && (
+                <div style={{ marginTop: 4, paddingLeft: 14, borderLeft: "2px solid var(--line)" }}>
+                  {c.extraAdjustments.map((a, idx) => (
+                    <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 11, color: "var(--espresso-2)", whiteSpace: "nowrap" }}>ปรับเพิ่ม:</span>
+                      <select
+                        className="cfield"
+                        style={{ flex: 1, minWidth: 140 }}
+                        value={a.ingredientId || ""}
+                        onChange={(e) => patchExtraAdjustment(g.id, c.id, idx, { ingredientId: e.target.value || null })}
+                      >
+                        <option value="">เลือกวัตถุดิบ</option>
+                        {data.ingredients.map((i) => (
+                          <option key={i.id} value={i.id}>{i.name}</option>
+                        ))}
+                      </select>
+                      <input
+                        className="cfield"
+                        type="number"
+                        value={a.qtyPercent != null ? a.qtyPercent : 100}
+                        onChange={(e) => patchExtraAdjustment(g.id, c.id, idx, { qtyPercent: Number(e.target.value) })}
+                        style={{ width: 66 }}
+                        title="ปริมาณที่ใช้ (% ของสูตรตั้งต้นของวัตถุดิบนี้ในเมนู)"
+                      />
+                      <button className="cbtn cbtn-danger" style={{ padding: "5px 7px" }} onClick={() => removeExtraAdjustment(g.id, c.id, idx)} title="ลบรายการนี้"><Icon name="x" size={12} /></button>
+                    </div>
+                  ))}
+                </div>
               )}
-              <button
-                className="cbtn"
-                style={{
-                  padding: "6px 8px",
-                  background: c.isDefault ? "var(--sage-light)" : undefined,
-                  borderColor: c.isDefault ? "var(--sage)" : undefined,
-                  color: c.isDefault ? "var(--sage-dark)" : undefined,
-                }}
-                onClick={() => setDefaultChoice(g.id, c.id)}
-                title={c.isDefault ? "เป็นค่าเริ่มต้นอยู่ (กดอีกครั้งเพื่อยกเลิก)" : "ตั้งเป็นค่าเริ่มต้น (ลูกค้าไม่ต้องกดเลือกเอง)"}
-              >
-                <Icon name="star" size={13} />
+              <button className="cbtn" style={{ marginTop: 4, marginLeft: 14, padding: "4px 8px", fontSize: 11 }} onClick={() => addExtraAdjustment(g.id, c.id)}>
+                <Icon name="plus" size={11} /> ปรับปริมาณวัตถุดิบอื่นพร้อมกัน
               </button>
-              <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => removeChoice(g.id, c.id)} title="ลบตัวเลือกย่อยนี้"><Icon name="x" size={13} /></button>
             </div>
           ))}
           <button className="cbtn" style={{ marginLeft: 12 }} onClick={() => addChoice(g.id)}><Icon name="plus" size={13} /> เพิ่มตัวเลือกย่อย</button>

@@ -1842,7 +1842,7 @@ function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm, hideQty
       if (initialOptions && initialOptions.length) {
         const sel = {};
         for (const o of initialOptions) {
-          sel[o.groupId] = { id: o.choiceId, label: o.label, note: "", priceDelta: o.priceDelta || 0, ingredientId: o.ingredientId || null, qtyPercent: o.qtyPercent != null ? o.qtyPercent : 100, groupId: o.groupId, groupName: o.groupName };
+          sel[o.groupId] = { id: o.choiceId, label: o.label, note: "", priceDelta: o.priceDelta || 0, ingredientId: o.ingredientId || null, qtyPercent: o.qtyPercent != null ? o.qtyPercent : 100, extraAdjustments: o.extraAdjustments || [], groupId: o.groupId, groupName: o.groupName };
         }
         setSelections(sel);
       } else {
@@ -1875,6 +1875,7 @@ function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm, hideQty
       .map((c) => ({
         groupId: c.groupId, groupName: c.groupName, choiceId: c.id, label: c.label, priceDelta: c.priceDelta || 0,
         ingredientId: c.ingredientId || null, qtyPercent: c.qtyPercent != null ? c.qtyPercent : 100,
+        extraAdjustments: c.extraAdjustments || [],
       }));
     onConfirm(hideQty ? 1 : qty, options);
   }
