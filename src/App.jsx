@@ -264,6 +264,54 @@ function milkChoiceFor(menu, ingredientsById) {
   return { originalIngredientId: line.ingredientId, options };
 }
 
+function groupsForMenu(menu, optionGroups) {
+  const ids = menu.optionGroupIds || [];
+  return optionGroups.filter((g) => ids.includes(g.id));
+}
+
+function defaultOptionsFor(groups) {
+  const sel = {};
+  for (const g of groups) {
+    const def = g.choices.find((c) => c.isDefault);
+    if (def) sel[g.id] = { ...def, groupId: g.id, groupName: g.name };
+  }
+  return sel;
+}
+
+// เลือกตัวเลือกแบบเดียวกับที่ลูกค้าเห็น ใช้ทั้งในหน้าขายเครื่องดื่ม (admin) และตอนแก้ไข option ของออเดอร์ที่ลูกค้าสั่งมาแล้ว
+function OptionGroupPicker({ groups, selections, onPick }) {
+  return (
+    <>
+      {groups.map((g) => (
+        <div key={g.id} style={{ marginBottom: 8 }}>
+          <label style={{ fontSize: 11, color: "var(--espresso-2)" }}>{g.name}{g.required ? " *" : ""}</label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 3 }}>
+            {g.choices.map((c) => {
+              const selected = selections[g.id]?.id === c.id;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  className="cbtn"
+                  onClick={() => onPick(g, c)}
+                  style={{
+                    padding: "5px 10px", fontSize: 11.5, fontWeight: selected ? 700 : 500,
+                    background: selected ? "var(--sage-light)" : undefined,
+                    borderColor: selected ? "var(--sage)" : undefined,
+                    color: selected ? "var(--sage-dark)" : undefined,
+                  }}
+                >
+                  {c.label}{c.priceDelta ? ` +฿${c.priceDelta}` : ""}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
 function resolveIngredientAdjustmentsFromOptions(menu, options, ingredientsById) {
   const adjustments = {};
   for (const opt of options || []) {
@@ -546,6 +594,7 @@ function ShopApp({ uid, user }) {
         totalCost, profit: netRevenue - totalCost,
         platformName: platform ? platform.name : null,
         milkNote: opts.milkLabel || null,
+        note: opts.note || null,
       });
     });
     showToast(`บันทึกการขาย ${menu.name} x${qty} (${channel === "delivery" ? (platform ? platform.name : "เดลิเวอรี่") : "หน้าร้าน"}) แล้ว`);
@@ -862,6 +911,7 @@ function EmptyNote({ text }) {
 function SellPanel({ data, ingredientsById, recordSale }) {
   const [state, setState] = useState({});
   const [cart, setCart] = useState([]);
+  const [cartNote, setCartNote] = useState("");
 
   function get(menuId, key, fallback) {
     return (state[menuId] && state[menuId][key] !== undefined) ? state[menuId][key] : fallback;
@@ -895,17 +945,19 @@ function SellPanel({ data, ingredientsById, recordSale }) {
   }
 
   function addToCart(menu, cfg) {
-    const { qty, channel, milkSelId, milk, platformId, promo } = cfg;
-    const substitutions = milk && milkSelId !== milk.originalIngredientId ? { [milk.originalIngredientId]: { ingredientId: milkSelId, qtyPercent: 100 } } : {};
-    const upcharge = milk ? (ingredientsById[milkSelId] ? ingredientsById[milkSelId].altUpcharge : 0) : 0;
+    const { qty, channel, options, platformId, promo } = cfg;
+    const optionsArr = Object.values(options);
+    const substitutions = resolveIngredientAdjustmentsFromOptions(menu, optionsArr, ingredientsById);
+    const upcharge = optionsArr.reduce((s, o) => s + (o.priceDelta || 0), 0);
     const basePrice = channel === "delivery" ? menu.priceDelivery : menu.priceStore;
     const unitPrice = basePrice + upcharge;
     const platform = channel === "delivery" ? data.settings.platforms.find((p) => p.id === platformId) : null;
+    const optionsLabel = optionsArr.map((o) => o.label).join(", ") || null;
     setCart((c) => [...c, {
       cartId: genId("cart"), menuId: menu.id, menuName: menu.name, qty, channel,
       platformId: channel === "delivery" ? platformId : null,
       platformName: platform ? platform.name : null,
-      milkLabel: milk ? (ingredientsById[milkSelId] ? ingredientsById[milkSelId].name : null) : null,
+      options: optionsArr, optionsLabel,
       substitutions, upcharge, unitPrice, promo: channel === "delivery" ? (promo || 0) : 0,
     }]);
     set(menu.id, { qty: 1, promo: 0 });
@@ -923,10 +975,12 @@ function SellPanel({ data, ingredientsById, recordSale }) {
     for (const line of cart) {
       recordSale(line.menuId, line.qty, line.channel, {
         substitutions: line.substitutions, upcharge: line.upcharge,
-        promoDiscount: line.promo, platformId: line.platformId, milkLabel: line.milkLabel,
+        promoDiscount: line.promo, platformId: line.platformId, milkLabel: line.optionsLabel,
+        note: cartNote.trim() || null,
       });
     }
     setCart([]);
+    setCartNote("");
   }
 
   const cartCups = cart.reduce((s, l) => s + l.qty, 0);
@@ -934,16 +988,17 @@ function SellPanel({ data, ingredientsById, recordSale }) {
 
   return (
     <div>
-      <SectionTitle icon="cash-register" text="บันทึกการขาย — หยิบใส่ตะกร้าแล้วค่อยยืนยันออเดอร์ทีเดียว ลดโอกาสกดพลาด" />
+      <SectionTitle icon="cash-register" text="บันทึกการขาย — ตัวเลือกเมนูแบบเดียวกับหน้าลูกค้า หยิบใส่ตะกร้าแล้วค่อยยืนยันทีเดียว ลดโอกาสกดพลาด" />
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
-        <div style={{ flex: "3 1 480px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 12, minWidth: 0 }}>
+        <div style={{ flex: "3 1 480px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12, minWidth: 0 }}>
           {data.menus.map((menu) => {
+            const groups = groupsForMenu(menu, data.optionGroups);
             const qty = get(menu.id, "qty", 1);
             const channel = get(menu.id, "channel", "store");
-            const milk = milkChoiceFor(menu, ingredientsById);
-            const milkSelId = get(menu.id, "milkSel", milk ? milk.originalIngredientId : null);
-            const substitutions = milk && milkSelId !== milk.originalIngredientId ? { [milk.originalIngredientId]: { ingredientId: milkSelId, qtyPercent: 100 } } : {};
-            const upcharge = milk ? (ingredientsById[milkSelId] ? ingredientsById[milkSelId].altUpcharge : 0) : 0;
+            const options = get(menu.id, "options") || defaultOptionsFor(groups);
+            const optionsArr = Object.values(options);
+            const substitutions = resolveIngredientAdjustmentsFromOptions(menu, optionsArr, ingredientsById);
+            const upcharge = optionsArr.reduce((s, o) => s + (o.priceDelta || 0), 0);
             const promo = get(menu.id, "promo", 0);
             const platformId = get(menu.id, "platformId", data.settings.platforms[0]?.id);
             const platform = data.settings.platforms.find((p) => p.id === platformId);
@@ -951,6 +1006,11 @@ function SellPanel({ data, ingredientsById, recordSale }) {
             const ok = stockOk(menu, substitutions, qty);
             const basePrice = channel === "delivery" ? menu.priceDelivery : menu.priceStore;
             const unitPrice = basePrice + upcharge;
+            const missingRequired = groups.some((g) => g.required && !options[g.id]);
+
+            function pick(g, c) {
+              set(menu.id, { options: { ...options, [g.id]: { ...c, groupId: g.id, groupName: g.name } } });
+            }
 
             return (
               <div key={menu.id} style={glass({ borderRadius: 12, padding: 14 })}>
@@ -970,16 +1030,7 @@ function SellPanel({ data, ingredientsById, recordSale }) {
                   })}
                 </div>
 
-                {milk && (
-                  <div style={{ marginBottom: 8 }}>
-                    <label style={{ fontSize: 11, color: "var(--espresso-2)" }}>นม</label>
-                    <select className="cfield" value={milkSelId} onChange={(e) => set(menu.id, { milkSel: e.target.value })}>
-                      {milk.options.map((o) => (
-                        <option key={o.id} value={o.id}>{o.name}{o.altUpcharge ? ` (+฿${o.altUpcharge})` : ""}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
+                {groups.length > 0 && <OptionGroupPicker groups={groups} selections={options} onPick={pick} />}
 
                 {channel === "delivery" && (
                   <div style={{ marginBottom: 8 }}>
@@ -999,7 +1050,12 @@ function SellPanel({ data, ingredientsById, recordSale }) {
                   <button className="cbtn" style={{ padding: "4px 10px" }} onClick={() => set(menu.id, { qty: qty + 1 })}>+</button>
                 </div>
                 {!ok && <p style={{ fontSize: 11.5, color: "var(--danger)", margin: "0 0 8px" }}><Icon name="alert-circle" size={13} /> สต็อกวัตถุดิบไม่พอ (รวมของในตะกร้าแล้ว ยังหยิบเพิ่มได้ แต่สต็อกจะติดลบ)</p>}
-                <button className="cbtn cbtn-accent" style={{ width: "100%" }} onClick={() => addToCart(menu, { qty, channel, milkSelId, milk, platformId, promo })}>
+                {missingRequired && <p style={{ fontSize: 11.5, color: "var(--danger)", margin: "0 0 8px" }}><Icon name="alert-circle" size={13} /> กรุณาเลือกตัวเลือกที่จำเป็นให้ครบ</p>}
+                <button
+                  className="cbtn cbtn-accent" style={{ width: "100%", opacity: missingRequired ? 0.5 : 1, cursor: missingRequired ? "not-allowed" : "pointer" }}
+                  disabled={missingRequired}
+                  onClick={() => addToCart(menu, { qty, channel, options, platformId, promo })}
+                >
                   <Icon name="shopping-cart-plus" size={14} /> หยิบใส่ตะกร้า ({channel === "delivery" ? (platform ? platform.name : "เดลิเวอรี่") : "หน้าร้าน"})
                 </button>
               </div>
@@ -1033,7 +1089,7 @@ function SellPanel({ data, ingredientsById, recordSale }) {
                     </button>
                   </div>
                   <div style={{ fontSize: 11, color: "var(--espresso-2)" }}>
-                    {CHANNELS[line.channel]}{line.platformName ? ` · ${line.platformName}` : ""}{line.milkLabel ? ` · ${line.milkLabel}` : ""}
+                    {CHANNELS[line.channel]}{line.platformName ? ` · ${line.platformName}` : ""}{line.optionsLabel ? ` · ${line.optionsLabel}` : ""}
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -1047,6 +1103,12 @@ function SellPanel({ data, ingredientsById, recordSale }) {
               ))}
             </div>
           )}
+
+          <label style={{ fontSize: 11, color: "var(--espresso-2)", marginBottom: 4 }}>หมายเหตุ (ถ้ามี)</label>
+          <textarea
+            className="cfield" value={cartNote} onChange={(e) => setCartNote(e.target.value)}
+            placeholder="เช่น ลูกค้าขอพิเศษ..." style={{ resize: "vertical", minHeight: 50, marginBottom: 10, fontFamily: "inherit" }}
+          />
 
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontWeight: 700, fontSize: 18, fontFamily: "var(--f-body)", borderTop: "1px solid var(--line)", paddingTop: 10, marginBottom: 10 }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: "var(--espresso-3)" }}>รวมทั้งหมด</span><span>฿{money(cartTotal)}</span>
@@ -1130,14 +1192,25 @@ function OrderMeta({ paymentMethod, pickupDate, paymentVerified, paymentVerified
   );
 }
 
-function OrderItemLines({ items, note, compact }) {
+function OrderItemLines({ items, note, compact, onEditItem }) {
   return (
     <div style={{ margin: compact ? "6px 0" : "10px 0" }}>
       {items.map((i, idx) => (
         <div key={idx} style={{ marginBottom: compact ? 5 : 9, paddingBottom: compact ? 5 : 9, borderBottom: idx < items.length - 1 ? "1px dashed var(--line-soft)" : "none" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: compact ? 5 : 10 }}>
             <span style={{ fontSize: compact ? 11.5 : 16, fontWeight: 700, color: "var(--espresso-5)", lineHeight: 1.25 }}>{i.name} <span style={{ color: "var(--sage-dark)" }}>x{i.qty}</span></span>
-            <span style={{ fontSize: compact ? 10.5 : 15, fontWeight: 700, fontFamily: "var(--f-body)", textAlign: "right", whiteSpace: "nowrap" }}>฿{money(i.unitPrice * i.qty)}</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+              {onEditItem && !compact && (
+                <button
+                  onClick={() => onEditItem(idx)}
+                  title="แก้ไขตัวเลือกรายการนี้"
+                  style={{ border: "none", background: "var(--cream-2)", color: "var(--espresso-3)", borderRadius: 6, padding: "3px 5px", cursor: "pointer", display: "flex" }}
+                >
+                  <Icon name="edit" size={11} />
+                </button>
+              )}
+              <span style={{ fontSize: compact ? 10.5 : 15, fontWeight: 700, fontFamily: "var(--f-body)", textAlign: "right", whiteSpace: "nowrap" }}>฿{money(i.unitPrice * i.qty)}</span>
+            </span>
           </div>
           {i.options?.length > 0 && !compact && (
             <div style={{ fontSize: 13, color: "var(--espresso-3)", marginTop: 3, lineHeight: 1.5 }}>{i.options.map((o) => o.label).join(", ")}</div>
@@ -1161,6 +1234,7 @@ function OrdersPanel({ uid, orders, recordSale, showToast, data, ingredientsById
   const [dragId, setDragId] = useState(null);
   const [dragPos, setDragPos] = useState(null);
   const [overCol, setOverCol] = useState(null);
+  const [editingItem, setEditingItem] = useState(null);
   const dragInfoRef = useRef(null);
   // จอแคบ (เช่น iPad) ให้ทั้ง 4 คอลัมน์อัดพอดีจอโดยไม่ต้องเลื่อนแนวนอน แทนที่จะปล่อยให้ล้นแล้วสกอลล์
   const [compact, setCompact] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 1080px)").matches);
@@ -1192,6 +1266,20 @@ function OrdersPanel({ uid, orders, recordSale, showToast, data, ingredientsById
 
   function setStatus(order, status) {
     update(ref(db, `orders/${uid}/${order.id}`), { status }).catch((err) => showToast("อัปเดตไม่สำเร็จ: " + err.message));
+  }
+
+  // แก้ option ได้เฉพาะตอนออเดอร์ยังไม่ยืนยันจ่ายเงิน (ก่อนตัดสต็อก/บันทึกยอดขาย) กันไม่ให้ตัวเลขสต็อก/ต้นทุนที่บันทึกไปแล้วเพี้ยน
+  function saveItemOptions(order, itemIdx, newOptions) {
+    const item = order.items[itemIdx];
+    const oldDelta = (item.options || []).reduce((s, o) => s + (o.priceDelta || 0), 0);
+    const newDelta = newOptions.reduce((s, o) => s + (o.priceDelta || 0), 0);
+    const newUnitPrice = round4(item.unitPrice - oldDelta + newDelta);
+    const newItems = order.items.map((it, idx) => (idx === itemIdx ? { ...it, options: newOptions, unitPrice: newUnitPrice } : it));
+    const newTotal = round4(newItems.reduce((s, it) => s + it.unitPrice * it.qty, 0));
+    update(ref(db, `orders/${uid}/${order.id}`), { items: newItems, total: newTotal })
+      .then(() => showToast("แก้ไขตัวเลือกออเดอร์แล้ว"))
+      .catch((err) => showToast("แก้ไขไม่สำเร็จ: " + err.message));
+    setEditingItem(null);
   }
 
   function confirmPaid(order) {
@@ -1337,7 +1425,10 @@ function OrdersPanel({ uid, orders, recordSale, showToast, data, ingredientsById
                       </div>
                     )}
                     {!compact && <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} paymentVerified={o.paymentVerified} paymentVerifiedBy={o.paymentVerifiedBy} />}
-                    <OrderItemLines items={o.items} note={o.note} compact={compact} />
+                    <OrderItemLines
+                      items={o.items} note={o.note} compact={compact}
+                      onEditItem={col.id === "pending" ? (idx) => setEditingItem({ order: o, itemIdx: idx }) : undefined}
+                    />
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontWeight: 700, fontSize: compact ? 13 : 16, fontFamily: "var(--f-body)", borderTop: "1px dashed var(--line)", paddingTop: compact ? 4 : 7, marginBottom: col.id !== "done" ? (compact ? 6 : 9) : 0 }}>
                       <span style={{ fontSize: compact ? 10.5 : 12, fontWeight: 600, color: "var(--espresso-3)" }}>รวม</span><span>฿{money(o.total)}</span>
                     </div>
@@ -1391,6 +1482,53 @@ function OrdersPanel({ uid, orders, recordSale, showToast, data, ingredientsById
           </table>
         </div>
       )}
+
+      {editingItem && (
+        <EditOrderItemModal
+          order={editingItem.order} itemIdx={editingItem.itemIdx} data={data}
+          onClose={() => setEditingItem(null)}
+          onSave={(newOptions) => saveItemOptions(editingItem.order, editingItem.itemIdx, newOptions)}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditOrderItemModal({ order, itemIdx, data, onClose, onSave }) {
+  const item = order.items[itemIdx];
+  const menu = data.menus.find((m) => m.id === item.menuId);
+  const groups = menu ? groupsForMenu(menu, data.optionGroups) : [];
+  const initial = {};
+  for (const o of item.options || []) initial[o.groupId] = o;
+  const [selections, setSelections] = useState(initial);
+
+  function pick(g, c) {
+    setSelections((s) => ({ ...s, [g.id]: { ...c, groupId: g.id, groupName: g.name } }));
+  }
+
+  const missingRequired = groups.some((g) => g.required && !selections[g.id]);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(43,29,20,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60 }} onClick={onClose}>
+      <div style={{ background: "var(--surface)", borderRadius: 14, padding: 20, width: 340, maxWidth: "90vw", maxHeight: "85vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <p style={{ fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 16, margin: "0 0 2px" }}>แก้ไขตัวเลือก: {item.name}</p>
+        <p style={{ fontSize: 11.5, color: "var(--espresso-2)", margin: "0 0 14px" }}>ออเดอร์ {order.customerName || order.customerPhone}</p>
+        {groups.length === 0 ? (
+          <EmptyNote text="เมนูนี้ไม่มีตัวเลือกให้แก้ไข" />
+        ) : (
+          <OptionGroupPicker groups={groups} selections={selections} onPick={pick} />
+        )}
+        {missingRequired && <p style={{ fontSize: 11.5, color: "var(--danger)", margin: "4px 0 0" }}><Icon name="alert-circle" size={13} /> กรุณาเลือกตัวเลือกที่จำเป็นให้ครบ</p>}
+        <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+          <button
+            className="cbtn cbtn-accent" disabled={missingRequired} style={{ opacity: missingRequired ? 0.5 : 1, cursor: missingRequired ? "not-allowed" : "pointer" }}
+            onClick={() => onSave(Object.values(selections))}
+          >
+            บันทึก
+          </button>
+          <button className="cbtn" onClick={onClose}>ยกเลิก</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2394,7 +2532,10 @@ function ReportsPanel({ data }) {
               {filtered.slice().reverse().slice(0, 50).map((s) => (
                 <tr key={s.id}>
                   <td style={{ whiteSpace: "nowrap" }}>{new Date(s.timestamp).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</td>
-                  <td>{s.menuName}{s.milkNote ? ` (${s.milkNote})` : ""}</td>
+                  <td>
+                    {s.menuName}{s.milkNote ? ` (${s.milkNote})` : ""}
+                    {s.note && <div style={{ fontSize: 11, color: "#92400E" }}><Icon name="message-2" size={11} style={{ marginRight: 3 }} />{s.note}</div>}
+                  </td>
                   <td style={{ whiteSpace: "nowrap" }}><ChannelPill channel={s.channel} />{s.platformName ? <span style={{ fontSize: 11, color: "var(--espresso-2)" }}> {s.platformName}</span> : null}</td>
                   <td>{s.qty}</td>
                   <td style={{ whiteSpace: "nowrap" }}>฿{money(s.netRevenue)}</td>
