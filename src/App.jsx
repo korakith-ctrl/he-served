@@ -169,7 +169,16 @@ function normalizeData(raw) {
       bannerImageUrl: raw.settings?.bannerImageUrl || "",
     },
     optionGroups: (raw.optionGroups || []).map((g) => ({ ...g, choices: g.choices || [] })),
-    promotions: (raw.promotions || []).map((p) => ({ ...p, menuIds: p.menuIds || [], active: p.active ?? true })),
+    promotions: (raw.promotions || []).map((p) => ({
+      ...p,
+      menuIds: p.menuIds || [],
+      active: p.active ?? true,
+      type: p.type || (p.menuIds && p.menuIds.length > 1 ? "bundle" : "single"),
+      minQty: p.minQty || 2,
+      chooseCount: p.chooseCount || 2,
+      startAt: p.startAt || null,
+      endAt: p.endAt || null,
+    })),
   };
 }
 
@@ -180,6 +189,27 @@ function computePromoPricing(promo, menusById) {
     ? originalTotal * (1 - (Number(promo.discountValue) || 0) / 100)
     : Number(promo.discountValue) || 0;
   return { items, originalTotal, promoTotal: Math.max(0, Math.round(promoTotal * 100) / 100) };
+}
+
+function qtyPromoSetPrice(promo, menu) {
+  if (!menu) return 0;
+  const setSize = Math.max(1, Number(promo.minQty) || 2);
+  const total = promo.discountType === "percent"
+    ? menu.priceStore * setSize * (1 - (Number(promo.discountValue) || 0) / 100)
+    : Number(promo.discountValue) || 0;
+  return Math.max(0, Math.round(total * 100) / 100);
+}
+
+function promoActiveWindow(promo) {
+  const now = Date.now();
+  if (promo.startAt && now < promo.startAt) return "upcoming";
+  if (promo.endAt && now > promo.endAt) return "expired";
+  return "live";
+}
+
+function formatPromoDateTime(ms) {
+  if (!ms) return "";
+  return new Date(ms).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" });
 }
 
 function resolveLines(menu, substitutions) {
@@ -1120,11 +1150,13 @@ function PromotionsPanel({ data, updateData, showToast }) {
   }, [data.menus]);
 
   function newPromo() {
-    setEditing({ id: null, name: "", menuIds: [], discountType: "percent", discountValue: 10, active: true });
+    setEditing({ id: null, name: "", type: "single", menuIds: [], discountType: "percent", discountValue: 10, minQty: 2, chooseCount: 2, active: true, startAt: null, endAt: null });
   }
 
   function savePromo(promo) {
     if (promo.menuIds.length === 0) { showToast("กรุณาเลือกเมนูอย่างน้อย 1 รายการ"); return; }
+    if (promo.type === "bundle" && promo.menuIds.length < 2) { showToast("โปรจับคู่คอมโบต้องเลือกอย่างน้อย 2 เมนู"); return; }
+    if (promo.type === "choice" && promo.menuIds.length < promo.chooseCount) { showToast("จำนวนเมนูในกลุ่มต้องมากกว่าหรือเท่ากับจำนวนที่ให้เลือก"); return; }
     updateData((next) => {
       if (!next.promotions) next.promotions = [];
       if (promo.id) {
@@ -1163,23 +1195,78 @@ function PromotionsPanel({ data, updateData, showToast }) {
         <button className="cbtn cbtn-accent" onClick={newPromo}><Icon name="plus" size={14} /> เพิ่มโปรโมชั่น</button>
       </div>
       <p style={{ fontSize: 11.5, color: "var(--espresso-2)", margin: "-6px 0 14px" }}>
-        โปรโมชั่นที่เปิดใช้งานจะแสดงในหมวด "ดีลพิเศษ" อันดับแรกสุดของหน้าลูกค้า พร้อมราคาปกติขีดฆ่าและราคาโปรสีแดง เลือกเมนูเดียวเพื่อทำโปรลดราคา หรือเลือกหลายเมนูเพื่อจับคู่เป็นเซ็ตคอมโบ
+        โปรโมชั่นที่เปิดใช้งานจะแสดงในหมวด "ดีลพิเศษ" อันดับแรกสุดของหน้าลูกค้า พร้อมราคาปกติขีดฆ่าและราคาโปรสีแดง ทำได้ทั้งลดเมนูเดียว จับคู่คอมโบราคาคงที่ ซื้อครบจำนวนลดเพิ่ม หรือให้ลูกค้าเลือกเองจากกลุ่มเมนู
       </p>
       {promotions.length === 0 ? <EmptyNote text='ยังไม่มีโปรโมชั่น กด "เพิ่มโปรโมชั่น" เพื่อเริ่ม' /> : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
           {promotions.map((promo) => {
-            const { items, originalTotal, promoTotal } = computePromoPricing(promo, menusById);
-            const isBundle = promo.menuIds.length > 1;
+            const type = promo.type || "single";
+            const promoWin = promoActiveWindow(promo);
+            const typeLabel = type === "bundle" ? `เซ็ตคอมโบ ${promo.menuIds.length} รายการ`
+              : type === "qty" ? `ซื้อครบ ${promo.minQty} ชิ้น`
+              : type === "choice" ? `เลือก ${promo.chooseCount} จาก ${promo.menuIds.length} รายการ`
+              : "โปรเมนูเดี่ยว";
+            let priceNode = null;
+            if (type === "bundle" || type === "single") {
+              const { items, originalTotal, promoTotal } = computePromoPricing(promo, menusById);
+              priceNode = (
+                <>
+                  <div style={{ borderTop: "1px dashed var(--line)", margin: "8px 0", paddingTop: 8, fontSize: 12 }}>
+                    {items.map((m) => (
+                      <div key={m.id} style={{ display: "flex", justifyContent: "space-between", color: "var(--espresso-3)" }}>
+                        <span>{m.name}</span><span>฿{money(m.priceStore)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 4 }}>
+                    <span style={{ fontSize: 13, color: "var(--espresso-2)", textDecoration: "line-through" }}>฿{money(originalTotal)}</span>
+                    <span style={{ fontSize: 17, fontWeight: 700, color: "var(--danger)" }}>฿{money(promoTotal)}</span>
+                  </div>
+                </>
+              );
+            } else if (type === "qty") {
+              const menu = menusById[promo.menuIds[0]];
+              const setPrice = qtyPromoSetPrice(promo, menu);
+              priceNode = menu ? (
+                <div style={{ marginTop: 6, fontSize: 12.5 }}>
+                  <div style={{ color: "var(--espresso-3)" }}>{menu.name} · ฿{money(menu.priceStore)}/ชิ้น</div>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 2 }}>
+                    <span style={{ color: "var(--espresso-2)" }}>ปกติ ฿{money(menu.priceStore * promo.minQty)}</span>
+                    <span style={{ fontSize: 17, fontWeight: 700, color: "var(--danger)" }}>ชุดละ ฿{money(setPrice)}</span>
+                  </div>
+                </div>
+              ) : null;
+            } else if (type === "choice") {
+              const pool = promo.menuIds.map((id) => menusById[id]).filter(Boolean);
+              priceNode = (
+                <div style={{ marginTop: 6, fontSize: 12.5 }}>
+                  <div style={{ color: "var(--espresso-3)" }}>{pool.map((m) => m.name).join(", ")}</div>
+                  <div style={{ fontSize: 17, fontWeight: 700, color: "var(--danger)", marginTop: 4 }}>
+                    {promo.discountType === "percent" ? `ลด ${promo.discountValue}% จากรายการที่เลือก` : `ราคาชุดละ ฿${money(promo.discountValue)}`}
+                  </div>
+                </div>
+              );
+            }
             return (
-              <div key={promo.id} style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14, opacity: promo.active === false ? 0.55 : 1 }}>
+              <div key={promo.id} style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 14, opacity: promo.active === false || promoWin === "expired" ? 0.55 : 1 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 15, color: "var(--espresso-5)" }}>
-                      {promo.name || items.map((m) => m.name).join(" + ")}
+                      {promo.name || (promo.menuIds.map((id) => menusById[id]?.name).filter(Boolean).join(" + ") || "โปรโมชั่น")}
                     </div>
                     <div style={{ fontSize: 11, color: "var(--espresso-2)", marginTop: 2 }}>
-                      {isBundle ? `เซ็ตคอมโบ ${items.length} รายการ` : "โปรเมนูเดี่ยว"} · {promo.discountType === "percent" ? `ลด ${promo.discountValue}%` : `ราคาพิเศษ ฿${money(promo.discountValue)}`}
+                      {typeLabel} · {type === "qty" || type === "single" || type === "bundle" ? (promo.discountType === "percent" ? `ลด ${promo.discountValue}%` : `ราคาพิเศษ ฿${money(promo.discountValue)}`) : ""}
                     </div>
+                    {(promo.startAt || promo.endAt) && (
+                      <div style={{ fontSize: 10.5, marginTop: 3, color: promoWin === "expired" ? "var(--danger)" : promoWin === "upcoming" ? "var(--gold-dark)" : "var(--sage-dark)" }}>
+                        <Icon name="clock" size={11} style={{ marginRight: 3 }} />
+                        {promoWin === "upcoming" ? "เริ่ม " : promoWin === "expired" ? "หมดเขต " : ""}
+                        {promo.startAt && promo.endAt ? `${formatPromoDateTime(promo.startAt)} - ${formatPromoDateTime(promo.endAt)}`
+                          : promo.startAt ? `เริ่ม ${formatPromoDateTime(promo.startAt)}`
+                          : `ถึง ${formatPromoDateTime(promo.endAt)}`}
+                        {promoWin === "live" && (promo.startAt || promo.endAt) ? " (กำลังใช้งาน)" : ""}
+                      </div>
+                    )}
                   </div>
                   <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
                     <button className="cbtn" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => toggleActive(promo)}>{promo.active === false ? "เปิดใช้งาน" : "ปิดใช้งาน"}</button>
@@ -1187,17 +1274,7 @@ function PromotionsPanel({ data, updateData, showToast }) {
                     <button className="cbtn cbtn-danger" style={{ padding: "4px 8px" }} onClick={() => deletePromo(promo.id)} title="ลบโปรโมชั่น"><Icon name="trash" size={13} /></button>
                   </div>
                 </div>
-                <div style={{ borderTop: "1px dashed var(--line)", margin: "8px 0", paddingTop: 8, fontSize: 12 }}>
-                  {items.map((m) => (
-                    <div key={m.id} style={{ display: "flex", justifyContent: "space-between", color: "var(--espresso-3)" }}>
-                      <span>{m.name}</span><span>฿{money(m.priceStore)}</span>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 4 }}>
-                  <span style={{ fontSize: 13, color: "var(--espresso-2)", textDecoration: "line-through" }}>฿{money(originalTotal)}</span>
-                  <span style={{ fontSize: 17, fontWeight: 700, color: "var(--danger)" }}>฿{money(promoTotal)}</span>
-                </div>
+                {priceNode}
               </div>
             );
           })}
@@ -1207,8 +1284,25 @@ function PromotionsPanel({ data, updateData, showToast }) {
   );
 }
 
+const PROMO_TYPES = [
+  { id: "single", label: "ลดราคาเมนูเดียว" },
+  { id: "bundle", label: "จับคู่คอมโบ (ราคาคงที่)" },
+  { id: "qty", label: "ซื้อครบจำนวน ลดเพิ่ม" },
+  { id: "choice", label: "ให้ลูกค้าเลือกเอง" },
+];
+
+function dtLocalValue(ms) {
+  if (!ms) return "";
+  const d = new Date(ms);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function PromoEditor({ promo, menus, onSave, onCancel }) {
-  const [form, setForm] = useState({ ...promo, menuIds: promo.menuIds || [] });
+  const [form, setForm] = useState({
+    type: "single", minQty: 2, chooseCount: 2, startAt: null, endAt: null,
+    ...promo, menuIds: promo.menuIds || [],
+  });
   const menusById = useMemo(() => {
     const m = {};
     for (const x of menus) m[x.id] = x;
@@ -1217,29 +1311,80 @@ function PromoEditor({ promo, menus, onSave, onCancel }) {
 
   function toggleMenu(id) {
     setForm((f) => {
+      if (f.type === "single" || f.type === "qty") return { ...f, menuIds: [id] };
       const has = f.menuIds.includes(id);
       return { ...f, menuIds: has ? f.menuIds.filter((x) => x !== id) : [...f.menuIds, id] };
     });
   }
 
+  function setType(type) {
+    setForm((f) => ({ ...f, type, menuIds: type === "single" || type === "qty" ? f.menuIds.slice(0, 1) : f.menuIds }));
+  }
+
   const { items, originalTotal, promoTotal } = computePromoPricing(form, menusById);
+  const qtyMenu = form.type === "qty" ? menusById[form.menuIds[0]] : null;
+  const qtySetPrice = qtyMenu ? qtyPromoSetPrice(form, qtyMenu) : 0;
 
   return (
     <div style={{ maxWidth: 480 }}>
       <SectionTitle icon="discount" text={promo.id ? "แก้ไขโปรโมชั่น" : "โปรโมชั่นใหม่"} />
 
+      <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ประเภทโปรโมชั่น</label>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
+        {PROMO_TYPES.map((t) => (
+          <button
+            key={t.id}
+            className="cbtn"
+            style={{
+              fontSize: 12, padding: "7px 10px",
+              background: form.type === t.id ? "var(--sage-light)" : undefined,
+              borderColor: form.type === t.id ? "var(--sage)" : undefined,
+              color: form.type === t.id ? "var(--sage-dark)" : undefined,
+              fontWeight: form.type === t.id ? 600 : 500,
+            }}
+            onClick={() => setType(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
       <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ชื่อโปรโมชั่น (ถ้าเว้นว่างจะใช้ชื่อเมนูต่อกัน)</label>
       <input className="cfield" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="เช่น คู่หูสุดคุ้ม" style={{ marginBottom: 12 }} />
 
-      <p style={{ fontSize: 12, color: "var(--espresso-2)", margin: "0 0 6px" }}>เลือกเมนูที่ต้องการทำโปร (เลือกมากกว่า 1 รายการเพื่อจับคู่เป็นเซ็ตคอมโบ)</p>
+      <p style={{ fontSize: 12, color: "var(--espresso-2)", margin: "0 0 6px" }}>
+        {form.type === "single" && "เลือกเมนูที่ต้องการลดราคา"}
+        {form.type === "bundle" && "เลือกเมนูทั้งหมดที่จะรวมเป็นเซ็ตคอมโบ (อย่างน้อย 2 รายการ)"}
+        {form.type === "qty" && "เลือกเมนูที่จะให้ซื้อครบจำนวนแล้วลดราคา"}
+        {form.type === "choice" && "เลือกกลุ่มเมนูที่ให้ลูกค้าเลือกเอง (ต้องมีมากกว่าหรือเท่ากับจำนวนที่ให้เลือก)"}
+      </p>
       <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 10, padding: 8, marginBottom: 14 }}>
         {menus.map((m) => (
           <label key={m.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, padding: "5px 4px" }}>
-            <input type="checkbox" checked={form.menuIds.includes(m.id)} onChange={() => toggleMenu(m.id)} />
+            <input
+              type={form.type === "single" || form.type === "qty" ? "radio" : "checkbox"}
+              name="promo-menu"
+              checked={form.menuIds.includes(m.id)}
+              onChange={() => toggleMenu(m.id)}
+            />
             {m.name} <span style={{ color: "var(--espresso-2)", fontSize: 11.5 }}>฿{money(m.priceStore)}</span>
           </label>
         ))}
       </div>
+
+      {form.type === "qty" && (
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ซื้อครบกี่ชิ้นต่อเซ็ต</label>
+          <input className="cfield" type="number" min={2} value={form.minQty} onChange={(e) => setForm({ ...form, minQty: Math.max(2, Number(e.target.value)) })} style={{ maxWidth: 120 }} />
+        </div>
+      )}
+
+      {form.type === "choice" && (
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ให้ลูกค้าเลือกกี่รายการจากกลุ่มนี้</label>
+          <input className="cfield" type="number" min={1} value={form.chooseCount} onChange={(e) => setForm({ ...form, chooseCount: Math.max(1, Number(e.target.value)) })} style={{ maxWidth: 120 }} />
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 10, marginBottom: 6 }}>
         <div style={{ flex: 1 }}>
@@ -1250,8 +1395,28 @@ function PromoEditor({ promo, menus, onSave, onCancel }) {
           </select>
         </div>
         <div style={{ flex: 1 }}>
-          <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>{form.discountType === "percent" ? "เปอร์เซ็นต์ส่วนลด (%)" : "ราคาขาย (บาท)"}</label>
+          <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>{form.discountType === "percent" ? "เปอร์เซ็นต์ส่วนลด (%)" : form.type === "qty" ? "ราคาต่อเซ็ต (บาท)" : "ราคาขาย (บาท)"}</label>
           <input className="cfield" type="number" value={form.discountValue} onChange={(e) => setForm({ ...form, discountValue: Number(e.target.value) })} />
+        </div>
+      </div>
+
+      <p style={{ fontSize: 12, color: "var(--espresso-2)", margin: "14px 0 6px" }}>กำหนดช่วงเวลาโปรโมชั่น (ไม่บังคับ — เว้นว่างไว้ถ้าไม่ต้องการจำกัดเวลา)</p>
+      <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>เริ่ม</label>
+          <input
+            className="cfield" type="datetime-local"
+            value={dtLocalValue(form.startAt)}
+            onChange={(e) => setForm({ ...form, startAt: e.target.value ? new Date(e.target.value).getTime() : null })}
+          />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>สิ้นสุด</label>
+          <input
+            className="cfield" type="datetime-local"
+            value={dtLocalValue(form.endAt)}
+            onChange={(e) => setForm({ ...form, endAt: e.target.value ? new Date(e.target.value).getTime() : null })}
+          />
         </div>
       </div>
 
@@ -1260,7 +1425,7 @@ function PromoEditor({ promo, menus, onSave, onCancel }) {
         เปิดใช้งานโปรโมชั่นนี้
       </label>
 
-      {form.menuIds.length > 0 && (
+      {(form.type === "single" || form.type === "bundle") && form.menuIds.length > 0 && (
         <div style={{ background: "var(--sage-light)", borderRadius: 10, padding: "10px 12px", marginBottom: 16 }}>
           <div style={{ fontSize: 11.5, color: "var(--espresso-3)", marginBottom: 4 }}>ตัวอย่างราคาที่ลูกค้าจะเห็น</div>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
@@ -1268,6 +1433,22 @@ function PromoEditor({ promo, menus, onSave, onCancel }) {
             <span style={{ fontSize: 18, fontWeight: 700, color: "var(--danger)" }}>฿{money(promoTotal)}</span>
           </div>
         </div>
+      )}
+
+      {form.type === "qty" && qtyMenu && (
+        <div style={{ background: "var(--sage-light)", borderRadius: 10, padding: "10px 12px", marginBottom: 16 }}>
+          <div style={{ fontSize: 11.5, color: "var(--espresso-3)", marginBottom: 4 }}>ตัวอย่างราคาที่ลูกค้าจะเห็น (ซื้อครบ {form.minQty} ชิ้น)</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+            <span style={{ fontSize: 13, color: "var(--espresso-2)", textDecoration: "line-through" }}>฿{money(qtyMenu.priceStore * form.minQty)}</span>
+            <span style={{ fontSize: 18, fontWeight: 700, color: "var(--danger)" }}>฿{money(qtySetPrice)}</span>
+          </div>
+        </div>
+      )}
+
+      {form.type === "choice" && (
+        <p style={{ fontSize: 11.5, color: "var(--espresso-2)", margin: "0 0 16px" }}>
+          ลูกค้าจะเลือกเอง {form.chooseCount} รายการจากกลุ่มนี้ตอนสั่งซื้อ ราคาจะคำนวณจาก{form.discountType === "percent" ? `ส่วนลด ${form.discountValue}% ของราคารวมที่เลือก` : `ราคาชุดคงที่ ฿${money(form.discountValue)}`}
+        </p>
       )}
 
       <div style={{ display: "flex", gap: 8 }}>

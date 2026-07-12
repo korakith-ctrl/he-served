@@ -111,6 +111,49 @@ function splitBundlePrices(promo, menusById) {
   });
 }
 
+function qtyPromoTotal(promo, menu, qty) {
+  if (!menu || qty <= 0) return 0;
+  const setSize = Math.max(1, Number(promo.minQty) || 2);
+  const sets = Math.floor(qty / setSize);
+  const remainder = qty % setSize;
+  const setPrice = promo.discountType === "percent"
+    ? menu.priceStore * setSize * (1 - (Number(promo.discountValue) || 0) / 100)
+    : Number(promo.discountValue) || 0;
+  const total = sets * setPrice + remainder * menu.priceStore;
+  return Math.max(0, Math.round(total * 100) / 100);
+}
+
+function qtyPromoUnitPrice(promo, menu, qty) {
+  const total = qtyPromoTotal(promo, menu, qty);
+  return qty > 0 ? Math.max(0, Math.round((total / qty) * 100) / 100) : 0;
+}
+
+function splitChoicePrices(promo, chosenMenus) {
+  const sum = chosenMenus.reduce((s, m) => s + m.priceStore, 0);
+  const total = promo.discountType === "percent"
+    ? sum * (1 - (Number(promo.discountValue) || 0) / 100)
+    : Number(promo.discountValue) || 0;
+  const clampedTotal = Math.max(0, Math.round(total * 100) / 100);
+  let allocated = 0;
+  return chosenMenus.map((m, idx) => {
+    let price;
+    if (idx === chosenMenus.length - 1) {
+      price = clampedTotal - allocated;
+    } else {
+      price = sum > 0 ? Math.round((m.priceStore / sum) * clampedTotal * 100) / 100 : 0;
+      allocated += price;
+    }
+    return { menuId: m.id, name: m.name, unitPrice: Math.max(0, Math.round(price * 100) / 100) };
+  });
+}
+
+function promoInWindow(promo) {
+  const now = Date.now();
+  if (promo.startAt && now < promo.startAt) return false;
+  if (promo.endAt && now > promo.endAt) return false;
+  return true;
+}
+
 function localDateStr(d) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -375,6 +418,7 @@ export default function CustomerOrder({ shopUid }) {
   const prevCartCountRef = useRef(0);
   const [pickingMenu, setPickingMenu] = useState(null);
   const [pickingPromo, setPickingPromo] = useState(null);
+  const [pickingChoicePromo, setPickingChoicePromo] = useState(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [note, setNote] = useState("");
@@ -418,7 +462,15 @@ export default function CustomerOrder({ shopUid }) {
     );
     const unsub6 = onValue(ref(db, `shops/${shopUid}/settings/slipTestMode`), (snap) => setSlipTestMode(snap.val() === true));
     const unsub7 = onValue(ref(db, `shops/${shopUid}/settings/bannerImageUrl`), (snap) => setBannerImageUrl(snap.val() || ""));
-    const unsub8 = onValue(ref(db, `shops/${shopUid}/promotions`), (snap) => setPromotions(snap.val() || []));
+    const unsub8 = onValue(ref(db, `shops/${shopUid}/promotions`), (snap) => {
+      const list = snap.val() || [];
+      setPromotions(list.map((p) => ({
+        ...p,
+        type: p.type || (p.menuIds && p.menuIds.length > 1 ? "bundle" : "single"),
+        minQty: p.minQty || 2,
+        chooseCount: p.chooseCount || 2,
+      })));
+    });
     return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); unsub7(); unsub8(); };
   }, [authUid, shopUid]);
 
@@ -467,10 +519,16 @@ export default function CustomerOrder({ shopUid }) {
   }, [menus]);
 
   const activePromotions = useMemo(() => {
-    return (promotions || []).filter((p) =>
-      p.active !== false && p.menuIds && p.menuIds.length > 0 &&
-      p.menuIds.every((id) => menusById[id] && menusById[id].available !== false)
-    );
+    return (promotions || []).filter((p) => {
+      if (p.active === false) return false;
+      if (!p.menuIds || p.menuIds.length === 0) return false;
+      if (!promoInWindow(p)) return false;
+      if (p.type === "choice") {
+        const availableCount = p.menuIds.filter((id) => menusById[id] && menusById[id].available !== false).length;
+        return availableCount >= (p.chooseCount || 1);
+      }
+      return p.menuIds.every((id) => menusById[id] && menusById[id].available !== false);
+    });
   }, [promotions, menusById]);
 
   const categories = useMemo(() => {
@@ -532,24 +590,26 @@ export default function CustomerOrder({ shopUid }) {
   function openMenu(menu, promo) {
     if (menu.available === false) return;
     const groups = groupsForMenu(menu);
-    const priceOverride = promo ? singlePromoPrice(promo, menu) : undefined;
+    const isQty = promo && promo.type === "qty";
+    const priceOverride = promo ? (isQty ? qtyPromoUnitPrice(promo, menu, 1) : singlePromoPrice(promo, menu)) : undefined;
     const promoId = promo ? promo.id : null;
+    const promoKind = promo ? (isQty ? "qty" : "single") : null;
     const refKey = promo ? "promo_" + menu.id : menu.id;
     if (groups.length === 0) {
       spawnFly(refKey, menu.imageUrl);
       const existing = cart.find((l) => l.menuId === menu.id && l.options.length === 0 && (l.promoId || null) === promoId);
       if (existing) setLineQty(existing.lineId, existing.qty + 1);
-      else addToCart(menu, 1, [], priceOverride, promoId);
+      else addToCart(menu, 1, [], priceOverride, promoId, promoKind);
       return;
     }
     setPickingMenu(menu);
     setPickingPromo(promo || null);
   }
 
-  function addToCart(menu, qty, options, priceOverride, promoId) {
+  function addToCart(menu, qty, options, priceOverride, promoId, promoKind) {
     const base = priceOverride !== undefined ? priceOverride : menu.priceStore;
     const unitPrice = base + options.reduce((s, o) => s + (o.priceDelta || 0), 0);
-    setCart((c) => [...c, { lineId: genLineId(), menuId: menu.id, name: menu.name, unitPrice, qty, options, promoId: promoId || null }]);
+    setCart((c) => [...c, { lineId: genLineId(), menuId: menu.id, name: menu.name, unitPrice, qty, options, promoId: promoId || null, promoKind: promoKind || null }]);
   }
 
   function bundleQtyInCart(promo) {
@@ -570,7 +630,7 @@ export default function CustomerOrder({ shopUid }) {
         const existing = c.find((l) => l.promoId === promo.id && l.menuId === p.menuId);
         return {
           lineId: existing ? existing.lineId : genLineId(),
-          menuId: p.menuId, name: p.name, unitPrice: p.unitPrice, qty, options: [], promoId: promo.id,
+          menuId: p.menuId, name: p.name, unitPrice: p.unitPrice, qty, options: [], promoId: promo.id, promoKind: "bundle",
         };
       });
       return [...others, ...newLines];
@@ -581,13 +641,37 @@ export default function CustomerOrder({ shopUid }) {
     setBundleQty(promo, bundleQtyInCart(promo) + 1);
   }
 
+  function addChoiceSet(promo, chosenMenus) {
+    const setId = promo.id + "_" + Math.random().toString(36).slice(2, 8);
+    const prices = splitChoicePrices(promo, chosenMenus);
+    setCart((c) => [
+      ...c,
+      ...prices.map((p) => ({
+        lineId: genLineId(), menuId: p.menuId, name: p.name, unitPrice: p.unitPrice, qty: 1, options: [],
+        promoId: setId, promoKind: "choice", promoGroupId: promo.id,
+      })),
+    ]);
+  }
+
+  function removeChoiceSet(setId) {
+    setCart((c) => c.filter((l) => l.promoId !== setId));
+  }
+
   function removeLine(lineId) {
     setCart((c) => c.filter((l) => l.lineId !== lineId));
   }
 
   function setLineQty(lineId, qty) {
     if (qty <= 0) { removeLine(lineId); return; }
-    setCart((c) => c.map((l) => (l.lineId === lineId ? { ...l, qty } : l)));
+    setCart((c) => c.map((l) => {
+      if (l.lineId !== lineId) return l;
+      if (l.promoKind === "qty") {
+        const menu = menusById[l.menuId];
+        const promo = (promotions || []).find((p) => p.id === l.promoId);
+        if (menu && promo) return { ...l, qty, unitPrice: qtyPromoUnitPrice(promo, menu, qty) };
+      }
+      return { ...l, qty };
+    }));
   }
 
   const total = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0);
@@ -1006,8 +1090,77 @@ export default function CustomerOrder({ shopUid }) {
               <section key={cat} data-category={cat} ref={(el) => { sectionRefs.current[cat] = el; }} style={{ padding: "16px 6px 0" }}>
                 <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 600, color: COLORS.espresso5, margin: "0 0 10px" }}>{cat}</h2>
                 {cat === HOT_DEAL_CATEGORY ? activePromotions.map((promo) => {
-                  const isBundle = promo.menuIds.length > 1;
-                  if (isBundle) {
+                  if (promo.type === "choice") {
+                    const pool = promo.menuIds.map((id) => menusById[id]).filter((m) => m && m.available !== false);
+                    const displayName = promo.name || `เลือก ${promo.chooseCount} จาก ${pool.length} รายการ`;
+                    const priceText = promo.discountType === "percent" ? `ลด ${promo.discountValue}%` : `ชุดละ ${money(promo.discountValue)}`;
+                    return (
+                      <div key={promo.id} style={{ ...GLASS_PANEL, display: "flex", gap: 12, alignItems: "center", padding: "10px 12px", borderRadius: 14, marginBottom: 8 }}>
+                        <MenuThumb imageUrl={pool[0]?.imageUrl} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 500, fontSize: 14, color: COLORS.espresso5 }}>{displayName}</div>
+                          <div style={{ fontSize: 11.5, color: COLORS.espresso2, margin: "2px 0" }}>{pool.map((m) => m.name).join(", ")}</div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: COLORS.danger, marginTop: 3 }}>{priceText}</div>
+                        </div>
+                        <button onClick={() => setPickingChoicePromo(promo)} style={{
+                          flexShrink: 0, border: "none", background: COLORS.espresso5, color: "#fff",
+                          fontSize: 12.5, fontWeight: 600, borderRadius: 9, padding: "9px 12px",
+                        }}>เลือกเมนู</button>
+                      </div>
+                    );
+                  }
+                  if (promo.type === "qty") {
+                    const menu = menusById[promo.menuIds[0]];
+                    if (!menu) return null;
+                    const lines = linesForMenu(menu.id, promo.id);
+                    const qty = lines.reduce((s, l) => s + l.qty, 0);
+                    const singleLine = lines.length === 1 ? lines[0] : null;
+                    const setPrice = qtyPromoTotal(promo, menu, promo.minQty);
+                    return (
+                      <div key={promo.id} onClick={() => !singleLine && openMenu(menu, promo)} style={{
+                        ...GLASS_PANEL, display: "flex", gap: 12, alignItems: "center", padding: "10px 12px", borderRadius: 14, marginBottom: 8,
+                        cursor: singleLine ? "default" : "pointer",
+                      }}>
+                        <div ref={(el) => { menuThumbRefs.current["promo_" + menu.id] = el; }}>
+                          <MenuThumb imageUrl={menu.imageUrl} />
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 500, fontSize: 14, color: COLORS.espresso5 }}>{promo.name || menu.name}</div>
+                          <div style={{ fontSize: 13, color: COLORS.gold, fontWeight: 600, marginTop: 3 }}>{money(menu.priceStore)}/ชิ้น</div>
+                          <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 3 }}>
+                            <span style={{ fontSize: 12, color: COLORS.espresso2, textDecoration: "line-through" }}>{money(menu.priceStore * promo.minQty)}</span>
+                            <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.danger }}>ซื้อครบ {promo.minQty} ชิ้น {money(setPrice)}</span>
+                          </div>
+                        </div>
+                        {singleLine ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                            <button onClick={() => setLineQty(singleLine.lineId, singleLine.qty - 1)} style={{
+                              width: 28, height: 28, borderRadius: 9, border: "1px solid rgba(255,255,255,0.7)", background: "rgba(255,255,255,0.6)",
+                              color: COLORS.espresso5, fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                            }}>−</button>
+                            <span style={{ minWidth: 16, textAlign: "center", fontWeight: 600, color: COLORS.espresso5 }}><AnimatedQty value={qty} /></span>
+                            <button
+                              onClick={() => setLineQty(singleLine.lineId, singleLine.qty + 1)}
+                              style={{
+                                width: 28, height: 28, borderRadius: 8, border: "none", background: COLORS.espresso5,
+                                color: "#fff", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                              }}
+                            >+</button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); openMenu(menu, promo); }}
+                            style={{
+                              width: 32, height: 32, borderRadius: 9, flexShrink: 0, border: "none",
+                              background: COLORS.espresso5, color: "#fff", fontSize: 18, lineHeight: 1,
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                            }}
+                          >+</button>
+                        )}
+                      </div>
+                    );
+                  }
+                  if (promo.type === "bundle") {
                     const prices = splitBundlePrices(promo, menusById);
                     const originalTotal = promo.menuIds.reduce((s, id) => s + (menusById[id]?.priceStore || 0), 0);
                     const promoTotal = prices.reduce((s, p) => s + p.unitPrice, 0);
@@ -1218,10 +1371,22 @@ export default function CustomerOrder({ shopUid }) {
         onConfirm={(qty, options) => {
           const refKey = pickingPromo ? "promo_" + pickingMenu.id : pickingMenu.id;
           spawnFly(refKey, pickingMenu.imageUrl);
-          const priceOverride = pickingPromo ? singlePromoPrice(pickingPromo, pickingMenu) : undefined;
-          addToCart(pickingMenu, qty, options, priceOverride, pickingPromo ? pickingPromo.id : null);
+          const isQty = pickingPromo && pickingPromo.type === "qty";
+          const priceOverride = pickingPromo ? (isQty ? qtyPromoUnitPrice(pickingPromo, pickingMenu, qty) : singlePromoPrice(pickingPromo, pickingMenu)) : undefined;
+          addToCart(pickingMenu, qty, options, priceOverride, pickingPromo ? pickingPromo.id : null, pickingPromo ? (isQty ? "qty" : "single") : null);
           setPickingMenu(null);
           setPickingPromo(null);
+        }}
+      />
+
+      <ChoicePickerModal
+        visible={!!pickingChoicePromo}
+        promo={pickingChoicePromo}
+        menusById={menusById}
+        onCancel={() => setPickingChoicePromo(null)}
+        onConfirm={(chosenMenus) => {
+          addChoiceSet(pickingChoicePromo, chosenMenus);
+          setPickingChoicePromo(null);
         }}
       />
     </div>
@@ -1312,9 +1477,15 @@ function CartDrawer({ visible, cart, total, onClose, onSetQty, onRemove, onCheck
                 <div style={{ fontSize: 12.5, color: l.promoId ? COLORS.danger : COLORS.sage, fontWeight: 600, marginTop: 4 }}><AnimatedMoney value={l.unitPrice * l.qty} /></div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                <button style={{ ...btn, padding: "4px 10px" }} onClick={() => onSetQty(l.lineId, l.qty - 1)}>−</button>
-                <span style={{ minWidth: 18, textAlign: "center" }}><AnimatedQty value={l.qty} /></span>
-                <button style={{ ...btn, padding: "4px 10px" }} onClick={() => onSetQty(l.lineId, l.qty + 1)}>+</button>
+                {l.promoKind === "bundle" || l.promoKind === "choice" ? (
+                  <span style={{ fontSize: 12, color: COLORS.espresso2, marginRight: 2 }}>x{l.qty}</span>
+                ) : (
+                  <>
+                    <button style={{ ...btn, padding: "4px 10px" }} onClick={() => onSetQty(l.lineId, l.qty - 1)}>−</button>
+                    <span style={{ minWidth: 18, textAlign: "center" }}><AnimatedQty value={l.qty} /></span>
+                    <button style={{ ...btn, padding: "4px 10px" }} onClick={() => onSetQty(l.lineId, l.qty + 1)}>+</button>
+                  </>
+                )}
                 <button style={{ ...btn, padding: "4px 8px", color: COLORS.danger, borderColor: COLORS.danger }} onClick={() => onRemove(l.lineId)}>
                   <i className="ti ti-trash" style={{ fontSize: 14 }} aria-hidden="true"></i>
                 </button>
@@ -1422,6 +1593,80 @@ function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm }) {
         <div style={{ display: "flex", gap: 8 }}>
           <button style={btn} onClick={onCancel}>ยกเลิก</button>
           <button style={btnAccent} onClick={confirm}>เพิ่มลงตะกร้า</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChoicePickerModal({ promo, menusById, visible, onCancel, onConfirm }) {
+  const { mounted, shown } = useSheetTransition(visible);
+  const cachedRef = useRef(promo);
+  if (promo) cachedRef.current = promo;
+  const cp = cachedRef.current;
+
+  const [selected, setSelected] = useState([]);
+
+  useEffect(() => {
+    if (promo) setSelected([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [promo?.id]);
+
+  if (!mounted || !cp) return null;
+
+  const pool = (cp.menuIds || []).map((id) => menusById[id]).filter((m) => m && m.available !== false);
+  const need = cp.chooseCount || 1;
+
+  function toggle(id) {
+    setSelected((s) => {
+      if (s.includes(id)) return s.filter((x) => x !== id);
+      if (s.length >= need) return s;
+      return [...s, id];
+    });
+  }
+
+  function confirm() {
+    if (selected.length !== need) return;
+    const chosen = selected.map((id) => menusById[id]).filter(Boolean);
+    onConfirm(chosen);
+  }
+
+  return (
+    <div style={{ ...overlay, opacity: shown ? 1 : 0, transition: "opacity .25s ease" }} onClick={onCancel}>
+      <div style={{
+        ...GLASS_PANEL, borderRadius: "20px 20px 0 0", padding: 20, width: "100%", maxWidth: 420, maxHeight: "85vh", overflowY: "auto",
+        transform: shown ? "translateY(0)" : "translateY(100%)", transition: "transform .34s cubic-bezier(.22,1,.36,1)",
+      }} onClick={(e) => e.stopPropagation()}>
+        <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 18, margin: "0 0 4px" }}>{cp.name || "เลือกเมนู"}</h2>
+        <p style={{ fontSize: 12, color: COLORS.espresso2, margin: "0 0 14px" }}>เลือก {need} รายการจาก {pool.length} รายการ ({selected.length}/{need})</p>
+
+        {pool.map((m) => {
+          const isSel = selected.includes(m.id);
+          const disabled = !isSel && selected.length >= need;
+          return (
+            <button
+              key={m.id}
+              onClick={() => toggle(m.id)}
+              disabled={disabled}
+              style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%",
+                textAlign: "left", padding: "9px 12px", marginBottom: 6, borderRadius: 9, cursor: disabled ? "default" : "pointer",
+                border: isSel ? `1.5px solid ${COLORS.sage}` : `1px solid ${COLORS.line}`,
+                background: isSel ? COLORS.sageLight : "#fff", color: COLORS.espresso4, fontSize: 13,
+                opacity: disabled ? 0.45 : 1,
+              }}
+            >
+              <span style={{ fontWeight: 500 }}>{m.name}</span>
+              <span style={{ fontSize: 12.5, whiteSpace: "nowrap", marginLeft: 8 }}>{money(m.priceStore)}</span>
+            </button>
+          );
+        })}
+
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <button style={btn} onClick={onCancel}>ยกเลิก</button>
+          <button style={btnAccent} disabled={selected.length !== need} onClick={confirm}>
+            เพิ่มลงตะกร้า ({selected.length}/{need})
+          </button>
         </div>
       </div>
     </div>
