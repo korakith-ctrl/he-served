@@ -1025,11 +1025,13 @@ export default function CustomerOrder({ shopUid }) {
   async function openMyOrders() {
     setError("");
     const ids = loadMyOrderIds(shopUid);
-    const results = await Promise.all(ids.map(async (id) => {
-      const snap = await get(ref(db, `orders/${shopUid}/${id}`));
-      return snap.exists() ? { id, ...snap.val() } : null;
-    }));
-    setMyOrders(results.filter(Boolean));
+    // Promise.all rejects the whole batch (and silently no-ops the button, since there's
+    // no .catch) if even one cached id is denied/gone — allSettled lets the rest through.
+    const results = await Promise.allSettled(ids.map((id) => get(ref(db, `orders/${shopUid}/${id}`))));
+    const orders = results
+      .filter((r) => r.status === "fulfilled" && r.value.exists())
+      .map((r) => ({ id: r.value.key, ...r.value.val() }));
+    setMyOrders(orders);
     setStep("myorders");
   }
 
