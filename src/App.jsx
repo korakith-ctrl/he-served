@@ -844,6 +844,7 @@ function EmptyNote({ text }) {
 
 function SellPanel({ data, ingredientsById, recordSale }) {
   const [state, setState] = useState({});
+  const [cart, setCart] = useState([]);
 
   function get(menuId, key, fallback) {
     return (state[menuId] && state[menuId][key] !== undefined) ? state[menuId][key] : fallback;
@@ -852,90 +853,191 @@ function SellPanel({ data, ingredientsById, recordSale }) {
     setState((p) => ({ ...p, [menuId]: { ...p[menuId], ...patch } }));
   }
 
+  // รวมยอดใช้วัตถุดิบของทุกบรรทัดที่อยู่ในตะกร้าแล้ว เพื่อเช็คสต็อกสะสม ไม่ใช่แค่เช็คทีละแก้วตอนกด "หยิบใส่ตะกร้า"
+  function cartIngredientUsage() {
+    const usage = {};
+    for (const line of cart) {
+      const m = data.menus.find((x) => x.id === line.menuId);
+      if (!m) continue;
+      for (const l of resolveLines(m, line.substitutions)) {
+        usage[l.ingredientId] = (usage[l.ingredientId] || 0) + l.qty * line.qty;
+      }
+    }
+    return usage;
+  }
+
   function stockOk(menu, substitutions, qty) {
+    const cartUsage = cartIngredientUsage();
     const lines = resolveLines(menu, substitutions);
     for (const line of lines) {
       const ing = ingredientsById[line.ingredientId];
-      if (ing && ing.stockQty < line.qty * qty) return false;
+      const reserved = cartUsage[line.ingredientId] || 0;
+      if (ing && ing.stockQty - reserved < line.qty * qty) return false;
     }
     return true;
   }
 
+  function addToCart(menu, cfg) {
+    const { qty, channel, milkSelId, milk, platformId, promo } = cfg;
+    const substitutions = milk && milkSelId !== milk.originalIngredientId ? { [milk.originalIngredientId]: { ingredientId: milkSelId, qtyPercent: 100 } } : {};
+    const upcharge = milk ? (ingredientsById[milkSelId] ? ingredientsById[milkSelId].altUpcharge : 0) : 0;
+    const basePrice = channel === "delivery" ? menu.priceDelivery : menu.priceStore;
+    const unitPrice = basePrice + upcharge;
+    const platform = channel === "delivery" ? data.settings.platforms.find((p) => p.id === platformId) : null;
+    setCart((c) => [...c, {
+      cartId: genId("cart"), menuId: menu.id, menuName: menu.name, qty, channel,
+      platformId: channel === "delivery" ? platformId : null,
+      platformName: platform ? platform.name : null,
+      milkLabel: milk ? (ingredientsById[milkSelId] ? ingredientsById[milkSelId].name : null) : null,
+      substitutions, upcharge, unitPrice, promo: channel === "delivery" ? (promo || 0) : 0,
+    }]);
+    set(menu.id, { qty: 1, promo: 0 });
+  }
+
+  function removeFromCart(cartId) {
+    setCart((c) => c.filter((l) => l.cartId !== cartId));
+  }
+
+  function updateCartQty(cartId, qty) {
+    setCart((c) => c.map((l) => (l.cartId === cartId ? { ...l, qty: Math.max(1, qty) } : l)));
+  }
+
+  function checkout() {
+    for (const line of cart) {
+      recordSale(line.menuId, line.qty, line.channel, {
+        substitutions: line.substitutions, upcharge: line.upcharge,
+        promoDiscount: line.promo, platformId: line.platformId, milkLabel: line.milkLabel,
+      });
+    }
+    setCart([]);
+  }
+
+  const cartCups = cart.reduce((s, l) => s + l.qty, 0);
+  const cartTotal = cart.reduce((s, l) => s + l.unitPrice * l.qty - (l.promo || 0), 0);
+
   return (
     <div>
-      <SectionTitle icon="cash-register" text="บันทึกการขาย — ระบบตัดสต็อกให้อัตโนมัติตามช่องทางและนมที่เลือก" />
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 12 }}>
-        {data.menus.map((menu) => {
-          const qty = get(menu.id, "qty", 1);
-          const channel = get(menu.id, "channel", "store");
-          const milk = milkChoiceFor(menu, ingredientsById);
-          const milkSelId = get(menu.id, "milkSel", milk ? milk.originalIngredientId : null);
-          const substitutions = milk && milkSelId !== milk.originalIngredientId ? { [milk.originalIngredientId]: { ingredientId: milkSelId, qtyPercent: 100 } } : {};
-          const upcharge = milk ? (ingredientsById[milkSelId] ? ingredientsById[milkSelId].altUpcharge : 0) : 0;
-          const promo = get(menu.id, "promo", 0);
-          const platformId = get(menu.id, "platformId", data.settings.platforms[0]?.id);
-          const platform = data.settings.platforms.find((p) => p.id === platformId);
-          const { ingredientCost } = calcRecipeCost(menu, ingredientsById, substitutions);
-          const ok = stockOk(menu, substitutions, qty);
-          const basePrice = channel === "delivery" ? menu.priceDelivery : menu.priceStore;
-          const unitPrice = basePrice + upcharge;
+      <SectionTitle icon="cash-register" text="บันทึกการขาย — หยิบใส่ตะกร้าแล้วค่อยยืนยันออเดอร์ทีเดียว ลดโอกาสกดพลาด" />
+      <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div style={{ flex: "3 1 480px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 12, minWidth: 0 }}>
+          {data.menus.map((menu) => {
+            const qty = get(menu.id, "qty", 1);
+            const channel = get(menu.id, "channel", "store");
+            const milk = milkChoiceFor(menu, ingredientsById);
+            const milkSelId = get(menu.id, "milkSel", milk ? milk.originalIngredientId : null);
+            const substitutions = milk && milkSelId !== milk.originalIngredientId ? { [milk.originalIngredientId]: { ingredientId: milkSelId, qtyPercent: 100 } } : {};
+            const upcharge = milk ? (ingredientsById[milkSelId] ? ingredientsById[milkSelId].altUpcharge : 0) : 0;
+            const promo = get(menu.id, "promo", 0);
+            const platformId = get(menu.id, "platformId", data.settings.platforms[0]?.id);
+            const platform = data.settings.platforms.find((p) => p.id === platformId);
+            const { ingredientCost } = calcRecipeCost(menu, ingredientsById, substitutions);
+            const ok = stockOk(menu, substitutions, qty);
+            const basePrice = channel === "delivery" ? menu.priceDelivery : menu.priceStore;
+            const unitPrice = basePrice + upcharge;
 
-          return (
-            <div key={menu.id} style={glass({ borderRadius: 12, padding: 14 })}>
-              <div style={{ fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 16, color: "var(--espresso-5)" }}>{menu.name}</div>
-              <div style={{ fontSize: 12, color: "var(--espresso-2)", margin: "3px 0 10px" }}>
-                ต้นทุนวัตถุดิบ ฿{money(ingredientCost)} · ราคาขาย ฿{money(unitPrice)}
-              </div>
-
-              <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-                {Object.entries(CHANNELS).map(([k, label]) => {
-                  const disabled = k === "delivery" && data.settings.platforms.length === 0;
-                  return (
-                    <button key={k} className="cbtn" disabled={disabled} title={disabled ? "เพิ่มแพลตฟอร์มในแท็บตั้งค่าก่อน" : undefined}
-                      style={{ flex: 1, padding: "6px 8px", fontSize: 12, opacity: disabled ? 0.5 : 1, background: channel === k ? "var(--sage-light)" : undefined, borderColor: channel === k ? "var(--sage)" : undefined }}
-                      onClick={() => !disabled && set(menu.id, { channel: k })}>{label}</button>
-                  );
-                })}
-              </div>
-
-              {milk && (
-                <div style={{ marginBottom: 8 }}>
-                  <label style={{ fontSize: 11, color: "var(--espresso-2)" }}>นม</label>
-                  <select className="cfield" value={milkSelId} onChange={(e) => set(menu.id, { milkSel: e.target.value })}>
-                    {milk.options.map((o) => (
-                      <option key={o.id} value={o.id}>{o.name}{o.altUpcharge ? ` (+฿${o.altUpcharge})` : ""}</option>
-                    ))}
-                  </select>
+            return (
+              <div key={menu.id} style={glass({ borderRadius: 12, padding: 14 })}>
+                <div style={{ fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 16, color: "var(--espresso-5)" }}>{menu.name}</div>
+                <div style={{ fontSize: 12, color: "var(--espresso-2)", margin: "3px 0 10px" }}>
+                  ต้นทุนวัตถุดิบ ฿{money(ingredientCost)} · ราคาขาย ฿{money(unitPrice)}
                 </div>
-              )}
 
-              {channel === "delivery" && (
-                <div style={{ marginBottom: 8 }}>
-                  <label style={{ fontSize: 11, color: "var(--espresso-2)" }}>แพลตฟอร์ม</label>
-                  <select className="cfield" value={platformId} onChange={(e) => set(menu.id, { platformId: e.target.value })} style={{ marginBottom: 6 }}>
-                    {data.settings.platforms.map((p) => <option key={p.id} value={p.id}>{p.name} (GP {p.gpPercent}%)</option>)}
-                  </select>
-                  <label style={{ fontSize: 11, color: "var(--espresso-2)" }}>ส่วนลดโปรโมชั่น (บาท, ถ้ามี)</label>
-                  <input className="cfield" type="number" value={promo} onChange={(e) => set(menu.id, { promo: Number(e.target.value) })} />
-                  {platform && <p style={{ fontSize: 10.5, color: "var(--espresso-2)", margin: "3px 0 0" }}>หัก GP {platform.name} {platform.gpPercent}% อัตโนมัติ</p>}
+                <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                  {Object.entries(CHANNELS).map(([k, label]) => {
+                    const disabled = k === "delivery" && data.settings.platforms.length === 0;
+                    return (
+                      <button key={k} className="cbtn" disabled={disabled} title={disabled ? "เพิ่มแพลตฟอร์มในแท็บตั้งค่าก่อน" : undefined}
+                        style={{ flex: 1, padding: "6px 8px", fontSize: 12, opacity: disabled ? 0.5 : 1, background: channel === k ? "var(--sage-light)" : undefined, borderColor: channel === k ? "var(--sage)" : undefined }}
+                        onClick={() => !disabled && set(menu.id, { channel: k })}>{label}</button>
+                    );
+                  })}
                 </div>
-              )}
 
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                <button className="cbtn" style={{ padding: "4px 10px" }} onClick={() => set(menu.id, { qty: Math.max(1, qty - 1) })}>−</button>
-                <span style={{ minWidth: 20, textAlign: "center", fontWeight: 600 }}>{qty}</span>
-                <button className="cbtn" style={{ padding: "4px 10px" }} onClick={() => set(menu.id, { qty: qty + 1 })}>+</button>
+                {milk && (
+                  <div style={{ marginBottom: 8 }}>
+                    <label style={{ fontSize: 11, color: "var(--espresso-2)" }}>นม</label>
+                    <select className="cfield" value={milkSelId} onChange={(e) => set(menu.id, { milkSel: e.target.value })}>
+                      {milk.options.map((o) => (
+                        <option key={o.id} value={o.id}>{o.name}{o.altUpcharge ? ` (+฿${o.altUpcharge})` : ""}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {channel === "delivery" && (
+                  <div style={{ marginBottom: 8 }}>
+                    <label style={{ fontSize: 11, color: "var(--espresso-2)" }}>แพลตฟอร์ม</label>
+                    <select className="cfield" value={platformId} onChange={(e) => set(menu.id, { platformId: e.target.value })} style={{ marginBottom: 6 }}>
+                      {data.settings.platforms.map((p) => <option key={p.id} value={p.id}>{p.name} (GP {p.gpPercent}%)</option>)}
+                    </select>
+                    <label style={{ fontSize: 11, color: "var(--espresso-2)" }}>ส่วนลดโปรโมชั่น (บาท, ถ้ามี)</label>
+                    <input className="cfield" type="number" value={promo} onChange={(e) => set(menu.id, { promo: Number(e.target.value) })} />
+                    {platform && <p style={{ fontSize: 10.5, color: "var(--espresso-2)", margin: "3px 0 0" }}>หัก GP {platform.name} {platform.gpPercent}% อัตโนมัติ</p>}
+                  </div>
+                )}
+
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <button className="cbtn" style={{ padding: "4px 10px" }} onClick={() => set(menu.id, { qty: Math.max(1, qty - 1) })}>−</button>
+                  <span style={{ minWidth: 20, textAlign: "center", fontWeight: 600 }}>{qty}</span>
+                  <button className="cbtn" style={{ padding: "4px 10px" }} onClick={() => set(menu.id, { qty: qty + 1 })}>+</button>
+                </div>
+                {!ok && <p style={{ fontSize: 11.5, color: "var(--danger)", margin: "0 0 8px" }}><Icon name="alert-circle" size={13} /> สต็อกวัตถุดิบไม่พอ (รวมของในตะกร้าแล้ว ยังหยิบเพิ่มได้ แต่สต็อกจะติดลบ)</p>}
+                <button className="cbtn cbtn-accent" style={{ width: "100%" }} onClick={() => addToCart(menu, { qty, channel, milkSelId, milk, platformId, promo })}>
+                  <Icon name="shopping-cart-plus" size={14} /> หยิบใส่ตะกร้า ({channel === "delivery" ? (platform ? platform.name : "เดลิเวอรี่") : "หน้าร้าน"})
+                </button>
               </div>
-              {!ok && <p style={{ fontSize: 11.5, color: "var(--danger)", margin: "0 0 8px" }}><Icon name="alert-circle" size={13} /> สต็อกวัตถุดิบไม่พอ (ยังขายได้ แต่สต็อกจะติดลบ)</p>}
-              <button className="cbtn cbtn-accent" style={{ width: "100%" }} onClick={() => {
-                recordSale(menu.id, qty, channel, { substitutions, upcharge, promoDiscount: promo, platformId, milkLabel: milk ? ingredientsById[milkSelId].name : null });
-                set(menu.id, { qty: 1, promo: 0 });
-              }}>
-                ขาย {qty} แก้ว ({channel === "delivery" ? (platform ? platform.name : "เดลิเวอรี่") : "หน้าร้าน"})
-              </button>
+            );
+          })}
+        </div>
+
+        <div style={{
+          flex: "1 1 280px", maxWidth: 340, minWidth: 260, position: "sticky", top: 10,
+          ...glass({ borderRadius: 16, padding: 16 }),
+          display: "flex", flexDirection: "column", maxHeight: "calc(100vh - 40px)",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+            <Icon name="shopping-cart" size={18} style={{ color: "var(--sage-dark)" }} />
+            <span style={{ fontWeight: 700, fontSize: 15, color: "var(--espresso-5)" }}>ตะกร้า</span>
+            {cartCups > 0 && (
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--espresso-2)", background: "var(--cream-2)", borderRadius: 999, padding: "1px 9px" }}>{cartCups} แก้ว</span>
+            )}
+          </div>
+
+          {cart.length === 0 ? (
+            <EmptyNote text="ยังไม่มีรายการในตะกร้า — กด “หยิบใส่ตะกร้า” จากเมนูด้านซ้าย" />
+          ) : (
+            <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10, marginBottom: 12, paddingRight: 2 }}>
+              {cart.map((line) => (
+                <div key={line.cartId} style={{ borderBottom: "1px dashed var(--line)", paddingBottom: 9 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 6 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13.5, color: "var(--espresso-4)" }}>{line.menuName}</span>
+                    <button onClick={() => removeFromCart(line.cartId)} style={{ border: "none", background: "none", color: "var(--danger)", cursor: "pointer", padding: 2, flexShrink: 0 }} title="เอาออกจากตะกร้า">
+                      <Icon name="x" size={14} />
+                    </button>
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--espresso-2)" }}>
+                    {CHANNELS[line.channel]}{line.platformName ? ` · ${line.platformName}` : ""}{line.milkLabel ? ` · ${line.milkLabel}` : ""}
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <button className="cbtn" style={{ padding: "2px 9px", fontSize: 13 }} onClick={() => updateCartQty(line.cartId, line.qty - 1)}>−</button>
+                      <span style={{ minWidth: 16, textAlign: "center", fontSize: 13, fontWeight: 600 }}>{line.qty}</span>
+                      <button className="cbtn" style={{ padding: "2px 9px", fontSize: 13 }} onClick={() => updateCartQty(line.cartId, line.qty + 1)}>+</button>
+                    </div>
+                    <span style={{ fontWeight: 700, fontFamily: "var(--f-body)", fontSize: 14 }}>฿{money(line.unitPrice * line.qty - (line.promo || 0))}</span>
+                  </div>
+                </div>
+              ))}
             </div>
-          );
-        })}
+          )}
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontWeight: 700, fontSize: 18, fontFamily: "var(--f-body)", borderTop: "1px solid var(--line)", paddingTop: 10, marginBottom: 10 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--espresso-3)" }}>รวมทั้งหมด</span><span>฿{money(cartTotal)}</span>
+          </div>
+          <button className="cbtn cbtn-accent" style={{ width: "100%", padding: "11px 14px", fontSize: 14, opacity: cart.length === 0 ? 0.5 : 1, cursor: cart.length === 0 ? "not-allowed" : "pointer" }} disabled={cart.length === 0} onClick={checkout}>
+            <Icon name="check" size={15} /> ยืนยันออเดอร์ / ชำระเงิน
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1276,6 +1378,7 @@ function OrdersPanel({ uid, orders, recordSale, showToast, data, ingredientsById
 
 function MenusPanel({ data, ingredientsById, updateData, showToast }) {
   const [editing, setEditing] = useState(null);
+  const [viewingDetail, setViewingDetail] = useState(null);
 
   function newMenu() {
     const defaultPackaging = (data.settings.defaultPackagingLines || []).map((l) => ({ ...l }));
@@ -1367,69 +1470,121 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
           <div key={cat} style={{ marginBottom: 22 }}>
             <p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--espresso-3)", margin: "0 0 8px" }}>{cat}</p>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
-              {menusInCat.map((menu, idx) => {
-                const { ingredientCost, breakdown } = calcRecipeCost(menu, ingredientsById, {});
-                const totalCost = ingredientCost + data.settings.overheadPerCup;
-                const marginStore = menu.priceStore > 0 ? ((menu.priceStore - totalCost) / menu.priceStore) * 100 : 0;
-                return (
-                  <div key={menu.id} style={glass({ borderRadius: 12, padding: 14, fontFamily: "var(--f-mono)", opacity: menu.available ? 1 : 0.6 })}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                        {menu.imageUrl && <img src={menu.imageUrl} alt="" width={32} height={32} style={{ borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />}
-                        <div>
-                          <div style={{ fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 16, color: "var(--espresso-5)" }}>{menu.name}</div>
-                          <div style={{ fontSize: 10.5, color: "var(--espresso-2)", textTransform: "uppercase", letterSpacing: ".03em" }}>{menu.category}</div>
+              {menusInCat.map((menu, idx) => (
+                <div key={menu.id} style={glass({ borderRadius: 12, padding: 14, opacity: menu.available ? 1 : 0.6 })}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                      {menu.imageUrl ? (
+                        <img src={menu.imageUrl} alt="" width={44} height={44} style={{ borderRadius: 10, objectFit: "cover", flexShrink: 0 }} />
+                      ) : (
+                        <div style={{ width: 44, height: 44, borderRadius: 10, background: "var(--cream-2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          <Icon name="cup" size={18} style={{ color: "var(--espresso-2)" }} />
                         </div>
-                      </div>
-                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                        <button className="cbtn" style={{ padding: "4px 6px" }} disabled={idx === 0} onClick={() => moveMenu(menu.id, "up")} title="ย้ายขึ้น"><Icon name="chevron-up" size={12} /></button>
-                        <button className="cbtn" style={{ padding: "4px 6px" }} disabled={idx === menusInCat.length - 1} onClick={() => moveMenu(menu.id, "down")} title="ย้ายลง"><Icon name="chevron-down" size={12} /></button>
-                        <button className="cbtn" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => toggleAvailable(menu)} title={menu.available ? "ปิดขายชั่วคราว" : "เปิดขาย"}>
-                          {menu.available ? "เปิดขาย" : "หมด"}
-                        </button>
-                        <button className="cbtn cbtn-edit" style={{ padding: "4px 8px" }} onClick={() => setEditing(menu)} title="แก้ไขเมนู"><Icon name="edit" size={13} /></button>
-                        <button className="cbtn cbtn-danger" style={{ padding: "4px 8px" }} onClick={() => deleteMenu(menu.id)} title="ลบเมนู"><Icon name="trash" size={13} /></button>
+                      )}
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 15.5, color: "var(--espresso-5)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{menu.name}</div>
+                        <div style={{ fontSize: 10.5, color: "var(--espresso-2)", textTransform: "uppercase", letterSpacing: ".03em" }}>{menu.category}</div>
                       </div>
                     </div>
-                    <div style={{ borderTop: "1px dashed var(--line)", margin: "8px 0", paddingTop: 8, fontSize: 11.5 }}>
-                      {breakdown.map((b) => (
-                        <div key={b.ingredientId} style={{ display: "flex", justifyContent: "space-between", color: "var(--espresso-3)" }}>
-                          <span>{b.name} ×{b.qty}{UNITS[b.unit]}</span><span>฿{money(b.lineCost)}</span>
-                        </div>
-                      ))}
-                      <div style={{ display: "flex", justifyContent: "space-between", color: "var(--espresso-3)" }}>
-                        <span>ต้นทุนแฝง/แก้ว</span><span>฿{money(data.settings.overheadPerCup)}</span>
-                      </div>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 600, fontSize: 13, borderTop: "1px dashed var(--line)", paddingTop: 8 }}>
-                      <span>ต้นทุนรวม/แก้ว</span><span>฿{money(totalCost)}</span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginTop: 4 }}>
-                      <span><ChannelPill channel="store" /> ฿{money(menu.priceStore)}</span>
-                      <span style={{ color: marginStore >= 0 ? "var(--sage-dark)" : "var(--danger)" }}>{money(marginStore)}%</span>
-                    </div>
-                    <div style={{ fontSize: 12.5, marginTop: 2 }}>
-                      <span><ChannelPill channel="delivery" /> ฿{money(menu.priceDelivery)}</span>
-                    </div>
-                    <div style={{ marginTop: 4 }}>
-                      {data.settings.platforms.map((p) => {
-                        const net = menu.priceDelivery * (1 - p.gpPercent / 100);
-                        const margin = menu.priceDelivery > 0 ? ((net - totalCost) / menu.priceDelivery) * 100 : 0;
-                        return (
-                          <div key={p.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--espresso-3)" }}>
-                            <span>{p.name} (GP {p.gpPercent}%)</span>
-                            <span style={{ color: margin >= 0 ? "var(--sage-dark)" : "var(--danger)" }}>{money(margin)}%</span>
-                          </div>
-                        );
-                      })}
-                    </div>
+                    <button
+                      className="cbtn" style={{
+                        padding: "3px 9px", fontSize: 10.5, flexShrink: 0, fontWeight: 700, border: "none",
+                        background: menu.available ? "rgba(22,163,74,0.16)" : "rgba(220,38,38,0.16)",
+                        color: menu.available ? "#15803D" : "#B91C1C",
+                      }}
+                      onClick={() => toggleAvailable(menu)} title={menu.available ? "ปิดขายชั่วคราว" : "เปิดขาย"}
+                    >
+                      {menu.available ? "เปิดขาย" : "หมด"}
+                    </button>
                   </div>
-                );
-              })}
+
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 10, paddingTop: 9, borderTop: "1px dashed var(--line)" }}>
+                    <span style={{ fontSize: 11, color: "var(--espresso-2)" }}>หน้าร้าน / เดลิเวอรี่</span>
+                    <span style={{ fontWeight: 700, fontFamily: "var(--f-body)", fontSize: 15, color: "var(--espresso-5)" }}>
+                      ฿{money(menu.priceStore)} <span style={{ fontSize: 11.5, color: "var(--espresso-3)", fontWeight: 500 }}>/ ฿{money(menu.priceDelivery)}</span>
+                    </span>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 4, marginTop: 10 }}>
+                    <button className="cbtn" style={{ flex: 1, padding: "6px 6px", fontSize: 11.5 }} onClick={() => setViewingDetail(menu)}>
+                      <Icon name="chart-bar" size={12} /> รายละเอียด/ต้นทุน
+                    </button>
+                    <button className="cbtn" style={{ padding: "6px 7px" }} disabled={idx === 0} onClick={() => moveMenu(menu.id, "up")} title="ย้ายขึ้น"><Icon name="chevron-up" size={12} /></button>
+                    <button className="cbtn" style={{ padding: "6px 7px" }} disabled={idx === menusInCat.length - 1} onClick={() => moveMenu(menu.id, "down")} title="ย้ายลง"><Icon name="chevron-down" size={12} /></button>
+                    <button className="cbtn cbtn-edit" style={{ padding: "6px 8px" }} onClick={() => setEditing(menu)} title="แก้ไขเมนู"><Icon name="edit" size={13} /></button>
+                    <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => deleteMenu(menu.id)} title="ลบเมนู"><Icon name="trash" size={13} /></button>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         );
       })}
+
+      {viewingDetail && (
+        <MenuDetailDrawer
+          menu={viewingDetail} data={data} ingredientsById={ingredientsById}
+          onClose={() => setViewingDetail(null)}
+          onEdit={() => { setEditing(viewingDetail); setViewingDetail(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function MenuDetailDrawer({ menu, data, ingredientsById, onClose, onEdit }) {
+  const { ingredientCost, breakdown } = calcRecipeCost(menu, ingredientsById, {});
+  const totalCost = ingredientCost + data.settings.overheadPerCup;
+  const marginStore = menu.priceStore > 0 ? ((menu.priceStore - totalCost) / menu.priceStore) * 100 : 0;
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(43,29,20,0.4)", display: "flex", justifyContent: "flex-end", zIndex: 50 }} onClick={onClose}>
+      <div
+        style={{ background: "var(--surface)", padding: 22, width: 360, maxWidth: "90vw", height: "100vh", overflowY: "auto" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 4, gap: 8 }}>
+          <p style={{ fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 19, margin: 0 }}>{menu.name}</p>
+          <button className="cbtn" style={{ padding: "5px 9px", flexShrink: 0 }} onClick={onClose}><Icon name="x" size={14} /></button>
+        </div>
+        <p style={{ fontSize: 11, color: "var(--espresso-2)", textTransform: "uppercase", letterSpacing: ".03em", margin: "0 0 18px" }}>{menu.category}</p>
+
+        <SectionTitle icon="list-details" text="ส่วนผสม (BOM)" />
+        <div style={{ marginBottom: 14 }}>
+          {breakdown.map((b) => (
+            <div key={b.ingredientId} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "6px 0", borderBottom: "1px dashed var(--line-soft)" }}>
+              <span>{b.name} ×{b.qty}{UNITS[b.unit]}</span><span>฿{money(b.lineCost)}</span>
+            </div>
+          ))}
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "6px 0" }}>
+            <span>ต้นทุนแฝง/แก้ว</span><span>฿{money(data.settings.overheadPerCup)}</span>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 15, borderTop: "1px solid var(--line)", paddingTop: 10, marginBottom: 20 }}>
+          <span>ต้นทุนรวม/แก้ว</span><span>฿{money(totalCost)}</span>
+        </div>
+
+        <SectionTitle icon="chart-line" text="ราคาขาย & กำไร" />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, marginBottom: 6 }}>
+          <span><ChannelPill channel="store" /> ฿{money(menu.priceStore)}</span>
+          <span style={{ color: marginStore >= 0 ? "var(--sage-dark)" : "var(--danger)", fontWeight: 700 }}>{money(marginStore)}%</span>
+        </div>
+        <div style={{ fontSize: 13, marginBottom: 10 }}>
+          <span><ChannelPill channel="delivery" /> ฿{money(menu.priceDelivery)}</span>
+        </div>
+        {data.settings.platforms.map((p) => {
+          const net = menu.priceDelivery * (1 - p.gpPercent / 100);
+          const margin = menu.priceDelivery > 0 ? ((net - totalCost) / menu.priceDelivery) * 100 : 0;
+          return (
+            <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: "var(--espresso-3)", padding: "4px 0" }}>
+              <span>{p.name} (GP {p.gpPercent}%)</span>
+              <span style={{ color: margin >= 0 ? "var(--sage-dark)" : "var(--danger)", fontWeight: 600 }}>{money(margin)}%</span>
+            </div>
+          );
+        })}
+
+        <button className="cbtn cbtn-edit" style={{ width: "100%", marginTop: 20 }} onClick={onEdit}><Icon name="edit" size={13} /> แก้ไขเมนูนี้</button>
+      </div>
     </div>
   );
 }
@@ -1864,6 +2019,7 @@ function PromoEditor({ promo, menus, onSave, onCancel }) {
 
 function IngredientsPanel({ data, updateData, showToast }) {
   const [restocking, setRestocking] = useState(null);
+  const [adjusting, setAdjusting] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [adding, setAdding] = useState(false);
   const blankIng = { name: "", category: "coffee", unit: "g", costPerUnit: 0, stockQty: 0, lowStockThreshold: 100, altGroup: "", altUpcharge: 0 };
@@ -1879,6 +2035,16 @@ function IngredientsPanel({ data, updateData, showToast }) {
     });
     setRestocking(null);
     showToast("เติมสต็อกแล้ว");
+  }
+
+  function doAdjustStock(id, countedQty) {
+    updateData((next) => {
+      const ing = next.ingredients.find((i) => i.id === id);
+      if (!ing) return;
+      ing.stockQty = round4(countedQty);
+    });
+    setAdjusting(null);
+    showToast("ปรับปรุงสต็อกให้ตรงกับที่นับได้แล้ว");
   }
 
   function addIngredient() {
@@ -1931,6 +2097,7 @@ function IngredientsPanel({ data, updateData, showToast }) {
                       <td>{ing.altGroup ? `${ing.altGroup}${ing.altUpcharge ? ` (+฿${ing.altUpcharge})` : ""}` : "—"}</td>
                       <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                         <button className="cbtn" style={{ padding: "4px 8px", marginRight: 4 }} onClick={() => setRestocking(ing.id)}>เติมสต็อก</button>
+                        <button className="cbtn" style={{ padding: "4px 8px", marginRight: 4 }} onClick={() => setAdjusting(ing.id)} title="ปรับปรุงสต็อกให้ตรงกับที่นับได้จริง (Cycle Count)"><Icon name="adjustments" size={12} /> ปรับสต็อก</button>
                         <button className="cbtn cbtn-edit" style={{ padding: "4px 8px", marginRight: 4 }} onClick={() => setEditingId(ing.id)} title="แก้ไขวัตถุดิบ"><Icon name="edit" size={12} /></button>
                         <button className="cbtn cbtn-danger" style={{ padding: "4px 8px" }} onClick={() => deleteIngredient(ing.id)} title="ลบวัตถุดิบ"><Icon name="trash" size={12} /></button>
                       </td>
@@ -1947,6 +2114,9 @@ function IngredientsPanel({ data, updateData, showToast }) {
 
       {restocking && (
         <RestockModal ingredient={data.ingredients.find((i) => i.id === restocking)} onClose={() => setRestocking(null)} onConfirm={doRestock} />
+      )}
+      {adjusting && (
+        <StockAdjustModal ingredient={data.ingredients.find((i) => i.id === adjusting)} onClose={() => setAdjusting(null)} onConfirm={doAdjustStock} />
       )}
       {editingId && (
         <EditIngredientModal ingredient={data.ingredients.find((i) => i.id === editingId)} onClose={() => setEditingId(null)} onSave={saveEdit} />
@@ -2050,6 +2220,36 @@ function RestockModal({ ingredient, onClose, onConfirm }) {
         <p style={{ fontSize: 11.5, color: "var(--espresso-2)" }}>ต้นทุนต่อหน่วยใหม่จะถูกคำนวณอัตโนมัติ = ราคารวม ÷ ปริมาณ</p>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="cbtn cbtn-accent" onClick={() => onConfirm(ingredient.id, qty, total)}>ยืนยัน</button>
+          <button className="cbtn" onClick={onClose}>ยกเลิก</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StockAdjustModal({ ingredient, onClose, onConfirm }) {
+  const [counted, setCounted] = useState(ingredient ? ingredient.stockQty : 0);
+  if (!ingredient) return null;
+  const delta = round4(counted - ingredient.stockQty);
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(43,29,20,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
+      <div style={{ background: "var(--surface)", borderRadius: 14, padding: 20, width: 320 }}>
+        <p style={{ fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 17, margin: "0 0 4px" }}>ปรับปรุงสต็อก: {ingredient.name}</p>
+        <p style={{ fontSize: 11.5, color: "var(--espresso-2)", margin: "0 0 14px" }}>
+          สำหรับตอนนับสต็อกจริงหน้างาน (Cycle Count) — กรอกจำนวนที่นับได้ ระบบจะปรับตัวเลขในระบบให้ตรงทันที ไม่กระทบต้นทุน/หน่วย
+        </p>
+        <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>สต็อกในระบบปัจจุบัน</label>
+        <p style={{ margin: "2px 0 10px", fontWeight: 600, fontSize: 14 }}>{ingredient.stockQty} {UNITS[ingredient.unit]}</p>
+        <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>จำนวนที่นับได้จริง ({UNITS[ingredient.unit]})</label>
+        <input className="cfield" type="number" value={counted} onChange={(e) => setCounted(Number(e.target.value))} style={{ marginBottom: 8 }} />
+        <p style={{
+          fontSize: 12.5, fontWeight: 700, margin: "0 0 14px",
+          color: delta === 0 ? "var(--espresso-2)" : delta > 0 ? "var(--sage-dark)" : "var(--danger)",
+        }}>
+          {delta === 0 ? "ไม่มีการเปลี่ยนแปลง" : `${delta > 0 ? "+" : ""}${delta} ${UNITS[ingredient.unit]} จากค่าปัจจุบัน`}
+        </p>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="cbtn cbtn-accent" onClick={() => onConfirm(ingredient.id, counted)}>ยืนยันปรับสต็อก</button>
           <button className="cbtn" onClick={onClose}>ยกเลิก</button>
         </div>
       </div>
