@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { auth, db } from "./firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { ref, onValue, set, update } from "firebase/database";
+import { ref, onValue, set, update, push } from "firebase/database";
 import QRCode from "qrcode";
 import Login from "./Login.jsx";
 import CustomerOrder from "./CustomerOrder.jsx";
@@ -600,6 +600,24 @@ function ShopApp({ uid, user }) {
     showToast(`บันทึกการขาย ${menu.name} x${qty} (${channel === "delivery" ? (platform ? platform.name : "เดลิเวอรี่") : "หน้าร้าน"}) แล้ว`);
   }
 
+  // ออเดอร์ที่ขายจากหน้า admin ต้องขึ้นบอร์ด Kanban เหมือนออเดอร์ลูกค้า ไม่งั้นบาริสต้าจะไม่มีการ์ดให้ไล่ทำตามสถานะ
+  // จ่ายเงินแล้วที่หน้าร้านตอนกดขาย จึงเข้าคอลัมน์ "กำลังดำเนินการ" ทันที ข้ามสถานะ "รอยืนยัน" (เหมือนสลิปยืนยันอัตโนมัติ)
+  function createInstoreOrder(cart, note) {
+    const items = cart.map((line) => ({
+      menuId: line.menuId, name: line.menuName, unitPrice: line.unitPrice, qty: line.qty, options: line.options,
+    }));
+    const total = round4(cart.reduce((s, l) => s + l.unitPrice * l.qty - (l.promo || 0), 0));
+    const platformNames = [...new Set(cart.filter((l) => l.channel === "delivery" && l.platformName).map((l) => l.platformName))];
+    const customerName = platformNames.length > 0 ? platformNames.join(", ") : "ขายหน้าร้าน";
+    const newRef = push(ref(db, `orders/${uid}`));
+    set(newRef, {
+      customerName, customerPhone: "", note: note || "",
+      paymentMethod: "cash", pickupDate: new Date().toISOString().slice(0, 10),
+      items, total, status: "preparing", createdAt: new Date().toISOString(),
+      saleRecorded: true, source: "admin-pos",
+    }).catch((err) => showToast("บันทึกออเดอร์ไม่สำเร็จ: " + err.message));
+  }
+
   const activeTabInfo = TABS.find((t) => t.id === tab);
   const pendingOrderCount = orders.filter((o) => o.status === "pending").length;
 
@@ -768,7 +786,7 @@ function ShopApp({ uid, user }) {
           </div>
 
           {tab === "dashboard" && <Dashboard data={data} ingredientsById={ingredientsById} setTab={setTab} recordSale={recordSale} />}
-          {tab === "sell" && <SellPanel data={data} ingredientsById={ingredientsById} recordSale={recordSale} />}
+          {tab === "sell" && <SellPanel data={data} ingredientsById={ingredientsById} recordSale={recordSale} createInstoreOrder={createInstoreOrder} />}
           {tab === "orders" && <OrdersPanel uid={uid} orders={orders} recordSale={recordSale} showToast={showToast} data={data} ingredientsById={ingredientsById} />}
           {tab === "menus" && <MenusPanel data={data} ingredientsById={ingredientsById} updateData={updateData} showToast={showToast} />}
           {tab === "promotions" && <PromotionsPanel data={data} updateData={updateData} showToast={showToast} />}
@@ -908,7 +926,7 @@ function EmptyNote({ text }) {
   return <p style={{ fontSize: 12.5, color: "var(--espresso-2)", fontStyle: "italic", margin: 0 }}>{text}</p>;
 }
 
-function SellPanel({ data, ingredientsById, recordSale }) {
+function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
   const [state, setState] = useState({});
   const [cart, setCart] = useState([]);
   const [cartNote, setCartNote] = useState("");
@@ -979,6 +997,7 @@ function SellPanel({ data, ingredientsById, recordSale }) {
         note: cartNote.trim() || null,
       });
     }
+    createInstoreOrder(cart, cartNote.trim());
     setCart([]);
     setCartNote("");
   }
