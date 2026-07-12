@@ -144,7 +144,7 @@ function defaultState() {
     menus,
     sales: [],
     purchases: [],
-    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true, slipTestMode: false, bannerImageUrl: "", categoryOrder: [], defaultPackagingLines: [] },
+    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true, slipTestMode: false, bannerImageUrl: "", bannerImageUrls: [], categoryOrder: [], defaultPackagingLines: [] },
     optionGroups,
     promotions: [],
   };
@@ -167,12 +167,13 @@ function normalizeData(raw) {
       acceptingOrders: raw.settings?.acceptingOrders ?? true,
       slipTestMode: raw.settings?.slipTestMode ?? false,
       bannerImageUrl: raw.settings?.bannerImageUrl || "",
+      bannerImageUrls: raw.settings?.bannerImageUrls || [],
       categoryOrder: raw.settings?.categoryOrder || [],
       defaultPackagingLines: raw.settings?.defaultPackagingLines || [],
     },
     optionGroups: (raw.optionGroups || []).map((g) => ({
       ...g,
-      choices: (g.choices || []).map((c) => ({ ...c, ingredientId: c.ingredientId || null })),
+      choices: (g.choices || []).map((c) => ({ ...c, ingredientId: c.ingredientId || null, isDefault: c.isDefault || false })),
     })),
     promotions: (raw.promotions || []).map((p) => ({
       ...p,
@@ -261,6 +262,23 @@ function resolveSubstitutionsFromOptions(menu, options, ingredientsById) {
     }
   }
   return substitutions;
+}
+
+function ingredientPickerOptions(ingredients, currentId) {
+  const currentIng = ingredients.find((x) => x.id === currentId);
+  const seen = new Set();
+  const result = [];
+  for (const i of ingredients) {
+    if (i.altGroup) {
+      if (seen.has(i.altGroup)) continue;
+      seen.add(i.altGroup);
+      const rep = currentIng && currentIng.altGroup === i.altGroup ? currentIng : i;
+      result.push({ value: rep.id, label: rep.altGroup });
+    } else {
+      result.push({ value: i.id, label: i.name });
+    }
+  }
+  return result;
 }
 
 function todayStr(d = new Date()) {
@@ -1187,11 +1205,13 @@ function MenuEditor({ menu, ingredients, optionGroups, categories, onSave, onCan
         </div>
       </div>
 
-      <p style={{ fontSize: 12, color: "var(--espresso-2)", marginBottom: 6 }}>ส่วนผสม (ถ้าต้องการให้เลือกนมทางเลือกได้ตอนขาย ให้ตั้งค่า "กลุ่มทางเลือก" ของวัตถุดิบนมในแท็บวัตถุดิบ)</p>
+      <p style={{ fontSize: 12, color: "var(--espresso-2)", marginBottom: 6 }}>
+        ส่วนผสม (วัตถุดิบที่ตั้ง "กลุ่มทางเลือก" ไว้ เช่น นม/เมล็ดกาแฟ จะรวมเป็นตัวเลือกเดียวในรายการนี้ — ระบบจะตัดสต็อกตามที่ลูกค้าเลือกจริงในตัวเลือกเสริม)
+      </p>
       {form.ingredients.map((line, idx) => (
         <div key={idx} style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
           <select className="cfield" value={line.ingredientId} onChange={(e) => updateLine(idx, { ingredientId: e.target.value })}>
-            {ingredients.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+            {ingredientPickerOptions(ingredients, line.ingredientId).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
           <input className="cfield" style={{ width: 80 }} type="number" value={line.qty} onChange={(e) => updateLine(idx, { qty: Number(e.target.value) })} />
           <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => removeLine(idx)} title="ลบส่วนผสมนี้"><Icon name="x" size={13} /></button>
@@ -1882,7 +1902,7 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
   function addChoice(groupId) {
     updateData((next) => {
       const g = next.optionGroups.find((x) => x.id === groupId);
-      if (g) g.choices.push({ id: genId("choice"), label: "ตัวเลือกใหม่", note: "", priceDelta: 0, ingredientId: null });
+      if (g) g.choices.push({ id: genId("choice"), label: "ตัวเลือกใหม่", note: "", priceDelta: 0, ingredientId: null, isDefault: false });
     });
   }
   function patchChoice(groupId, choiceId, patch) {
@@ -1898,6 +1918,13 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
       if (g) g.choices = g.choices.filter((c) => c.id !== choiceId);
     });
   }
+  function setDefaultChoice(groupId, choiceId) {
+    updateData((next) => {
+      const g = next.optionGroups.find((x) => x.id === groupId);
+      if (!g) return;
+      for (const c of g.choices) c.isDefault = c.id === choiceId ? !c.isDefault : false;
+    });
+  }
 
   return (
     <div style={{ maxWidth: 640 }}>
@@ -1908,7 +1935,7 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
       <p style={{ fontSize: 11.5, color: "var(--espresso-2)", margin: "0 0 14px" }}>
         ตั้งค่าที่นี่ครั้งเดียว แล้วไปติ๊กเลือกว่าเมนูไหนใช้กลุ่มตัวเลือกไหนได้ในแท็บ "เมนู & สูตร" ตอนแก้ไขเมนู
         ถ้าตัวเลือกไหนแทนวัตถุดิบ (เช่น เลือกเมล็ด/นมคนละแบบ) ให้เลือก "วัตถุดิบที่ใช้แทน" ระบบจะตัดสต็อกตามที่ลูกค้าเลือกจริงแทนสูตรตั้งต้น
-        (วัตถุดิบต้นทางและตัวเลือกต้องตั้ง "กลุ่มทางเลือก" ให้ตรงกันในแท็บวัตถุดิบก่อน)
+        (วัตถุดิบต้นทางและตัวเลือกต้องตั้ง "กลุ่มทางเลือก" ให้ตรงกันในแท็บวัตถุดิบก่อน) กดไอคอนดาว ★ เพื่อตั้งตัวเลือกเริ่มต้น ลูกค้าจะไม่ต้องกดเลือกเองถ้าไม่ต้องการเปลี่ยน
       </p>
 
       {data.optionGroups.length === 0 && <EmptyNote text={'ยังไม่มีกลุ่มตัวเลือก กด "เพิ่มกลุ่มตัวเลือก" เพื่อเริ่ม'} />}
@@ -1941,6 +1968,19 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
                   <option key={i.id} value={i.id}>{i.name} ({i.altGroup})</option>
                 ))}
               </select>
+              <button
+                className="cbtn"
+                style={{
+                  padding: "6px 8px",
+                  background: c.isDefault ? "var(--sage-light)" : undefined,
+                  borderColor: c.isDefault ? "var(--sage)" : undefined,
+                  color: c.isDefault ? "var(--sage-dark)" : undefined,
+                }}
+                onClick={() => setDefaultChoice(g.id, c.id)}
+                title={c.isDefault ? "เป็นค่าเริ่มต้นอยู่ (กดอีกครั้งเพื่อยกเลิก)" : "ตั้งเป็นค่าเริ่มต้น (ลูกค้าไม่ต้องกดเลือกเอง)"}
+              >
+                <Icon name="star" size={13} />
+              </button>
               <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => removeChoice(g.id, c.id)} title="ลบตัวเลือกย่อยนี้"><Icon name="x" size={13} /></button>
             </div>
           ))}
@@ -1956,7 +1996,21 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
   const [overhead, setOverhead] = useState(data.settings.overheadPerCup);
   const [platforms, setPlatforms] = useState(data.settings.platforms);
   const [promptpayId, setPromptpayId] = useState(data.settings.promptpayId || "");
-  const [bannerImageUrl, setBannerImageUrl] = useState(data.settings.bannerImageUrl || "");
+  const [bannerImageUrls, setBannerImageUrls] = useState(
+    data.settings.bannerImageUrls && data.settings.bannerImageUrls.length
+      ? data.settings.bannerImageUrls
+      : (data.settings.bannerImageUrl ? [data.settings.bannerImageUrl] : [])
+  );
+
+  function updateBannerUrl(idx, value) {
+    setBannerImageUrls((u) => u.map((x, i) => (i === idx ? value : x)));
+  }
+  function addBannerUrl() {
+    setBannerImageUrls((u) => [...u, ""]);
+  }
+  function removeBannerUrl(idx) {
+    setBannerImageUrls((u) => u.filter((_, i) => i !== idx));
+  }
 
   function save() {
     updateData((next) => {
@@ -1964,7 +2018,7 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
       next.settings.overheadPerCup = Number(overhead);
       next.settings.platforms = platforms;
       next.settings.promptpayId = promptpayId.trim();
-      next.settings.bannerImageUrl = bannerImageUrl.trim();
+      next.settings.bannerImageUrls = bannerImageUrls.map((u) => u.trim()).filter(Boolean);
     });
     showToast("บันทึกการตั้งค่าแล้ว");
   }
@@ -2068,19 +2122,19 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
 
       <div style={{ marginTop: 18 }}>
         <SectionTitle icon="photo" text="แบนเนอร์โฆษณาหน้าลูกค้า" />
-        <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ลิงก์รูปแบนเนอร์ (แถบยาวด้านบนหน้าเลือกเมนู)</label>
-        <input className="cfield" value={bannerImageUrl} onChange={(e) => setBannerImageUrl(e.target.value)} placeholder="https://..." style={{ marginBottom: 6 }} />
-        <p style={{ fontSize: 11, color: "var(--espresso-2)", margin: "0 0 8px" }}>
-          แนะนำรูปอัตราส่วนยาว ๆ (เช่น 1200×300px) เว้นว่างไว้ถ้าไม่ต้องการแสดงแบนเนอร์
+        <p style={{ fontSize: 11, color: "var(--espresso-2)", margin: "-6px 0 10px" }}>
+          ใส่ได้หลายรูป ระบบจะเลื่อนสไลด์วนอัตโนมัติที่หน้าลูกค้า แนะนำรูปอัตราส่วนยาว ๆ (เช่น 1200×300px) ไม่ใส่รูปเลยถ้าไม่ต้องการแสดงแบนเนอร์
         </p>
-        {bannerImageUrl && (
-          <img
-            src={bannerImageUrl}
-            alt="ตัวอย่างแบนเนอร์"
-            style={{ width: "100%", maxHeight: 90, objectFit: "cover", borderRadius: 8, border: "1px solid var(--line)", marginBottom: 8 }}
-            onError={(e) => { e.currentTarget.style.display = "none"; }}
-          />
-        )}
+        {bannerImageUrls.map((url, idx) => (
+          <div key={idx} style={{ display: "flex", gap: 6, marginBottom: 8, alignItems: "flex-start" }}>
+            <div style={{ flex: 1 }}>
+              <input className="cfield" value={url} onChange={(e) => updateBannerUrl(idx, e.target.value)} placeholder="https://..." />
+              <BannerThumbPreview url={url} />
+            </div>
+            <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => removeBannerUrl(idx)} title="ลบรูปนี้"><Icon name="x" size={13} /></button>
+          </div>
+        ))}
+        <button className="cbtn" onClick={addBannerUrl}><Icon name="plus" size={13} /> เพิ่มรูปแบนเนอร์</button>
       </div>
 
       <div style={{ marginTop: 6 }}>
@@ -2093,6 +2147,20 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
         ข้อมูลทั้งหมด (วัตถุดิบ เมนู ยอดขาย) ถูกบันทึกไว้อัตโนมัติ และจะยังอยู่เมื่อกลับมาเปิดใหม่ นมสด (รวม) ใช้แทนแบรนด์เฉพาะ — ตัดสต็อกจากยอดรวมนมสด ยกเว้นตอนขายเลือก "นม Oat" ซึ่งจะตัดจากสต็อกนม Oat แยกต่างหาก แต่ละแพลตฟอร์มเดลิเวอรี่หัก GP ตาม % ที่ตั้งไว้ด้านบน
       </p>
     </div>
+  );
+}
+
+function BannerThumbPreview({ url }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [url]);
+  if (!url || failed) return null;
+  return (
+    <img
+      src={url}
+      alt="ตัวอย่างแบนเนอร์"
+      style={{ width: "100%", maxHeight: 70, objectFit: "cover", borderRadius: 8, border: "1px solid var(--line)", marginTop: 4 }}
+      onError={() => setFailed(true)}
+    />
   );
 }
 

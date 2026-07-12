@@ -355,6 +355,63 @@ function MenuThumb({ imageUrl }) {
   );
 }
 
+function BannerSlide({ url, active }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [url]);
+  if (failed) return null;
+  return (
+    <img
+      src={url}
+      alt=""
+      style={{
+        position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover",
+        opacity: active ? 1 : 0, transition: "opacity .6s ease",
+      }}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+function BannerCarousel({ images }) {
+  const [index, setIndex] = useState(0);
+  const validImages = (images || []).filter(Boolean);
+  const key = validImages.join("|");
+
+  useEffect(() => {
+    setIndex(0);
+  }, [key]);
+
+  useEffect(() => {
+    if (validImages.length <= 1) return;
+    const t = setInterval(() => setIndex((i) => (i + 1) % validImages.length), 4000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  if (validImages.length === 0) return null;
+
+  return (
+    <div style={{
+      margin: "10px 10px 0", borderRadius: 16, overflow: "hidden", position: "relative", height: 84,
+      border: "1px solid rgba(255,255,255,0.55)", boxShadow: "0 8px 24px rgba(43,29,20,0.10)", flexShrink: 0,
+    }}>
+      {validImages.map((url, i) => (
+        <BannerSlide key={url + i} url={url} active={i === index} />
+      ))}
+      {validImages.length > 1 && (
+        <div style={{ position: "absolute", bottom: 6, left: 0, right: 0, display: "flex", justifyContent: "center", gap: 4 }}>
+          {validImages.map((_, i) => (
+            <span key={i} style={{
+              width: i === index ? 14 : 5, height: 5, borderRadius: 3,
+              background: i === index ? "#fff" : "rgba(255,255,255,0.55)", transition: "width .25s ease",
+            }} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BrandLogo({ height = 64 }) {
   const [failed, setFailed] = useState(false);
   if (failed) {
@@ -410,6 +467,7 @@ export default function CustomerOrder({ shopUid }) {
   const [acceptingOrders, setAcceptingOrders] = useState(true);
   const [slipTestMode, setSlipTestMode] = useState(false);
   const [bannerImageUrl, setBannerImageUrl] = useState("");
+  const [bannerImageUrls, setBannerImageUrls] = useState([]);
   const [categoryOrder, setCategoryOrder] = useState([]);
   const [cart, setCart] = useState([]);
   const [flyItems, setFlyItems] = useState([]);
@@ -465,6 +523,7 @@ export default function CustomerOrder({ shopUid }) {
     );
     const unsub6 = onValue(ref(db, `shops/${shopUid}/settings/slipTestMode`), (snap) => setSlipTestMode(snap.val() === true));
     const unsub7 = onValue(ref(db, `shops/${shopUid}/settings/bannerImageUrl`), (snap) => setBannerImageUrl(snap.val() || ""));
+    const unsub7b = onValue(ref(db, `shops/${shopUid}/settings/bannerImageUrls`), (snap) => setBannerImageUrls(snap.val() || []));
     const unsub9 = onValue(ref(db, `shops/${shopUid}/settings/categoryOrder`), (snap) => setCategoryOrder(snap.val() || []));
     const unsub8 = onValue(ref(db, `shops/${shopUid}/promotions`), (snap) => {
       const list = snap.val() || [];
@@ -475,7 +534,7 @@ export default function CustomerOrder({ shopUid }) {
         chooseCount: p.chooseCount || 2,
       })));
     });
-    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); unsub7(); unsub8(); unsub9(); };
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); unsub7(); unsub7b(); unsub8(); unsub9(); };
   }, [authUid, shopUid]);
 
   useEffect(() => {
@@ -1099,16 +1158,7 @@ export default function CustomerOrder({ shopUid }) {
         )}
       </div>
 
-      {bannerImageUrl && (
-        <div style={{ margin: "10px 10px 0", borderRadius: 16, overflow: "hidden", border: "1px solid rgba(255,255,255,0.55)", boxShadow: "0 8px 24px rgba(43,29,20,0.10)", flexShrink: 0 }}>
-          <img
-            src={bannerImageUrl}
-            alt=""
-            style={{ width: "100%", height: 84, objectFit: "cover", display: "block" }}
-            onError={(e) => { e.currentTarget.parentElement.style.display = "none"; }}
-          />
-        </div>
-      )}
+      <BannerCarousel images={bannerImageUrls.length > 0 ? bannerImageUrls : (bannerImageUrl ? [bannerImageUrl] : [])} />
 
       {menus.length === 0 ? (
         <div style={{ padding: 24, textAlign: "center", color: COLORS.espresso2, fontSize: 13 }}>ร้านยังไม่มีเมนู</div>
@@ -1602,7 +1652,12 @@ function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm, hideQty
         }
         setSelections(sel);
       } else {
-        setSelections({});
+        const defaults = {};
+        for (const g of cg) {
+          const def = (g.choices || []).find((c) => c.isDefault);
+          if (def) defaults[g.id] = { ...def, groupId: g.id, groupName: g.name };
+        }
+        setSelections(defaults);
       }
       setErr("");
     }
