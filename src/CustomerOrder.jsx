@@ -348,6 +348,48 @@ function useSheetTransition(visible, duration = 300) {
   return { mounted, shown };
 }
 
+const dominantColorCache = new Map();
+
+function useDominantColor(imageUrl) {
+  const [color, setColor] = useState(() => (imageUrl ? dominantColorCache.get(imageUrl) || null : null));
+
+  useEffect(() => {
+    if (!imageUrl) { setColor(null); return; }
+    if (dominantColorCache.has(imageUrl)) { setColor(dominantColorCache.get(imageUrl)); return; }
+    let cancelled = false;
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      if (cancelled) return;
+      try {
+        const size = 12;
+        const canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, size, size);
+        const data = ctx.getImageData(0, 0, size, size).data;
+        let r = 0, g = 0, b = 0, count = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i + 3] < 100) continue;
+          r += data[i]; g += data[i + 1]; b += data[i + 2]; count++;
+        }
+        const result = count > 0 ? { r: Math.round(r / count), g: Math.round(g / count), b: Math.round(b / count) } : null;
+        dominantColorCache.set(imageUrl, result);
+        if (!cancelled) setColor(result);
+      } catch {
+        dominantColorCache.set(imageUrl, null);
+        if (!cancelled) setColor(null);
+      }
+    };
+    img.onerror = () => { if (!cancelled) setColor(null); };
+    img.src = imageUrl;
+    return () => { cancelled = true; };
+  }, [imageUrl]);
+
+  return color;
+}
+
 function MenuThumb({ imageUrl, size = 60 }) {
   const [failed, setFailed] = useState(false);
   return (
@@ -412,6 +454,58 @@ function PromoImageGrid({ images, size = 72 }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function OfferCard({ images, label, title, subtitle, priceNode, qty, rippling, onClick, thumbRef }) {
+  const dominant = useDominantColor(images && images[0]);
+  const glassBg = dominant
+    ? `linear-gradient(135deg, rgba(${dominant.r},${dominant.g},${dominant.b},0.42) 0%, rgba(${dominant.r},${dominant.g},${dominant.b},0.14) 55%, rgba(255,255,255,0.32) 100%), rgba(255,255,255,0.28)`
+    : GLASS_PANEL.background;
+
+  return (
+    <div
+      className="offer-card"
+      onClick={onClick}
+      style={{
+        ...GLASS_PANEL,
+        background: glassBg,
+        display: "flex", alignItems: "center", gap: 14, borderRadius: 18,
+        padding: 16, height: 116, position: "relative", cursor: "pointer",
+        transition: "background .6s ease, transform .25s ease, box-shadow .25s ease",
+      }}
+    >
+      <div ref={thumbRef} style={{ flex: "0 0 92px" }}>
+        <PromoImageGrid images={images} size={92} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontSize: 10.5, fontWeight: 600, color: "#F97316", textTransform: "uppercase", letterSpacing: ".03em",
+          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+        }}>{label}</div>
+        <div style={{
+          fontSize: 16.5, fontWeight: 700, color: COLORS.espresso5, marginTop: 3, lineHeight: 1.2,
+          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+        }}>{title}</div>
+        {subtitle && (
+          <div style={{
+            fontSize: 11.5, color: COLORS.espresso2, marginTop: 2,
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+          }}>{subtitle}</div>
+        )}
+        <div style={{ marginTop: 6, fontSize: 13.5 }}>{priceNode}</div>
+      </div>
+      {qty > 0 && (
+        <div style={{
+          position: "absolute", top: 10, right: 10, background: COLORS.sage, color: "#fff",
+          fontSize: 11, fontWeight: 700, borderRadius: 999, minWidth: 22, height: 22,
+          display: "flex", alignItems: "center", justifyContent: "center", padding: "0 6px",
+        }}>
+          <AnimatedQty value={qty} />
+        </div>
+      )}
+      {rippling && <span className="offer-ripple" />}
     </div>
   );
 }
@@ -1409,48 +1503,18 @@ export default function CustomerOrder({ shopUid }) {
                         }
 
                         return (
-                          <div key={promo.id} style={{ flex: "0 0 100%", scrollSnapAlign: "start" }}>
-                            <div
-                              className="offer-card"
-                              onClick={() => { triggerOfferRipple(promo.id); onCardClick(); }}
-                              style={{
-                                ...GLASS_PANEL,
-                                display: "flex", alignItems: "center", gap: 14, borderRadius: 18,
-                                padding: 16, height: 116, position: "relative", cursor: "pointer",
-                              }}
-                            >
-                              <div ref={(el) => { menuThumbRefs.current[refKey] = el; }} style={{ flex: "0 0 92px" }}>
-                                <PromoImageGrid images={images} size={92} />
-                              </div>
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{
-                                  fontSize: 10.5, fontWeight: 600, color: "#F97316", textTransform: "uppercase", letterSpacing: ".03em",
-                                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                                }}>{label}</div>
-                                <div style={{
-                                  fontSize: 16.5, fontWeight: 700, color: COLORS.espresso5, marginTop: 3, lineHeight: 1.2,
-                                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                                }}>{title}</div>
-                                {subtitle && (
-                                  <div style={{
-                                    fontSize: 11.5, color: COLORS.espresso2, marginTop: 2,
-                                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                                  }}>{subtitle}</div>
-                                )}
-                                <div style={{ marginTop: 6, fontSize: 13.5 }}>{priceNode}</div>
-                              </div>
-                              {qty > 0 && (
-                                <div style={{
-                                  position: "absolute", top: 10, right: 10, background: COLORS.sage, color: "#fff",
-                                  fontSize: 11, fontWeight: 700, borderRadius: 999, minWidth: 22, height: 22,
-                                  display: "flex", alignItems: "center", justifyContent: "center", padding: "0 6px",
-                                }}>
-                                  <AnimatedQty value={qty} />
-                                </div>
-                              )}
-                              {offerRippleId === promo.id && <span className="offer-ripple" />}
-                            </div>
-                          </div>
+                          <OfferCard
+                            key={promo.id}
+                            images={images}
+                            label={label}
+                            title={title}
+                            subtitle={subtitle}
+                            priceNode={priceNode}
+                            qty={qty}
+                            rippling={offerRippleId === promo.id}
+                            onClick={() => { triggerOfferRipple(promo.id); onCardClick(); }}
+                            thumbRef={(el) => { menuThumbRefs.current[refKey] = el; }}
+                          />
                         );
                       })}
                     </div>
