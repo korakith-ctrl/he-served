@@ -348,64 +348,6 @@ function useSheetTransition(visible, duration = 300) {
   return { mounted, shown };
 }
 
-const dominantColorCache = new Map();
-
-function useDominantColor(imageUrl) {
-  const [color, setColor] = useState(() => (imageUrl ? dominantColorCache.get(imageUrl) || null : null));
-
-  useEffect(() => {
-    if (!imageUrl) { setColor(null); return; }
-    if (dominantColorCache.has(imageUrl)) { setColor(dominantColorCache.get(imageUrl)); return; }
-    let cancelled = false;
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => {
-      if (cancelled) return;
-      try {
-        const size = 12;
-        const canvas = document.createElement("canvas");
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, size, size);
-        const data = ctx.getImageData(0, 0, size, size).data;
-        let r = 0, g = 0, b = 0, count = 0;
-        for (let i = 0; i < data.length; i += 4) {
-          if (data[i + 3] < 100) continue;
-          r += data[i]; g += data[i + 1]; b += data[i + 2]; count++;
-        }
-        const result = count > 0 ? { r: Math.round(r / count), g: Math.round(g / count), b: Math.round(b / count) } : null;
-        dominantColorCache.set(imageUrl, result);
-        if (!cancelled) setColor(result);
-      } catch {
-        dominantColorCache.set(imageUrl, null);
-        if (!cancelled) setColor(null);
-      }
-    };
-    img.onerror = () => { if (!cancelled) setColor(null); };
-    img.src = imageUrl;
-    return () => { cancelled = true; };
-  }, [imageUrl]);
-
-  return color;
-}
-
-function hslToRgb(h, s, l) {
-  s /= 100; l /= 100;
-  const k = (n) => (n + h / 30) % 12;
-  const a = s * Math.min(l, 1 - l);
-  const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
-  return { r: Math.round(255 * f(0)), g: Math.round(255 * f(8)), b: Math.round(255 * f(4)) };
-}
-
-function hashColorFromText(text) {
-  const str = text || "drink";
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  const hue = Math.abs(hash) % 360;
-  return hslToRgb(hue, 58, 58);
-}
-
 function MenuThumb({ imageUrl, size = 60 }) {
   const [failed, setFailed] = useState(false);
   return (
@@ -475,20 +417,14 @@ function PromoImageGrid({ images, size = 72 }) {
 }
 
 function OfferCard({ images, label, title, subtitle, priceNode, qty, rippling, onClick, thumbRef }) {
-  const sampled = useDominantColor(images && images[0]);
-  const dominant = sampled || hashColorFromText(title);
-  const glassBg = `linear-gradient(135deg, rgba(${dominant.r},${dominant.g},${dominant.b},0.42) 0%, rgba(${dominant.r},${dominant.g},${dominant.b},0.14) 55%, rgba(255,255,255,0.32) 100%), rgba(255,255,255,0.28)`;
-
   return (
     <div
       className="offer-card"
       onClick={onClick}
       style={{
         ...GLASS_PANEL,
-        background: glassBg,
         display: "flex", alignItems: "center", gap: 14, borderRadius: 18,
         padding: 16, height: 116, position: "relative", cursor: "pointer",
-        transition: "background .6s ease, transform .25s ease, box-shadow .25s ease",
       }}
     >
       <div ref={thumbRef} style={{ flex: "0 0 92px" }}>
@@ -1838,7 +1774,7 @@ function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm, hideQty
       if (initialOptions && initialOptions.length) {
         const sel = {};
         for (const o of initialOptions) {
-          sel[o.groupId] = { id: o.choiceId, label: o.label, note: "", priceDelta: o.priceDelta || 0, ingredientId: o.ingredientId || null, groupId: o.groupId, groupName: o.groupName };
+          sel[o.groupId] = { id: o.choiceId, label: o.label, note: "", priceDelta: o.priceDelta || 0, ingredientId: o.ingredientId || null, qtyPercent: o.qtyPercent != null ? o.qtyPercent : 100, groupId: o.groupId, groupName: o.groupName };
         }
         setSelections(sel);
       } else {
@@ -1868,7 +1804,10 @@ function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm, hideQty
     const options = cg
       .map((grp) => selections[grp.id])
       .filter(Boolean)
-      .map((c) => ({ groupId: c.groupId, groupName: c.groupName, choiceId: c.id, label: c.label, priceDelta: c.priceDelta || 0, ingredientId: c.ingredientId || null }));
+      .map((c) => ({
+        groupId: c.groupId, groupName: c.groupName, choiceId: c.id, label: c.label, priceDelta: c.priceDelta || 0,
+        ingredientId: c.ingredientId || null, qtyPercent: c.qtyPercent != null ? c.qtyPercent : 100,
+      }));
     onConfirm(hideQty ? 1 : qty, options);
   }
 

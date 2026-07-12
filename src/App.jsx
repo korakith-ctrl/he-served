@@ -173,7 +173,7 @@ function normalizeData(raw) {
     },
     optionGroups: (raw.optionGroups || []).map((g) => ({
       ...g,
-      choices: (g.choices || []).map((c) => ({ ...c, ingredientId: c.ingredientId || null, isDefault: c.isDefault || false })),
+      choices: (g.choices || []).map((c) => ({ ...c, ingredientId: c.ingredientId || null, qtyPercent: c.qtyPercent != null ? c.qtyPercent : 100, isDefault: c.isDefault || false })),
     })),
     promotions: (raw.promotions || []).map((p) => ({
       ...p,
@@ -218,15 +218,18 @@ function formatPromoDateTime(ms) {
   return new Date(ms).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" });
 }
 
-function resolveLines(menu, substitutions) {
+function resolveLines(menu, adjustments) {
   return menu.ingredients.map((line) => {
-    const subId = substitutions[line.ingredientId];
-    return subId ? { ...line, ingredientId: subId } : line;
+    const adj = adjustments[line.ingredientId];
+    if (!adj) return line;
+    const ingredientId = adj.ingredientId || line.ingredientId;
+    const qtyPercent = adj.qtyPercent != null ? adj.qtyPercent : 100;
+    return { ...line, ingredientId, qty: round4(line.qty * (qtyPercent / 100)) };
   });
 }
 
-function calcRecipeCost(menu, ingredientsById, substitutions) {
-  const lines = resolveLines(menu, substitutions || {});
+function calcRecipeCost(menu, ingredientsById, adjustments) {
+  const lines = resolveLines(menu, adjustments || {});
   let cost = 0;
   const breakdown = [];
   for (const line of lines) {
@@ -247,8 +250,8 @@ function milkChoiceFor(menu, ingredientsById) {
   return { originalIngredientId: line.ingredientId, options };
 }
 
-function resolveSubstitutionsFromOptions(menu, options, ingredientsById) {
-  const substitutions = {};
+function resolveIngredientAdjustmentsFromOptions(menu, options, ingredientsById) {
+  const adjustments = {};
   for (const opt of options || []) {
     if (!opt.ingredientId) continue;
     const chosenIng = ingredientsById[opt.ingredientId];
@@ -257,11 +260,12 @@ function resolveSubstitutionsFromOptions(menu, options, ingredientsById) {
       const li = ingredientsById[l.ingredientId];
       return li && li.altGroup === chosenIng.altGroup;
     });
-    if (origLine && origLine.ingredientId !== opt.ingredientId) {
-      substitutions[origLine.ingredientId] = opt.ingredientId;
-    }
+    if (!origLine) continue;
+    const qtyPercent = opt.qtyPercent != null ? opt.qtyPercent : 100;
+    if (origLine.ingredientId === opt.ingredientId && qtyPercent === 100) continue;
+    adjustments[origLine.ingredientId] = { ingredientId: opt.ingredientId, qtyPercent };
   }
-  return substitutions;
+  return adjustments;
 }
 
 function ingredientPickerOptions(ingredients, currentId) {
@@ -309,6 +313,35 @@ function playOrderChime() {
 
 function Icon({ name, size = 18, style }) {
   return <i className={"ti ti-" + name} style={{ fontSize: size, ...style }} aria-hidden="true"></i>;
+}
+
+// Buffers the field's own display value locally and only pushes it up to
+// parent state once composition ends, so a controlled re-render can't
+// interrupt an in-progress Thai tone-mark composition and drop characters.
+function TextField({ value, onChange, ...rest }) {
+  const [local, setLocal] = useState(value);
+  const composingRef = useRef(false);
+
+  useEffect(() => {
+    if (!composingRef.current) setLocal(value);
+  }, [value]);
+
+  return (
+    <input
+      {...rest}
+      value={local}
+      onChange={(e) => {
+        setLocal(e.target.value);
+        if (!composingRef.current) onChange(e.target.value);
+      }}
+      onCompositionStart={() => { composingRef.current = true; }}
+      onCompositionEnd={(e) => {
+        composingRef.current = false;
+        setLocal(e.target.value);
+        onChange(e.target.value);
+      }}
+    />
+  );
 }
 
 const TABS = [
@@ -382,7 +415,7 @@ function ShopApp({ uid }) {
         for (const item of o.items) {
           const upcharge = (item.options || []).reduce((s, x) => s + (x.priceDelta || 0), 0);
           const itemMenu = data.menus.find((m) => m.id === item.menuId);
-          const substitutions = itemMenu ? resolveSubstitutionsFromOptions(itemMenu, item.options, ingredientsById) : {};
+          const substitutions = itemMenu ? resolveIngredientAdjustmentsFromOptions(itemMenu, item.options, ingredientsById) : {};
           recordSale(item.menuId, item.qty, "online", { upcharge, substitutions, milkLabel: (item.options || []).map((x) => x.label).join(", ") || null });
         }
         update(ref(db, `orders/${uid}/${o.id}`), { saleRecorded: true }).catch(() => {});
@@ -706,7 +739,7 @@ function SellPanel({ data, ingredientsById, recordSale }) {
           const channel = get(menu.id, "channel", "store");
           const milk = milkChoiceFor(menu, ingredientsById);
           const milkSelId = get(menu.id, "milkSel", milk ? milk.originalIngredientId : null);
-          const substitutions = milk && milkSelId !== milk.originalIngredientId ? { [milk.originalIngredientId]: milkSelId } : {};
+          const substitutions = milk && milkSelId !== milk.originalIngredientId ? { [milk.originalIngredientId]: { ingredientId: milkSelId, qtyPercent: 100 } } : {};
           const upcharge = milk ? (ingredientsById[milkSelId] ? ingredientsById[milkSelId].altUpcharge : 0) : 0;
           const promo = get(menu.id, "promo", 0);
           const platformId = get(menu.id, "platformId", data.settings.platforms[0]?.id);
@@ -885,7 +918,7 @@ function OrdersPanel({ uid, orders, recordSale, showToast, data, ingredientsById
     for (const item of order.items) {
       const upcharge = (item.options || []).reduce((s, o) => s + (o.priceDelta || 0), 0);
       const itemMenu = data.menus.find((m) => m.id === item.menuId);
-      const substitutions = itemMenu ? resolveSubstitutionsFromOptions(itemMenu, item.options, ingredientsById) : {};
+      const substitutions = itemMenu ? resolveIngredientAdjustmentsFromOptions(itemMenu, item.options, ingredientsById) : {};
       recordSale(item.menuId, item.qty, "online", { upcharge, substitutions, milkLabel: (item.options || []).map((o) => o.label).join(", ") || null });
     }
     showToast(`ยืนยันออเดอร์ ${order.customerName || order.customerPhone} แล้ว บันทึกยอดขายให้อัตโนมัติ`);
@@ -1449,7 +1482,7 @@ function PromoEditor({ promo, menus, onSave, onCancel }) {
       </div>
 
       <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ชื่อโปรโมชั่น (ถ้าเว้นว่างจะใช้ชื่อเมนูต่อกัน)</label>
-      <input className="cfield" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="เช่น คู่หูสุดคุ้ม" style={{ marginBottom: 12 }} />
+      <TextField className="cfield" value={form.name} onChange={(v) => setForm({ ...form, name: v })} placeholder="เช่น คู่หูสุดคุ้ม" style={{ marginBottom: 12 }} />
 
       <p style={{ fontSize: 12, color: "var(--espresso-2)", margin: "0 0 6px" }}>
         {form.type === "single" && "เลือกเมนูที่ต้องการลดราคา"}
@@ -1902,7 +1935,7 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
   function addChoice(groupId) {
     updateData((next) => {
       const g = next.optionGroups.find((x) => x.id === groupId);
-      if (g) g.choices.push({ id: genId("choice"), label: "ตัวเลือกใหม่", note: "", priceDelta: 0, ingredientId: null, isDefault: false });
+      if (g) g.choices.push({ id: genId("choice"), label: "ตัวเลือกใหม่", note: "", priceDelta: 0, ingredientId: null, qtyPercent: 100, isDefault: false });
     });
   }
   function patchChoice(groupId, choiceId, patch) {
@@ -1935,7 +1968,9 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
       <p style={{ fontSize: 11.5, color: "var(--espresso-2)", margin: "0 0 14px" }}>
         ตั้งค่าที่นี่ครั้งเดียว แล้วไปติ๊กเลือกว่าเมนูไหนใช้กลุ่มตัวเลือกไหนได้ในแท็บ "เมนู & สูตร" ตอนแก้ไขเมนู
         ถ้าตัวเลือกไหนแทนวัตถุดิบ (เช่น เลือกเมล็ด/นมคนละแบบ) ให้เลือก "วัตถุดิบที่ใช้แทน" ระบบจะตัดสต็อกตามที่ลูกค้าเลือกจริงแทนสูตรตั้งต้น
-        (วัตถุดิบต้นทางและตัวเลือกต้องตั้ง "กลุ่มทางเลือก" ให้ตรงกันในแท็บวัตถุดิบก่อน) กดไอคอนดาว ★ เพื่อตั้งตัวเลือกเริ่มต้น ลูกค้าจะไม่ต้องกดเลือกเองถ้าไม่ต้องการเปลี่ยน
+        (วัตถุดิบต้นทางและตัวเลือกต้องตั้ง "กลุ่มทางเลือก" ให้ตรงกันในแท็บวัตถุดิบก่อน)
+        เลือกวัตถุดิบเดิมของสูตรแล้วปรับ "% ที่ใช้" ได้ด้วย เช่น กลุ่ม "ความหวาน" เลือกไซรัปแล้วตั้งหวานปกติ 100%, หวานน้อย 50%, ไม่หวาน 0% ระบบจะตัดสต็อกและคิดต้นทุนตามปริมาณจริงที่ใช้
+        กดไอคอนดาว ★ เพื่อตั้งตัวเลือกเริ่มต้น ลูกค้าจะไม่ต้องกดเลือกเองถ้าไม่ต้องการเปลี่ยน
       </p>
 
       {data.optionGroups.length === 0 && <EmptyNote text={'ยังไม่มีกลุ่มตัวเลือก กด "เพิ่มกลุ่มตัวเลือก" เพื่อเริ่ม'} />}
@@ -1968,6 +2003,16 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
                   <option key={i.id} value={i.id}>{i.name} ({i.altGroup})</option>
                 ))}
               </select>
+              {c.ingredientId && (
+                <input
+                  className="cfield"
+                  type="number"
+                  value={c.qtyPercent != null ? c.qtyPercent : 100}
+                  onChange={(e) => patchChoice(g.id, c.id, { qtyPercent: Number(e.target.value) })}
+                  style={{ width: 66 }}
+                  title="ปริมาณที่ใช้ (% ของสูตรตั้งต้น) เช่น หวานน้อยลง 50%, ไม่หวาน 0%"
+                />
+              )}
               <button
                 className="cbtn"
                 style={{
