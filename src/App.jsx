@@ -356,10 +356,13 @@ const TABS = [
   { id: "settings", label: "ตั้งค่า", icon: "settings" },
 ];
 
-function ShopApp({ uid }) {
+function ShopApp({ uid, user }) {
   const [data, setData] = useState(null);
   const [tab, setTab] = useState("dashboard");
   const [toast, setToast] = useState(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(max-width: 1024px)").matches
+  );
   const [orders, setOrders] = useState([]);
   const prevPendingCount = useRef(0);
   const isFirstOrdersSnapshot = useRef(true);
@@ -501,7 +504,7 @@ function ShopApp({ uid }) {
   return (
     <div style={{ fontFamily: "var(--f-body)", color: "var(--espresso-4)", minHeight: "100vh" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
         .coffeeapp * { box-sizing: border-box; }
         .coffeeapp button { font-family: inherit; cursor: pointer; }
         .coffeeapp input, .coffeeapp select { font-family: inherit; }
@@ -520,17 +523,19 @@ function ShopApp({ uid }) {
         .navitem:hover { background: var(--cream-2); }
         .navitem.active { background: var(--sage-light); color: var(--sage-dark); font-weight: 600; }
         table.cdata { width: 100%; border-collapse: collapse; font-size: 13px; }
-        table.cdata th { text-align: left; font-weight: 500; color: var(--espresso-2); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+        table.cdata th { text-align: left; font-weight: 500; color: var(--espresso-2); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
         table.cdata td { padding: 8px; border-bottom: 1px solid var(--line-soft); }
+        .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        .table-scroll table.cdata { min-width: 640px; }
         .chpill { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 500; }
         @keyframes paidFlash {
           0% { box-shadow: 0 0 0 0 rgba(206,86,13,0); background: var(--surface); }
           15% { box-shadow: 0 0 0 4px var(--sage); background: var(--sage-light); }
           100% { box-shadow: 0 0 0 0 rgba(206,86,13,0); background: var(--surface); }
         }
-        @media (max-width: 860px) {
-          .admin-sidebar { display: none; }
-        }
+        .sidebar-toggle { border: none; background: var(--cream-2); color: var(--espresso-3); width: 26px; height: 26px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background .15s ease, color .15s ease; }
+        .sidebar-toggle:hover { background: var(--sage-light); color: var(--sage-dark); }
+        .admin-sidebar { transition: width .18s ease; }
       `}</style>
       <div className="coffeeapp" style={{
         "--cream": "#F4F6F4", "--cream-2": "#EBEFEA", "--surface": "#FFFFFF",
@@ -540,46 +545,111 @@ function ShopApp({ uid }) {
         "--info": "#3D6E8C", "--info-dark": "#2C5069", "--info-light": "#E4EDF2",
         "--danger": "#B23A2E", "--danger-line": "#E7CAC5", "--danger-light": "#FAEEEC",
         "--line": "#E4E8E5", "--line-soft": "#EEF1EF",
-        "--f-display": "'Fraunces', serif", "--f-body": "'Inter', sans-serif", "--f-mono": "'IBM Plex Mono', monospace",
+        "--f-display": "'Fraunces', serif", "--f-body": "'Manrope', 'Inter', sans-serif", "--f-mono": "'IBM Plex Mono', monospace",
         display: "flex", background: "var(--cream)", minHeight: "100vh",
       }}>
         <aside className="admin-sidebar" style={{
-          width: 236, flexShrink: 0, background: "#fff", borderRight: "1px solid var(--line)",
-          display: "flex", flexDirection: "column", padding: "18px 14px", position: "sticky", top: 0, height: "100vh",
+          width: sidebarCollapsed ? 68 : 236, flexShrink: 0, background: "#fff", borderRight: "1px solid var(--line)",
+          display: "flex", flexDirection: "column", padding: sidebarCollapsed ? "18px 10px" : "18px 14px",
+          position: "sticky", top: 0, height: "100vh", overflow: "hidden",
         }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 8px 18px" }}>
-            <div style={{
-              width: 34, height: 34, borderRadius: 10, background: "var(--sage)", color: "#fff",
-              display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-            }}>
-              <Icon name="coffee" size={18} />
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <p style={{ margin: 0, fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 15, color: "var(--espresso-5)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{data.settings.shopName}</p>
-              <p style={{ margin: 0, fontSize: 10.5, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--espresso-2)" }}>ระบบหลังบ้าน</p>
-            </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 4px 18px", justifyContent: sidebarCollapsed ? "center" : "space-between" }}>
+            {!sidebarCollapsed && (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                <div style={{
+                  width: 34, height: 34, borderRadius: 10, background: "var(--sage)", color: "#fff",
+                  display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                }}>
+                  <Icon name="coffee" size={18} />
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <p style={{ margin: 0, fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 15, color: "var(--espresso-5)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{data.settings.shopName}</p>
+                  <p style={{ margin: 0, fontSize: 10.5, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--espresso-2)" }}>ระบบหลังบ้าน</p>
+                </div>
+              </div>
+            )}
+            {sidebarCollapsed && (
+              <div style={{
+                width: 34, height: 34, borderRadius: 10, background: "var(--sage)", color: "#fff",
+                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+              }} title={data.settings.shopName}>
+                <Icon name="coffee" size={18} />
+              </div>
+            )}
+            {!sidebarCollapsed && (
+              <button className="sidebar-toggle" onClick={() => setSidebarCollapsed(true)} title="ย่อเมนู">
+                <Icon name="chevron-left" size={15} />
+              </button>
+            )}
           </div>
+
+          {sidebarCollapsed && (
+            <button className="sidebar-toggle" style={{ margin: "0 auto 12px" }} onClick={() => setSidebarCollapsed(false)} title="ขยายเมนู">
+              <Icon name="chevron-right" size={15} />
+            </button>
+          )}
 
           <nav style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, overflowY: "auto" }}>
             {TABS.map((t) => {
               const pendingCount = t.id === "orders" ? pendingOrderCount : 0;
               return (
-                <button key={t.id} className={"navitem" + (tab === t.id ? " active" : "")} onClick={() => setTab(t.id)}>
+                <button
+                  key={t.id}
+                  className={"navitem" + (tab === t.id ? " active" : "")}
+                  onClick={() => setTab(t.id)}
+                  title={sidebarCollapsed ? t.label : undefined}
+                  style={sidebarCollapsed ? { justifyContent: "center", padding: "10px", position: "relative" } : undefined}
+                >
                   <Icon name={t.icon} size={17} />
-                  <span style={{ flex: 1 }}>{t.label}</span>
+                  {!sidebarCollapsed && <span style={{ flex: 1 }}>{t.label}</span>}
                   {pendingCount > 0 && (
                     <span style={{
                       background: "var(--danger)", color: "#fff", fontSize: 10, fontWeight: 600, lineHeight: 1,
                       borderRadius: 999, padding: "3px 6px",
-                    }}>{pendingCount}</span>
+                      ...(sidebarCollapsed ? { position: "absolute", top: 4, right: 4, padding: "2px 5px" } : {}),
+                    }}>{sidebarCollapsed ? "" : pendingCount}</span>
                   )}
                 </button>
               );
             })}
           </nav>
 
-          <button className="cbtn" style={{ marginTop: 12, width: "100%", justifyContent: "center", display: "flex", alignItems: "center", gap: 6 }} onClick={() => signOut(auth)}>
-            <Icon name="logout" size={14} /> ออกจากระบบ
+          {user && (
+            <div
+              style={{
+                marginTop: 12, display: "flex", alignItems: "center", gap: 8, padding: sidebarCollapsed ? "0" : "8px 6px",
+                justifyContent: sidebarCollapsed ? "center" : "flex-start",
+              }}
+              title={user.displayName || user.email || ""}
+            >
+              <div style={{
+                width: 28, height: 28, borderRadius: "50%", background: "var(--sage-light)", color: "var(--sage-dark)",
+                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 12, fontWeight: 700,
+              }}>
+                {(user.displayName || user.email || "?").charAt(0).toUpperCase()}
+              </div>
+              {!sidebarCollapsed && (
+                <div style={{ minWidth: 0 }}>
+                  <p style={{ margin: 0, fontSize: 12.5, fontWeight: 600, color: "var(--espresso-4)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {user.displayName || user.email}
+                  </p>
+                  {user.displayName && (
+                    <p style={{ margin: 0, fontSize: 10.5, color: "var(--espresso-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {user.email}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          <button
+            className="cbtn"
+            style={{ marginTop: 8, width: "100%", justifyContent: "center", display: "flex", alignItems: "center", gap: 6 }}
+            onClick={() => signOut(auth)}
+            title="ออกจากระบบ"
+          >
+            <Icon name="logout" size={14} /> {!sidebarCollapsed && "ออกจากระบบ"}
           </button>
         </aside>
 
@@ -982,22 +1052,24 @@ function OrdersPanel({ uid, orders, recordSale, showToast, data, ingredientsById
 
       <SectionTitle icon="history" text="ประวัติล่าสุด" />
       {history.length === 0 ? <EmptyNote text="ยังไม่มีประวัติ" /> : (
-        <table className="cdata">
-          <thead><tr><th>เวลา</th><th>ลูกค้า</th><th>รายการ</th><th>วันรับ</th><th>ชำระ</th><th>ยอด</th><th>สถานะ</th></tr></thead>
-          <tbody>
-            {history.map((o) => (
-              <tr key={o.id}>
-                <td>{new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</td>
-                <td>{o.customerName ? `${o.customerName} · ${o.customerPhone}` : o.customerPhone}</td>
-                <td>{o.items.map((i) => `${i.name} x${i.qty}`).join(", ")}</td>
-                <td>{formatPickupDateTH(o.pickupDate)}</td>
-                <td>{PAYMENT_METHOD_LABEL[o.paymentMethod] || "-"}</td>
-                <td>฿{money(o.total)}</td>
-                <td><StatusBadge status={o.status} /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="table-scroll">
+          <table className="cdata">
+            <thead><tr><th>เวลา</th><th>ลูกค้า</th><th>รายการ</th><th>วันรับ</th><th>ชำระ</th><th>ยอด</th><th>สถานะ</th></tr></thead>
+            <tbody>
+              {history.map((o) => (
+                <tr key={o.id}>
+                  <td style={{ whiteSpace: "nowrap" }}>{new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</td>
+                  <td>{o.customerName ? `${o.customerName} · ${o.customerPhone}` : o.customerPhone}</td>
+                  <td>{o.items.map((i) => `${i.name} x${i.qty}`).join(", ")}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>{formatPickupDateTH(o.pickupDate)}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>{PAYMENT_METHOD_LABEL[o.paymentMethod] || "-"}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>฿{money(o.total)}</td>
+                  <td style={{ whiteSpace: "nowrap" }}><StatusBadge status={o.status} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -1646,26 +1718,28 @@ function IngredientsPanel({ data, updateData, showToast }) {
         return (
           <div key={cat.id} style={{ marginBottom: 18 }}>
             <p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--espresso-3)", margin: "0 0 6px" }}>{cat.label}</p>
-            <table className="cdata">
-              <thead><tr><th>รายการ</th><th>สต็อก</th><th>ต้นทุน/หน่วย</th><th>กลุ่มทางเลือก</th><th></th></tr></thead>
-              <tbody>
-                {items.map((ing) => (
-                  <tr key={ing.id}>
-                    <td>{ing.name}</td>
-                    <td style={{ color: ing.stockQty <= ing.lowStockThreshold ? "var(--danger)" : "var(--espresso-4)", fontWeight: ing.stockQty <= ing.lowStockThreshold ? 600 : 400 }}>
-                      {ing.stockQty} {UNITS[ing.unit]}
-                    </td>
-                    <td>฿{money(ing.costPerUnit)}/{UNITS[ing.unit]}</td>
-                    <td>{ing.altGroup ? `${ing.altGroup}${ing.altUpcharge ? ` (+฿${ing.altUpcharge})` : ""}` : "—"}</td>
-                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                      <button className="cbtn" style={{ padding: "4px 8px", marginRight: 4 }} onClick={() => setRestocking(ing.id)}>เติมสต็อก</button>
-                      <button className="cbtn cbtn-edit" style={{ padding: "4px 8px", marginRight: 4 }} onClick={() => setEditingId(ing.id)} title="แก้ไขวัตถุดิบ"><Icon name="edit" size={12} /></button>
-                      <button className="cbtn cbtn-danger" style={{ padding: "4px 8px" }} onClick={() => deleteIngredient(ing.id)} title="ลบวัตถุดิบ"><Icon name="trash" size={12} /></button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="table-scroll">
+              <table className="cdata">
+                <thead><tr><th>รายการ</th><th>สต็อก</th><th>ต้นทุน/หน่วย</th><th>กลุ่มทางเลือก</th><th></th></tr></thead>
+                <tbody>
+                  {items.map((ing) => (
+                    <tr key={ing.id}>
+                      <td>{ing.name}</td>
+                      <td style={{ whiteSpace: "nowrap", color: ing.stockQty <= ing.lowStockThreshold ? "var(--danger)" : "var(--espresso-4)", fontWeight: ing.stockQty <= ing.lowStockThreshold ? 600 : 400 }}>
+                        {ing.stockQty} {UNITS[ing.unit]}
+                      </td>
+                      <td style={{ whiteSpace: "nowrap" }}>฿{money(ing.costPerUnit)}/{UNITS[ing.unit]}</td>
+                      <td>{ing.altGroup ? `${ing.altGroup}${ing.altUpcharge ? ` (+฿${ing.altUpcharge})` : ""}` : "—"}</td>
+                      <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                        <button className="cbtn" style={{ padding: "4px 8px", marginRight: 4 }} onClick={() => setRestocking(ing.id)}>เติมสต็อก</button>
+                        <button className="cbtn cbtn-edit" style={{ padding: "4px 8px", marginRight: 4 }} onClick={() => setEditingId(ing.id)} title="แก้ไขวัตถุดิบ"><Icon name="edit" size={12} /></button>
+                        <button className="cbtn cbtn-danger" style={{ padding: "4px 8px" }} onClick={() => deleteIngredient(ing.id)} title="ลบวัตถุดิบ"><Icon name="trash" size={12} /></button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         );
       })}
@@ -1863,17 +1937,19 @@ function ReportsPanel({ data }) {
       {Object.keys(byPlatform).length > 0 && (
         <div style={{ marginBottom: 20 }}>
           <SectionTitle icon="truck-delivery" text="แยกตามแพลตฟอร์มเดลิเวอรี่" />
-          <table className="cdata">
-            <thead><tr><th>แพลตฟอร์ม</th><th>แก้ว</th><th>รายได้สุทธิ</th><th>กำไร</th></tr></thead>
-            <tbody>
-              {Object.entries(byPlatform).map(([name, v]) => (
-                <tr key={name}>
-                  <td>{name}</td><td>{v.cups}</td><td>฿{money(v.revenue)}</td>
-                  <td style={{ color: v.profit >= 0 ? "var(--sage-dark)" : "var(--danger)" }}>฿{money(v.profit)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-scroll">
+            <table className="cdata">
+              <thead><tr><th>แพลตฟอร์ม</th><th>แก้ว</th><th>รายได้สุทธิ</th><th>กำไร</th></tr></thead>
+              <tbody>
+                {Object.entries(byPlatform).map(([name, v]) => (
+                  <tr key={name}>
+                    <td>{name}</td><td>{v.cups}</td><td style={{ whiteSpace: "nowrap" }}>฿{money(v.revenue)}</td>
+                    <td style={{ whiteSpace: "nowrap", color: v.profit >= 0 ? "var(--sage-dark)" : "var(--danger)" }}>฿{money(v.profit)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -1893,22 +1969,24 @@ function ReportsPanel({ data }) {
 
       <SectionTitle icon="list" text="ประวัติการขาย" />
       {filtered.length === 0 ? <EmptyNote text="ไม่มีข้อมูลการขายในช่วงนี้" /> : (
-        <table className="cdata">
-          <thead><tr><th>เวลา</th><th>เมนู</th><th>ช่องทาง</th><th>จำนวน</th><th>รายได้สุทธิ</th><th>ต้นทุน</th><th>กำไร</th></tr></thead>
-          <tbody>
-            {filtered.slice().reverse().slice(0, 50).map((s) => (
-              <tr key={s.id}>
-                <td>{new Date(s.timestamp).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</td>
-                <td>{s.menuName}{s.milkNote ? ` (${s.milkNote})` : ""}</td>
-                <td><ChannelPill channel={s.channel} />{s.platformName ? <span style={{ fontSize: 11, color: "var(--espresso-2)" }}> {s.platformName}</span> : null}</td>
-                <td>{s.qty}</td>
-                <td>฿{money(s.netRevenue)}</td>
-                <td>฿{money(s.totalCost)}</td>
-                <td style={{ color: s.profit >= 0 ? "var(--sage-dark)" : "var(--danger)" }}>฿{money(s.profit)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="table-scroll">
+          <table className="cdata">
+            <thead><tr><th>เวลา</th><th>เมนู</th><th>ช่องทาง</th><th>จำนวน</th><th>รายได้สุทธิ</th><th>ต้นทุน</th><th>กำไร</th></tr></thead>
+            <tbody>
+              {filtered.slice().reverse().slice(0, 50).map((s) => (
+                <tr key={s.id}>
+                  <td style={{ whiteSpace: "nowrap" }}>{new Date(s.timestamp).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</td>
+                  <td>{s.menuName}{s.milkNote ? ` (${s.milkNote})` : ""}</td>
+                  <td style={{ whiteSpace: "nowrap" }}><ChannelPill channel={s.channel} />{s.platformName ? <span style={{ fontSize: 11, color: "var(--espresso-2)" }}> {s.platformName}</span> : null}</td>
+                  <td>{s.qty}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>฿{money(s.netRevenue)}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>฿{money(s.totalCost)}</td>
+                  <td style={{ whiteSpace: "nowrap", color: s.profit >= 0 ? "var(--sage-dark)" : "var(--danger)" }}>฿{money(s.profit)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -2257,5 +2335,5 @@ export default function App() {
 
   if (!user || user.isAnonymous) return <Login />;
 
-  return <ShopApp uid={user.uid} />;
+  return <ShopApp uid={user.uid} user={user} />;
 }
