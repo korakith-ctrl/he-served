@@ -827,7 +827,7 @@ function ShopApp({ uid, user }) {
             </div>
           </div>
 
-          {tab === "dashboard" && <Dashboard data={data} ingredientsById={ingredientsById} setTab={setTab} recordSale={recordSale} />}
+          {tab === "dashboard" && <Dashboard data={data} ingredientsById={ingredientsById} setTab={setTab} recordSale={recordSale} createInstoreOrder={createInstoreOrder} />}
           {tab === "sell" && <SellPanel data={data} ingredientsById={ingredientsById} recordSale={recordSale} createInstoreOrder={createInstoreOrder} />}
           {tab === "orders" && <OrdersPanel uid={uid} orders={orders} recordSale={recordSale} showToast={showToast} data={data} ingredientsById={ingredientsById} />}
           {tab === "menus" && <MenusPanel data={data} ingredientsById={ingredientsById} updateData={updateData} showToast={showToast} />}
@@ -982,7 +982,13 @@ function DashTrendChart({ days }) {
   );
 }
 
-function Dashboard({ data, ingredientsById, setTab, recordSale }) {
+function Dashboard({ data, ingredientsById, setTab, recordSale, createInstoreOrder }) {
+  // ขายด่วนต้องขึ้นบอร์ด Kanban เหมือนกับที่ SellPanel ทำ ไม่งั้นออเดอร์ "หายไปเลย" มีแต่ยอดขายแต่ไม่มีการ์ดให้ติดตาม
+  function quickSell(m) {
+    recordSale(m.id, 1, "store", {});
+    createInstoreOrder([{ menuId: m.id, menuName: m.name, unitPrice: m.priceStore, qty: 1, channel: "store", options: [], promo: 0 }], "");
+  }
+
   const today = todayStr();
   const todaySales = data.sales.filter((s) => s.timestamp.slice(0, 10) === today);
   const revenue = todaySales.reduce((a, s) => a + s.netRevenue, 0);
@@ -1047,7 +1053,7 @@ function Dashboard({ data, ingredientsById, setTab, recordSale }) {
             <DashSectionHeader icon="bolt" text="ขายด่วน" hint='สำหรับขายแบบละเอียด (เลือกช่องทาง/ตัวเลือกเสริม) ไปที่แท็บ "ขายเครื่องดื่ม"' />
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10 }}>
               {data.menus.map((m) => (
-                <button key={m.id} className="dash-qs-btn" onClick={() => recordSale(m.id, 1, "store", {})}>
+                <button key={m.id} className="dash-qs-btn" onClick={() => quickSell(m)}>
                   <span className="dash-qs-name">{m.name}</span>
                   <span className="dash-qs-row">
                     <span className="dash-qs-price">฿{money(m.priceStore)}</span>
