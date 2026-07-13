@@ -5,7 +5,6 @@ import "./promotion-takeover.css";
 const DISPLAY_SECONDS = 3;
 
 export default function PromotionTakeover({ promo, imageUrl, onClose, onCta }) {
-  const [secondsLeft, setSecondsLeft] = useState(DISPLAY_SECONDS);
   const [imageFailed, setImageFailed] = useState(false);
   const closeRef = useRef(null);
 
@@ -19,16 +18,8 @@ export default function PromotionTakeover({ promo, imageUrl, onClose, onCta }) {
   }, []);
 
   useEffect(() => {
-    const startedAt = Date.now();
-    const timer = window.setInterval(() => {
-      const remaining = Math.max(0, DISPLAY_SECONDS - Math.floor((Date.now() - startedAt) / 1000));
-      setSecondsLeft(remaining);
-      if (remaining === 0) {
-        window.clearInterval(timer);
-        onClose();
-      }
-    }, 200);
-    return () => window.clearInterval(timer);
+    const timer = window.setTimeout(onClose, DISPLAY_SECONDS * 1000);
+    return () => window.clearTimeout(timer);
   }, [onClose]);
 
   useEffect(() => {
@@ -65,7 +56,6 @@ export default function PromotionTakeover({ promo, imageUrl, onClose, onCta }) {
         onClick={onClose}
         aria-label="ปิดโปรโมชั่น"
       >
-        <span className="promotion-takeover__countdown" aria-hidden="true">{secondsLeft}</span>
         <i className="ti ti-x" aria-hidden="true" />
       </button>
     </div>,
