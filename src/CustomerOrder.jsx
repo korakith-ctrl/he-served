@@ -266,28 +266,7 @@ const GLOBAL_CSS = `
   .offer-arrow-btn:active { transform: scale(0.94); }
   .banner-carousel { touch-action: pan-y; }
   .banner-slide { transition: opacity .45s ease; }
-  .banner-control {
-    width: 36px; height: 36px; padding: 0; border: 1px solid rgba(255,255,255,.76); border-radius: 50%;
-    display: grid; place-items: center; color: #063360; background: rgba(255,255,255,.82);
-    box-shadow: 0 4px 12px rgba(43,29,20,.14); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-    transition: transform .16s ease, background-color .16s ease;
-  }
-  .banner-control:hover { background: #fff; }
-  .corder .banner-control:active { transform: scale(.96); }
-  .banner-control:focus-visible, .banner-dot:focus-visible { outline: 3px solid rgba(255,255,255,.95); outline-offset: 2px; }
-  .banner-dot {
-    width: 24px; height: 24px; padding: 0; border: 0; display: grid; place-items: center;
-    background: transparent;
-  }
-  .banner-dot::before {
-    content: ""; width: 6px; height: 6px; border-radius: 999px; background: rgba(255,255,255,.62);
-    box-shadow: 0 1px 4px rgba(0,0,0,.24); transition: width .22s ease, background-color .22s ease;
-  }
-  .banner-dot[aria-current="true"]::before { width: 17px; background: #fff; }
-  .banner-counter {
-    padding: 3px 8px; border-radius: 999px; color: #fff; background: rgba(6,51,96,.62);
-    box-shadow: 0 1px 5px rgba(0,0,0,.2); font-size: 10px; font-weight: 700;
-  }
+  .banner-carousel:focus-visible { outline: 3px solid rgba(6,51,96,.42); outline-offset: 2px; }
   @keyframes offerRipple { 0% { transform: scale(0); opacity: .5; } 100% { transform: scale(2.4); opacity: 0; } }
   .offer-ripple { position: absolute; inset: 0; border-radius: inherit; background: rgba(6,51,96,0.18); animation: offerRipple .5s ease-out; pointer-events: none; }
   .zone-header { transition: box-shadow .25s ease; }
@@ -347,7 +326,7 @@ const GLOBAL_CSS = `
   }
   .corder button:active { transform: scale(0.94); }
   @media (prefers-reduced-motion: reduce) {
-    .banner-slide, .banner-control, .banner-dot::before { transition-duration: 0ms; }
+    .banner-slide { transition-duration: 0ms; }
   }
 `;
 
@@ -549,13 +528,9 @@ function BannerCarousel({ images }) {
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
   const pointerStartRef = useRef(null);
+  const lastSwipeAtRef = useRef(0);
   const validImages = (images || []).filter(Boolean);
   const key = validImages.join("|");
-
-  const goTo = (nextIndex) => {
-    if (validImages.length === 0) return;
-    setIndex((nextIndex + validImages.length) % validImages.length);
-  };
 
   const goPrevious = () => setIndex((current) => (current - 1 + validImages.length) % validImages.length);
   const goNext = () => setIndex((current) => (current + 1) % validImages.length);
@@ -576,75 +551,55 @@ function BannerCarousel({ images }) {
   return (
     <section
       className="banner-carousel"
-      aria-label="แบนเนอร์โปรโมชั่น"
+      aria-label={`แบนเนอร์โปรโมชั่น ${index + 1} จาก ${validImages.length} แตะเพื่อ${paused ? "เล่นต่อ" : "หยุด"}`}
       aria-roledescription="carousel"
+      aria-live="polite"
+      tabIndex={validImages.length > 1 ? 0 : undefined}
+      onClick={() => {
+        if (Date.now() - lastSwipeAtRef.current < 350) return;
+        if (validImages.length > 1) setPaused((value) => !value);
+      }}
       onKeyDown={(event) => {
         if (event.key === "ArrowLeft") { event.preventDefault(); goPrevious(); }
         if (event.key === "ArrowRight") { event.preventDefault(); goNext(); }
+        if (event.key === " " || event.key === "Enter") { event.preventDefault(); setPaused((value) => !value); }
       }}
       onPointerDown={(event) => {
-        if (event.pointerType === "touch") pointerStartRef.current = event.clientX;
+        if (event.pointerType === "touch") {
+          pointerStartRef.current = event.clientX;
+        }
       }}
       onPointerUp={(event) => {
         if (pointerStartRef.current === null || event.pointerType !== "touch") return;
         const distance = event.clientX - pointerStartRef.current;
         pointerStartRef.current = null;
         if (Math.abs(distance) < 35) return;
+        lastSwipeAtRef.current = Date.now();
         if (distance > 0) goPrevious(); else goNext();
       }}
       onPointerCancel={() => { pointerStartRef.current = null; }}
       style={{
-      margin: "10px 10px 0", borderRadius: 16, overflow: "hidden", position: "relative", height: 104,
+      margin: "10px 10px 0", borderRadius: 16, overflow: "hidden", position: "relative", height: 84,
       border: "1px solid rgba(255,255,255,0.55)", boxShadow: "0 8px 24px rgba(43,29,20,0.10)", flexShrink: 0,
+      cursor: validImages.length > 1 ? "pointer" : "default",
     }}>
       {validImages.map((url, i) => (
         <BannerSlide key={url + i} url={url} active={i === index} position={i + 1} total={validImages.length} />
       ))}
       {validImages.length > 1 && (
-        <>
-          <button
-            type="button"
-            className="banner-control"
-            aria-label="แบนเนอร์ก่อนหน้า"
-            onClick={goPrevious}
-            style={{ position: "absolute", left: 7, top: "50%", transform: "translateY(-50%)" }}
-          >
-            <i className="ti ti-chevron-left" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className="banner-control"
-            aria-label="แบนเนอร์ถัดไป"
-            onClick={goNext}
-            style={{ position: "absolute", right: 7, top: "50%", transform: "translateY(-50%)" }}
-          >
-            <i className="ti ti-chevron-right" aria-hidden="true" />
-          </button>
-          <div style={{ position: "absolute", bottom: 1, left: 43, right: 43, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            {validImages.length <= 7 ? validImages.map((_, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  className="banner-dot"
-                  aria-label={`ไปแบนเนอร์ที่ ${i + 1}`}
-                  aria-current={i === index ? "true" : undefined}
-                  onClick={() => goTo(i)}
-                />
-              )) : (
-                <span className="banner-counter" aria-live="polite">{index + 1} / {validImages.length}</span>
-              )}
-          </div>
-          <button
-            type="button"
-            className="banner-control"
-            aria-label={paused ? "เล่นแบนเนอร์อัตโนมัติ" : "หยุดแบนเนอร์อัตโนมัติ"}
-            aria-pressed={paused}
-            onClick={() => setPaused((value) => !value)}
-            style={{ position: "absolute", right: 7, bottom: 5, width: 28, height: 28 }}
-          >
-            <i className={`ti ti-${paused ? "player-play" : "player-pause"}`} aria-hidden="true" />
-          </button>
-        </>
+        <div aria-hidden="true" style={{ position: "absolute", bottom: 6, left: 0, right: 0, display: "flex", justifyContent: "center", gap: 4, pointerEvents: "none" }}>
+          {validImages.length <= 12 ? validImages.map((_, i) => (
+              <span key={i} style={{
+                width: i === index ? 14 : 5, height: 5, borderRadius: 3,
+                background: i === index ? "#fff" : "rgba(255,255,255,0.55)", transition: "width .25s ease",
+                boxShadow: "0 1px 3px rgba(0,0,0,.2)",
+              }} />
+            )) : (
+              <span style={{ padding: "2px 7px", borderRadius: 999, color: "#fff", background: "rgba(6,51,96,.58)", fontSize: 9.5, fontWeight: 700 }}>
+                {index + 1} / {validImages.length}
+              </span>
+            )}
+        </div>
       )}
     </section>
   );
