@@ -1212,11 +1212,13 @@ const POS = {
 
 // ระดับสมาชิกล้อธีมคั่วกาแฟ คำนวณจาก lifetimeBeans (เมล็ดสะสมตลอดกาล ไม่ลดตอนแลกของ) — เรียงจากสูงไปต่ำ
 // เพื่อหาระดับปัจจุบันง่ายๆ ด้วย .find() ตัวแรกที่ min ต่ำกว่าหรือเท่ากับที่มี เป็นแค่ป้ายแสดงสถานะ ยังไม่มีสิทธิพิเศษผูกกับระดับ
+// สี tier แต่ละระดับผ่าน WCAG AA กับพื้นหลัง bg ของตัวเอง (ทดสอบไว้แล้วตอนออกแบบ badge เดิม) — ไอคอนของแต่ละระดับ
+// อยู่ใน ROAST_ICONS (custom SVG set ด้านบน) ไม่ใช้ emoji แล้ว
 const LOYALTY_TIERS = [
-  { id: "reserve", label: "Reserve", min: 100, color: "#8B5E00", bg: "#FBF0D9", icon: "💎" },
-  { id: "dark", label: "Dark Roast", min: 50, color: "#3B2410", bg: "#EDE4DA", icon: "⚫" },
-  { id: "medium", label: "Medium Roast", min: 20, color: "#B45309", bg: "#FFF1DE", icon: "🟤" },
-  { id: "light", label: "Light Roast", min: 0, color: "#8A6D3B", bg: "#FAF3E4", icon: "🌱" },
+  { id: "reserve", label: "Reserve", min: 100, color: "#8B5E00", bg: "#FBF0D9" },
+  { id: "dark", label: "Dark Roast", min: 50, color: "#3B2410", bg: "#EDE4DA" },
+  { id: "medium", label: "Medium Roast", min: 20, color: "#B45309", bg: "#FFF1DE" },
+  { id: "light", label: "Light Roast", min: 0, color: "#8A6D3B", bg: "#FAF3E4" },
 ];
 function loyaltyTierFor(lifetimeBeans) {
   return LOYALTY_TIERS.find((t) => (lifetimeBeans || 0) >= t.min) || LOYALTY_TIERS[LOYALTY_TIERS.length - 1];
@@ -1653,17 +1655,188 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
   );
 }
 
+// ===== Custom icon system เฉพาะหน้า "ลูกค้า / เมล็ดสะสม" =====
+// เส้น rounded outline + subtle fill บน viewBox 24x24 ทั้งชุด ให้ดูเป็น family เดียวกัน แยกจาก tabler-icons font
+// ที่ใช้ทั่วทั้งแอป เพราะหน้านี้ต้องการชุดไอคอนที่ออกแบบเฉพาะแบรนด์ (ดูโจทย์: ห้ามผสมคนละ library/stroke style กัน)
+// opacity .18 = ค่ามาตรฐานของ "subtle fill" ประดับ (รูปที่ 2 ที่ซ้อนอยู่ข้างหลัง) ใช้เหมือนกันทุกไอคอนในชุดนี้
+// ยกเว้นชุดระดับสมาชิก (Light/Medium/Dark Roast) ที่ opacity ของ fill เมล็ดมีความหมายจริง (สื่อระดับการคั่วเข้ม-อ่อน)
+const LOYALTY_ICON_SUBTLE_OPACITY = 0.18;
+
+function LoyaltyIconBase({ size = 20, color, strokeWidth = 1.75, className, "aria-label": ariaLabel, children }) {
+  return (
+    <svg
+      width={size} height={size} viewBox="0 0 24 24" fill="none"
+      stroke={color || "currentColor"} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round"
+      className={className}
+      role={ariaLabel ? "img" : undefined}
+      aria-label={ariaLabel}
+      aria-hidden={ariaLabel ? undefined : "true"}
+    >
+      {children}
+    </svg>
+  );
+}
+
+// 1. ลูกค้า — คนสองคนโค้งมน คนหลังเล็กกว่า/จางกว่าแบบ subtle fill กันดูแข็งเหมือนไอคอนองค์กร
+function IconCustomers(props) {
+  return (
+    <LoyaltyIconBase {...props}>
+      <circle cx="9" cy="8.2" r="3" />
+      <path d="M3.8 19c0-3.1 2.3-5.3 5.2-5.3s5.2 2.2 5.2 5.3" />
+      <circle cx="16.3" cy="8.8" r="2.4" opacity={LOYALTY_ICON_SUBTLE_OPACITY} fill="currentColor" stroke="none" />
+      <path d="M15.4 13.3c2.2.4 3.6 2.2 3.8 4.9" opacity={LOYALTY_ICON_SUBTLE_OPACITY * 3} />
+    </LoyaltyIconBase>
+  );
+}
+
+// 2. เมล็ดสะสม — เมล็ดกาแฟทรงรี 2 เมล็ดซ้อนกัน แต่ละเมล็ดมีร่องกลางโค้งชัดเจน (ใช้ทรงรีเอียง+เส้นร่อง ซึ่งเป็นภาษาภาพ
+// มาตรฐานของ "เมล็ดกาแฟ" กันสับสนกับเมล็ดพืช/ยาเม็ดที่มักเป็นวงกลม/แคปซูลเรียบไม่มีร่อง)
+function IconLoyaltyBeans(props) {
+  return (
+    <LoyaltyIconBase {...props}>
+      <g transform="rotate(-24 15 9)" opacity={LOYALTY_ICON_SUBTLE_OPACITY * 4.5}>
+        <ellipse cx="15" cy="9" rx="4.6" ry="3.1" fill="currentColor" stroke="none" />
+      </g>
+      <g transform="rotate(-24 15 9)">
+        <ellipse cx="15" cy="9" rx="4.6" ry="3.1" opacity="0.75" />
+        <path d="M15 6.4c-1.4.9-1.4 4.3 0 5.2" opacity="0.75" />
+      </g>
+      <g transform="rotate(-24 10 15)">
+        <ellipse cx="10" cy="15" rx="5.4" ry="3.6" />
+        <path d="M10 11.9c-1.6 1-1.6 5.2 0 6.2" />
+      </g>
+    </LoyaltyIconBase>
+  );
+}
+
+// 3. รางวัลพร้อมใช้ — แก้วเครื่องดื่ม (ฝาโดม + หลอด กันดูเป็นถังขยะ) + ดาวเล็กที่มุม ไม่ใช้กล่องของขวัญ
+function IconRewardReady(props) {
+  return (
+    <LoyaltyIconBase {...props}>
+      <path d="M7.3 9.6h9l-1.1 8.4a2 2 0 0 1-2 1.7h-2.8a2 2 0 0 1-2-1.7l-1.1-8.4Z" />
+      <path d="M9.8 13.2h4.6" opacity="0.85" />
+      <ellipse cx="11.8" cy="9.6" rx="4.5" ry="1.35" />
+      <path d="M14.3 8.6 15.9 5" />
+      <path d="M18 3.9l.5 1.2 1.3.2-.9.9.2 1.3-1.1-.6-1.1.6.2-1.3-.9-.9 1.3-.2z" fill="currentColor" opacity={LOYALTY_ICON_SUBTLE_OPACITY * 4.5} stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" />
+    </LoyaltyIconBase>
+  );
+}
+
+// 4. ลูกค้ากลับมาซื้อซ้ำ — แก้วกาแฟ + ลูกศรวงเดียววนกลับ ตัดรายละเอียดให้เหลือน้อยที่สุดเพื่อให้หัวลูกศรยังชัดตอนย่อเล็ก (16px inline)
+function IconRepeatCustomer(props) {
+  return (
+    <LoyaltyIconBase {...props}>
+      <path d="M8.4 11h7.2l-.7 5.8a1.7 1.7 0 0 1-1.7 1.5h-2.4a1.7 1.7 0 0 1-1.7-1.5L8.4 11Z" />
+      <path d="M8.1 11 7.7 9.4h8l-.4 1.6" />
+      <path d="M17.8 8.6a6 6 0 1 0-.5 5.8" />
+      <path d="M19.4 6.4l-1 2.4-2.4-.7" />
+    </LoyaltyIconBase>
+  );
+}
+
+// 5. Light Roast — ต้นอ่อนใบ 2 ใบ เส้นบางเบา สื่อ "อ่อน/เบา" ที่สุดในระดับสมาชิก
+function IconRoastLight(props) {
+  return (
+    <LoyaltyIconBase {...props} strokeWidth={props.strokeWidth || 1.5}>
+      <path d="M12 20V11" />
+      <path d="M12 13c0-3 2-4.6 5-4.8-.3 3-2.3 4.7-5 4.8Z" opacity="0.9" />
+      <path d="M12 15.5c0-2.6-1.8-4-4.4-4.2.3 2.6 2 4.1 4.4 4.2Z" opacity="0.9" />
+    </LoyaltyIconBase>
+  );
+}
+
+// 6. Medium Roast — เมล็ดกาแฟ fill ประมาณครึ่งเดียว (น้ำหนักภาพระดับกลาง แยกจาก Light/Dark ชัดเจน)
+function IconRoastMedium(props) {
+  return (
+    <LoyaltyIconBase {...props}>
+      <path d="M6.3 12c0-3.7 2.6-6.6 5.7-6.6S17.7 8.3 17.7 12s-2.6 6.6-5.7 6.6S6.3 15.7 6.3 12Z" />
+      <path d="M12 5.4c-3.1 0-5.7 2.9-5.7 6.6 0 1.8.6 3.4 1.6 4.6a6.9 6.9 0 0 0 4.1-11.2Z" fill="currentColor" opacity="0.5" stroke="none" />
+      <path d="M9 15.4c.9-2.6 1.7-5.2 2-8.6" opacity="0.9" />
+    </LoyaltyIconBase>
+  );
+}
+
+// 7. Dark Roast — เมล็ดกาแฟ fill มากกว่า Medium แต่ร่องกลางยังต้องเห็นชัด (ไม่ใช่วงกลมดำล้วน)
+function IconRoastDark(props) {
+  return (
+    <LoyaltyIconBase {...props}>
+      <path d="M6.3 12c0-3.7 2.6-6.6 5.7-6.6S17.7 8.3 17.7 12s-2.6 6.6-5.7 6.6S6.3 15.7 6.3 12Z" fill="currentColor" opacity="0.82" />
+      <path d="M9 15.4c.9-2.6 1.7-5.2 2-8.6" stroke="#fff" strokeOpacity="0.9" />
+    </LoyaltyIconBase>
+  );
+}
+
+// 8. Reserve — ทรงเพชรผสมร่องเมล็ดกาแฟ ให้ความรู้สึกพรีเมียม เรียบง่ายพอใช้ใน badge เล็กได้
+function IconReserve(props) {
+  return (
+    <LoyaltyIconBase {...props}>
+      <path d="M12 3.6 18.4 9 12 20.4 5.6 9Z" />
+      <path d="M5.6 9h12.8" opacity="0.85" />
+      <path d="M9.6 9 12 3.6l2.4 5.4-2.4 11.4Z" opacity={LOYALTY_ICON_SUBTLE_OPACITY * 4.5} fill="currentColor" stroke="none" />
+    </LoyaltyIconBase>
+  );
+}
+
+// 9. ตั้งค่ารางวัล — ตั๋ว/บัตรกำนัลรอยปรุตรงกลาง + เฟืองเล็กที่มุม สื่อ "ตั้งค่าเงื่อนไขรางวัล" ชัดกว่าเฟืองเดี่ยวลอยๆ
+function IconRewardSettings(props) {
+  return (
+    <LoyaltyIconBase {...props}>
+      <path d="M3.8 8.4a1.6 1.6 0 0 1 1.6-1.6h9.4a1.6 1.6 0 0 1 1.6 1.6v1a1.4 1.4 0 0 0 0 2.8v1a1.6 1.6 0 0 1-1.6 1.6H5.4A1.6 1.6 0 0 1 3.8 14.2v-1a1.4 1.4 0 0 0 0-2.8Z" />
+      <path d="M9.6 6.8v9" strokeDasharray="1.6 2" opacity="0.8" />
+      <circle cx="18.2" cy="16.4" r="3.1" opacity={LOYALTY_ICON_SUBTLE_OPACITY * 5.5} fill="currentColor" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M18.2 14.9v.6M18.2 17.3v.6M16.7 16.4h.6M19.1 16.4h.6M17.2 15.4l.4.4M18.8 17l.4.4M19.2 15.4l-.4.4M17.6 17l-.4.4" strokeWidth="1.2" />
+    </LoyaltyIconBase>
+  );
+}
+
+// 10. เพิ่มลูกค้า — silhouette คนเดียว + เครื่องหมายบวกที่มุม ชัดแต่ไม่แย่งซีนรูปคน
+function IconAddCustomer(props) {
+  return (
+    <LoyaltyIconBase {...props}>
+      <circle cx="10" cy="8.4" r="3.4" />
+      <path d="M4.4 19.4c0-3.4 2.5-5.8 5.6-5.8 1 0 1.9.2 2.7.7" />
+      <circle cx="18" cy="17.2" r="3.4" fill="currentColor" opacity={LOYALTY_ICON_SUBTLE_OPACITY * 2.5} stroke="currentColor" strokeWidth="1.5" />
+      <path d="M18 15.6v3.2M16.4 17.2h3.2" strokeWidth="1.5" />
+    </LoyaltyIconBase>
+  );
+}
+
+// 11. ดูรายละเอียดลูกค้า — ลูกศรชี้ขวาในวงกลม ใช้สัญลักษณ์เดียวนี้ให้สม่ำเสมอทุกจุดที่เปิดรายละเอียด
+function IconCustomerDetails(props) {
+  return (
+    <LoyaltyIconBase {...props}>
+      <circle cx="12" cy="12" r="8.4" />
+      <path d="M10.2 8.4 13.8 12l-3.6 3.6" />
+    </LoyaltyIconBase>
+  );
+}
+
+// 12. ตัวเลือกเพิ่มเติม — จุด 3 จุดแนวตั้ง ระยะห่างเท่ากัน (พื้นที่กดจริงกำหนดที่ปุ่มครอบข้างนอก ไม่ใช่ตัว SVG)
+function IconMoreActions(props) {
+  return (
+    <LoyaltyIconBase {...props} strokeWidth={props.strokeWidth || 2.2}>
+      <circle cx="12" cy="5.5" r="1.15" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1.15" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="18.5" r="1.15" fill="currentColor" stroke="none" />
+    </LoyaltyIconBase>
+  );
+}
+
+const ROAST_ICONS = { light: IconRoastLight, medium: IconRoastMedium, dark: IconRoastDark, reserve: IconReserve };
+
 // รายชื่อลูกค้า/เมล็ดสะสม — อ่านจาก customers/{uid} (คนละโหนดจาก data ก้อนใหญ่ ดู awardLoyaltyBeans ว่าทำไม)
 // เรียงคนสะสมเยอะสุดขึ้นก่อน ค้นหาด้วยเบอร์/ชื่อได้ ปรับเมล็ดมือได้เผื่อกรณีพิเศษ
 function TierBadge({ lifetimeBeans, size }) {
   const tier = loyaltyTierFor(lifetimeBeans);
   const dense = size === "sm";
+  const RoastIcon = ROAST_ICONS[tier.id];
   return (
     <span style={{
       display: "inline-flex", alignItems: "center", gap: 4, fontWeight: 700, borderRadius: 999, flexShrink: 0,
       fontSize: dense ? 10.5 : 12, padding: dense ? "3px 8px" : "4px 10px", color: tier.color, background: tier.bg,
     }}>
-      {tier.icon} {tier.label}
+      <RoastIcon size={16} color={tier.color} aria-label={`ระดับ ${tier.label}`} />
+      {tier.label}
     </span>
   );
 }
@@ -1716,7 +1889,10 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans,
         .loy-goal-input { padding: 8px 10px; border-radius: 10px; border: 1px solid ${POS.border}; font-size: 13.5px; width: 80px; font-family: inherit; }
       `}</style>
 
-      <SectionTitle icon="coffee" text="ลูกค้า / เมล็ดสะสม" />
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, color: "var(--espresso-3)" }}>
+        <IconLoyaltyBeans size={16} aria-label="ลูกค้า / เมล็ดสะสม" />
+        <span style={{ fontSize: 12.5, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".03em" }}>ลูกค้า / เมล็ดสะสม</span>
+      </div>
 
       {backfillEligibleCount > 0 && (
         <div style={{
@@ -1733,26 +1909,45 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans,
       )}
 
       <div className="loy-stats">
-        <div className="loy-stat">
-          <div style={{ fontSize: 12, color: POS.gray, fontWeight: 600 }}>ลูกค้าทั้งหมด</div>
-          <div style={{ fontSize: 24, fontWeight: 700, color: POS.navy, marginTop: 4 }}>{totalCustomers} คน</div>
+        <div className="loy-stat" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 46, height: 46, borderRadius: "50%", background: POS.chipBg, color: POS.navy, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <IconCustomers size={24} aria-label="ลูกค้าทั้งหมด" />
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: POS.gray, fontWeight: 600 }}>ลูกค้าทั้งหมด</div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: POS.navy, marginTop: 2 }}>{totalCustomers} คน</div>
+          </div>
         </div>
-        <div className="loy-stat">
-          <div style={{ fontSize: 12, color: POS.gray, fontWeight: 600 }}>เมล็ดสะสมค้างอยู่ (ยังไม่แลก)</div>
-          <div style={{ fontSize: 24, fontWeight: 700, color: POS.primary, marginTop: 4 }}>🫘 {totalBeansOut}</div>
+        <div className="loy-stat" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 46, height: 46, borderRadius: "50%", background: "#F7E9DD", color: "#9A4D16", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <IconLoyaltyBeans size={24} aria-label="เมล็ดสะสมค้างอยู่" />
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: POS.gray, fontWeight: 600 }}>เมล็ดสะสมค้างอยู่ (ยังไม่แลก)</div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: "#9A4D16", marginTop: 2 }}>{totalBeansOut}</div>
+          </div>
         </div>
-        <div className="loy-stat">
-          <div style={{ fontSize: 12, color: POS.gray, fontWeight: 600 }}>พร้อมแลกฟรีตอนนี้</div>
-          <div style={{ fontSize: 24, fontWeight: 700, color: "#15803D", marginTop: 4 }}>{eligibleCount} คน</div>
+        <div className="loy-stat" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 46, height: 46, borderRadius: "50%", background: "#E1F2E7", color: "#237A43", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <IconRewardReady size={24} aria-label="พร้อมแลกฟรีตอนนี้" />
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: POS.gray, fontWeight: 600 }}>พร้อมแลกฟรีตอนนี้</div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: "#237A43", marginTop: 2 }}>{eligibleCount} คน</div>
+          </div>
         </div>
       </div>
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
-        {LOYALTY_TIERS.slice().reverse().map((t) => (
-          <span key={t.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12.5, fontWeight: 600, color: t.color, background: t.bg, borderRadius: 999, padding: "5px 12px" }}>
-            {t.icon} {t.label} · {tierCounts[t.id]} คน
-          </span>
-        ))}
+        {LOYALTY_TIERS.slice().reverse().map((t) => {
+          const RoastIcon = ROAST_ICONS[t.id];
+          return (
+            <span key={t.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12.5, fontWeight: 600, color: t.color, background: t.bg, borderRadius: 999, padding: "5px 12px" }}>
+              <RoastIcon size={16} color={t.color} aria-label={t.label} />
+              {t.label} · {tierCounts[t.id]} คน
+            </span>
+          );
+        })}
       </div>
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
@@ -1762,6 +1957,7 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans,
           style={{ padding: "9px 14px", borderRadius: 12, border: `1px solid ${POS.border}`, fontSize: 13.5, minWidth: 220, fontFamily: "inherit" }}
         />
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <IconRewardSettings size={16} color={POS.gray} aria-label="ตั้งค่าเงื่อนไขรางวัล" />
           <span style={{ fontSize: 13, color: POS.gray, fontWeight: 600 }}>สะสมกี่เมล็ดแลกฟรี 1 แก้ว</span>
           <input className="loy-goal-input" value={goalInput} onChange={(e) => setGoalInput(e.target.value)} inputMode="numeric" />
           <button className="cbtn cbtn-accent" style={{ padding: "8px 14px", fontSize: 13 }} onClick={saveGoal}>บันทึก</button>
@@ -1774,18 +1970,30 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans,
         <div>
           {filtered.map((c) => (
             <div key={c.phone} className="loy-row">
-              <div style={{ width: 40, height: 40, borderRadius: "50%", background: POS.chipBg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>🫘</div>
+              <div style={{ width: 40, height: 40, borderRadius: "50%", background: "#F7E9DD", color: "#9A4D16", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <IconLoyaltyBeans size={20} aria-label="เมล็ดสะสม" />
+              </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <span style={{ fontWeight: 700, fontSize: 14, color: POS.navy }}>{c.name || "(ไม่ทราบชื่อ)"} · {c.phone}</span>
                   <TierBadge lifetimeBeans={c.lifetimeBeans} size="sm" />
                 </div>
-                <div style={{ fontSize: 12, color: POS.gray, marginTop: 1 }}>สะสม {c.beans || 0} / {loyaltyBeanGoal} เมล็ด · รวมตลอดกาล {c.lifetimeBeans || 0} เมล็ด</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: POS.gray, marginTop: 1 }}>
+                  <span>สะสม {c.beans || 0} / {loyaltyBeanGoal} เมล็ด</span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+                    <IconRepeatCustomer size={16} aria-label="ยอดสะสมตลอดกาล" />
+                    รวมตลอดกาล {c.lifetimeBeans || 0} เมล็ด
+                  </span>
+                </div>
               </div>
               {(c.beans || 0) >= loyaltyBeanGoal && (
-                <span style={{ fontSize: 11, fontWeight: 700, color: "#15803D", background: "#EAF7EE", borderRadius: 999, padding: "4px 10px", flexShrink: 0 }}>แลกฟรีได้</span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700, color: "#237A43", background: "#E1F2E7", borderRadius: 999, padding: "4px 10px", flexShrink: 0 }}>
+                  <IconRewardReady size={16} aria-label="พร้อมแลกฟรี" />แลกฟรีได้
+                </span>
               )}
-              <button className="cbtn" style={{ padding: "7px 12px", fontSize: 12.5, flexShrink: 0 }} onClick={() => setDetailFor(c)}>รายละเอียด</button>
+              <button className="cbtn" style={{ padding: "7px 12px", fontSize: 12.5, flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 5 }} onClick={() => setDetailFor(c)} title="ดูรายละเอียดลูกค้า">
+                <IconCustomerDetails size={20} aria-label="ดูรายละเอียดลูกค้า" />รายละเอียด
+              </button>
               <button className="cbtn" style={{ padding: "7px 12px", fontSize: 12.5, flexShrink: 0 }} onClick={() => setAdjustFor(c)}>ปรับเมล็ด</button>
             </div>
           ))}
