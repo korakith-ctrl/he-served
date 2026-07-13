@@ -739,6 +739,19 @@ function ShopApp({ uid, user }) {
     updateData((next) => { next.settings.loyaltyBeanGoal = Math.max(1, Number(goal) || 10); });
   }
 
+  // ให้เมล็ดย้อนหลังสำหรับออเดอร์ "เสร็จ" เก่าที่มีมาก่อนระบบสะสมเมล็ดจะเปิดใช้งาน (ยังไม่เคยติดแฟลก beansAwarded)
+  // ใช้ awardLoyaltyBeans ตัวเดียวกับที่ทำงานสด กันตรรกะนับเมล็ดเพี้ยนไปคนละทางกับของจริง — กดซ้ำได้ปลอดภัย
+  // เพราะออเดอร์ที่เคยติดแฟลกไปแล้วจะไม่ถูกนับซ้ำอีก
+  const backfillEligibleOrders = orders.filter((o) => o.status === "done" && !o.beansAwarded && (o.customerPhone || "").replace(/\D/g, "").length > 0);
+  function backfillLoyaltyBeans() {
+    if (backfillEligibleOrders.length === 0) { showToast("ไม่มีออเดอร์เก่าที่ต้องคำนวณเพิ่มแล้ว"); return; }
+    for (const o of backfillEligibleOrders) {
+      update(ref(db, `orders/${uid}/${o.id}`), { beansAwarded: true }).catch(() => {});
+      awardLoyaltyBeans(o);
+    }
+    showToast(`คำนวณเมล็ดย้อนหลังจาก ${backfillEligibleOrders.length} ออเดอร์เก่าให้แล้ว`);
+  }
+
   const activeTabInfo = TABS.find((t) => t.id === tab);
   const pendingOrderCount = orders.filter((o) => o.status === "pending").length;
 
@@ -919,7 +932,7 @@ function ShopApp({ uid, user }) {
           {tab === "promotions" && <PromotionsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "reports" && <ReportsPanel data={dataForDisplay} />}
-          {tab === "loyalty" && <LoyaltyPanel customers={customers} loyaltyBeanGoal={data.settings.loyaltyBeanGoal} adjustCustomerBeans={adjustCustomerBeans} updateLoyaltyGoal={updateLoyaltyGoal} showToast={showToast} />}
+          {tab === "loyalty" && <LoyaltyPanel customers={customers} loyaltyBeanGoal={data.settings.loyaltyBeanGoal} adjustCustomerBeans={adjustCustomerBeans} updateLoyaltyGoal={updateLoyaltyGoal} showToast={showToast} backfillEligibleCount={backfillEligibleOrders.length} backfillLoyaltyBeans={backfillLoyaltyBeans} />}
           {tab === "options" && <OptionGroupsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "settings" && <SettingsPanel data={data} updateData={updateData} showToast={showToast} uid={uid} />}
         </main>
@@ -1623,11 +1636,12 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
 
 // รายชื่อลูกค้า/เมล็ดสะสม — อ่านจาก customers/{uid} (คนละโหนดจาก data ก้อนใหญ่ ดู awardLoyaltyBeans ว่าทำไม)
 // เรียงคนสะสมเยอะสุดขึ้นก่อน ค้นหาด้วยเบอร์/ชื่อได้ ปรับเมล็ดมือได้เผื่อกรณีพิเศษ
-function LoyaltyPanel({ customers, loyaltyBeanGoal, adjustCustomerBeans, updateLoyaltyGoal, showToast }) {
+function LoyaltyPanel({ customers, loyaltyBeanGoal, adjustCustomerBeans, updateLoyaltyGoal, showToast, backfillEligibleCount, backfillLoyaltyBeans }) {
   const [search, setSearch] = useState("");
   const [goalInput, setGoalInput] = useState(String(loyaltyBeanGoal));
   const [adjustFor, setAdjustFor] = useState(null);
   const [adjustAmount, setAdjustAmount] = useState("1");
+  const [confirmBackfill, setConfirmBackfill] = useState(false);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -1664,6 +1678,20 @@ function LoyaltyPanel({ customers, loyaltyBeanGoal, adjustCustomerBeans, updateL
       `}</style>
 
       <SectionTitle icon="coffee" text="ลูกค้า / เมล็ดสะสม" />
+
+      {backfillEligibleCount > 0 && (
+        <div style={{
+          display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10,
+          background: "#FFF4E5", border: "1px solid #FBD5B5", borderRadius: 16, padding: "12px 16px", marginBottom: 16,
+        }}>
+          <div style={{ fontSize: 13, color: "#92400E" }}>
+            <b>พบออเดอร์เก่าที่ทำเสร็จแล้ว {backfillEligibleCount} รายการ</b> ที่มีเบอร์โทรลูกค้า แต่ยังไม่เคยถูกนับเป็นเมล็ดสะสม (เพราะเป็นออเดอร์ก่อนระบบนี้เปิดใช้งาน)
+          </div>
+          <button className="cbtn cbtn-accent" style={{ padding: "8px 14px", fontSize: 13, flexShrink: 0 }} onClick={() => setConfirmBackfill(true)}>
+            คำนวณเมล็ดจากประวัติออเดอร์
+          </button>
+        </div>
+      )}
 
       <div className="loy-stats">
         <div className="loy-stat">
@@ -1725,6 +1753,21 @@ function LoyaltyPanel({ customers, loyaltyBeanGoal, adjustCustomerBeans, updateL
             <div style={{ display: "flex", gap: 8 }}>
               <button className="cbtn cbtn-accent" style={{ flex: 1, padding: "9px 0" }} onClick={() => submitAdjust(1)}>+ เพิ่ม</button>
               <button className="cbtn cbtn-danger" style={{ flex: 1, padding: "9px 0" }} onClick={() => submitAdjust(-1)}>− หัก</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmBackfill && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }} onClick={() => setConfirmBackfill(false)}>
+          <div style={{ background: "#fff", borderRadius: 18, padding: 22, width: 340 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: POS.navy, marginBottom: 8 }}>คำนวณเมล็ดจากประวัติออเดอร์?</div>
+            <div style={{ fontSize: 13, color: POS.gray, marginBottom: 16, lineHeight: 1.5 }}>
+              จะรวมจำนวนแก้วจากออเดอร์เก่าที่ทำเสร็จแล้ว {backfillEligibleCount} รายการ (ที่มีเบอร์โทรลูกค้า) มาบวกเข้าเมล็ดสะสมของแต่ละคนให้ ทำครั้งเดียวพอ กดซ้ำได้แต่จะไม่นับออเดอร์เดิมซ้ำ
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="cbtn" style={{ flex: 1, padding: "9px 0" }} onClick={() => setConfirmBackfill(false)}>ยกเลิก</button>
+              <button className="cbtn cbtn-accent" style={{ flex: 1, padding: "9px 0" }} onClick={() => { backfillLoyaltyBeans(); setConfirmBackfill(false); }}>ยืนยัน</button>
             </div>
           </div>
         </div>
