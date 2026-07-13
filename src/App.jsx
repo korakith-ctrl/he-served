@@ -165,7 +165,7 @@ function normalizeData(raw) {
   return {
     // Firebase คืนอาเรย์ที่มี index ขาดหายเป็นช่องว่าง null ได้ (เช่นลบ element กลางอาเรย์) — กรอง null/undefined
     // ทิ้งก่อนเสมอ ไม่งั้น .map()/for-of ตัวไหนก็ตายเมื่อเจอ element ที่หายไปกลางอาเรย์
-    ingredients: (raw.ingredients || []).filter(Boolean).map((i) => ({ ...i, components: i.components || [] })),
+    ingredients: (raw.ingredients || []).filter(Boolean).map((i) => ({ ...i, components: i.components || [], unlimited: i.unlimited || false })),
     menus: (raw.menus || []).filter(Boolean).map((m) => ({
       ...m, ingredients: (m.ingredients || []).filter(Boolean), optionGroupIds: (m.optionGroupIds || []).filter(Boolean),
       available: m.available ?? true, category: m.category || "อื่นๆ", imageUrl: m.imageUrl || "",
@@ -631,7 +631,8 @@ function ShopApp({ uid, user }) {
     updateData((next) => {
       for (const line of lines) {
         const ing = next.ingredients.find((i) => i.id === line.ingredientId);
-        if (ing) ing.stockQty = round4(ing.stockQty - line.qty * qty);
+        // วัตถุดิบ "ไม่จำกัดสต็อก" (เช่น น้ำประปากรอง/น้ำแข็ง) ไม่ตัดสต็อก — ต้นทุนในสูตรยังคิดตามปกติ
+        if (ing && !ing.unlimited) ing.stockQty = round4(ing.stockQty - line.qty * qty);
       }
       next.sales.push({
         id: genId("sale"), timestamp: new Date().toISOString(), menuId, menuName: menu.name,
@@ -680,7 +681,7 @@ function ShopApp({ uid, user }) {
           const lines = resolveLines(itemMenu, substitutions, nextIngredientsById);
           for (const line of lines) {
             const ing = next.ingredients.find((i) => i.id === line.ingredientId);
-            if (ing) ing.stockQty = round4(ing.stockQty + line.qty * item.qty);
+            if (ing && !ing.unlimited) ing.stockQty = round4(ing.stockQty + line.qty * item.qty);
           }
         }
         next.sales = next.sales.filter((s) => s.orderId !== order.id);
@@ -1028,7 +1029,7 @@ function Dashboard({ data, setTab }) {
   const cups = todaySales.reduce((a, s) => a + s.qty, 0);
   const avgPerCup = cups > 0 ? revenue / cups : 0;
 
-  const lowStock = data.ingredients.filter((i) => i.stockQty <= i.lowStockThreshold);
+  const lowStock = data.ingredients.filter((i) => !i.unlimited && !(i.components && i.components.length > 0) && i.stockQty <= i.lowStockThreshold);
   const sortedLowStock = [...lowStock].sort((a, b) => (a.stockQty / (a.lowStockThreshold || 1)) - (b.stockQty / (b.lowStockThreshold || 1)));
   const visibleLowStock = sortedLowStock.slice(0, 6);
 
@@ -1284,6 +1285,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
     const lines = resolveLines(menu, substitutions, ingredientsById);
     for (const line of lines) {
       const ing = ingredientsById[line.ingredientId];
+      if (ing && ing.unlimited) continue;
       const reserved = cartUsage[line.ingredientId] || 0;
       if (ing && ing.stockQty - reserved < line.qty * qty) return false;
     }
@@ -2676,6 +2678,7 @@ const INV = {
 
 function invStatus(ing) {
   if (ing.components && ing.components.length > 0) return "composite";
+  if (ing.unlimited) return "unlimited";
   if (ing.stockQty <= 0) return "out";
   if (ing.stockQty <= ing.lowStockThreshold) return "low";
   return "normal";
@@ -2687,6 +2690,7 @@ function InvStatusBadge({ status }) {
     low: { bg: INV.warningSoft, color: "#B45309", icon: "alert-triangle", label: "ใกล้หมด" },
     out: { bg: INV.dangerSoft, color: "#B91C1C", icon: "alert-octagon", label: "หมดสต็อก" },
     composite: { bg: "#F3F4F6", color: "#4B5563", icon: "flask", label: "คำนวณอัตโนมัติ" },
+    unlimited: { bg: INV.primarySoft, color: INV.primaryDark, icon: "infinity", label: "ไม่จำกัด" },
   };
   const t = map[status] || map.normal;
   return (
@@ -2892,10 +2896,11 @@ function IngredientsPanel({ data, updateData, showToast }) {
     });
   }
 
-  const nonComposite = data.ingredients.filter((i) => !(i.components && i.components.length > 0));
-  const lowCount = nonComposite.filter((i) => i.stockQty > 0 && i.stockQty <= i.lowStockThreshold).length;
-  const outCount = nonComposite.filter((i) => i.stockQty <= 0).length;
-  const invValue = nonComposite.reduce((s, i) => s + i.stockQty * i.costPerUnit, 0);
+  // วัตถุดิบ "จับต้องได้จริง" = ไม่ใช่ของผสม และไม่ใช่ของไม่จำกัด (น้ำประปา/น้ำแข็ง) — ใช้คิดมูลค่าคลัง/แจ้งเตือน
+  const tracked = data.ingredients.filter((i) => !(i.components && i.components.length > 0) && !i.unlimited);
+  const lowCount = tracked.filter((i) => i.stockQty > 0 && i.stockQty <= i.lowStockThreshold).length;
+  const outCount = tracked.filter((i) => i.stockQty <= 0).length;
+  const invValue = tracked.reduce((s, i) => s + i.stockQty * i.costPerUnit, 0);
   const catCount = CATEGORIES.filter((c) => data.ingredients.some((i) => i.category === c.id)).length;
 
   const renderedCats = CATEGORIES
@@ -3038,7 +3043,8 @@ function IngredientsPanel({ data, updateData, showToast }) {
                   {items.map((ing) => {
                     const isMix = ing.components && ing.components.length > 0;
                     const status = invStatus(ing);
-                    const stockLow = !isMix && ing.stockQty <= ing.lowStockThreshold;
+                    const noStock = isMix || ing.unlimited; // ไม่ติดตามจำนวนสต็อก
+                    const stockLow = !noStock && ing.stockQty <= ing.lowStockThreshold;
                     return (
                       <tr key={ing.id}>
                         <td className="inv-name-cell" data-label="รายการ">
@@ -3049,8 +3055,8 @@ function IngredientsPanel({ data, updateData, showToast }) {
                             </span>
                           )}
                         </td>
-                        <td data-label="สต็อก" style={{ whiteSpace: "nowrap", fontWeight: stockLow ? 700 : 500, color: isMix ? INV.gray : stockLow ? INV.danger : INV.ink }}>
-                          {isMix ? "ตัดตามสัดส่วน" : ing.stockQty}
+                        <td data-label="สต็อก" style={{ whiteSpace: "nowrap", fontWeight: stockLow ? 700 : 500, color: noStock ? INV.gray : stockLow ? INV.danger : INV.ink }}>
+                          {isMix ? "ตัดตามสัดส่วน" : ing.unlimited ? "ไม่จำกัด" : ing.stockQty}
                         </td>
                         <td data-label="หน่วย" style={{ color: INV.gray, whiteSpace: "nowrap" }}>{isMix ? "—" : UNITS[ing.unit]}</td>
                         <td data-label="ต้นทุน/หน่วย" style={{ whiteSpace: "nowrap" }}>฿{money(isMix ? compositeCostPerUnit(ing, ingredientsById) : ing.costPerUnit)}<span style={{ color: INV.gray }}>/{UNITS[ing.unit]}</span></td>
@@ -3058,12 +3064,12 @@ function IngredientsPanel({ data, updateData, showToast }) {
                         <td data-label="สถานะ"><InvStatusBadge status={status} /></td>
                         <td className="inv-actions-cell" data-label="">
                           <div className="inv-row-actions">
-                            {!isMix && (
+                            {!noStock && (
                               <button className="inv-add-stock" onClick={() => setRestocking(ing.id)}><Icon name="plus" size={13} /> เติมสต็อก</button>
                             )}
                             <InvActionsMenu
                               items={[
-                                ...(!isMix ? [{ icon: "adjustments", label: "ปรับสต็อก (นับจริง)", onClick: () => setAdjusting(ing.id) }] : []),
+                                ...(!noStock ? [{ icon: "adjustments", label: "ปรับสต็อก (นับจริง)", onClick: () => setAdjusting(ing.id) }] : []),
                                 { icon: "edit", label: "แก้ไข", onClick: () => setDrawer({ mode: "edit", initial: ing }) },
                                 { icon: "copy", label: "ทำสำเนา", onClick: () => duplicateIngredient(ing) },
                                 { icon: "trash", label: "ลบ", danger: true, onClick: () => setConfirmDel(ing) },
@@ -3213,15 +3219,26 @@ function IngredientForm({ value, onChange, onSubmit, submitLabel, allIngredients
       {!isMix && (
         <div>
           <p className="inv-form-sec-title">สต็อก & ต้นทุน</p>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+            <OptgToggle checked={!!value.unlimited} onChange={(on) => onChange({ ...value, unlimited: on })} />
+            <span style={{ fontSize: 13.5, fontWeight: 600, color: INV.ink }}>ไม่จำกัดสต็อก</span>
+            <span title="สำหรับของที่มีไม่จำกัด เช่น น้ำประปากรอง/น้ำแข็ง — ระบบจะไม่ตัดสต็อก ไม่นับเข้ามูลค่าคลัง และไม่แจ้งเตือนใกล้หมด (ต้นทุนในสูตรยังคิดตามปกติ)" style={{ display: "inline-flex", cursor: "help", color: INV.gray }}>
+              <Icon name="info-circle" size={15} />
+            </span>
+          </div>
           <div className="inv-form-grid2">
-            <div>
-              <label style={lbl}>สต็อกปัจจุบัน</label>
-              <input className="inv-form-field" style={field} type="number" value={value.stockQty} onChange={(e) => onChange({ ...value, stockQty: Number(e.target.value) })} />
-            </div>
-            <div>
-              <label style={lbl}>แจ้งเตือนเมื่อต่ำกว่า</label>
-              <input className="inv-form-field" style={field} type="number" value={value.lowStockThreshold} onChange={(e) => onChange({ ...value, lowStockThreshold: Number(e.target.value) })} />
-            </div>
+            {!value.unlimited && (
+              <>
+                <div>
+                  <label style={lbl}>สต็อกปัจจุบัน</label>
+                  <input className="inv-form-field" style={field} type="number" value={value.stockQty} onChange={(e) => onChange({ ...value, stockQty: Number(e.target.value) })} />
+                </div>
+                <div>
+                  <label style={lbl}>แจ้งเตือนเมื่อต่ำกว่า</label>
+                  <input className="inv-form-field" style={field} type="number" value={value.lowStockThreshold} onChange={(e) => onChange({ ...value, lowStockThreshold: Number(e.target.value) })} />
+                </div>
+              </>
+            )}
             <div>
               <label style={lbl}>ต้นทุนต่อหน่วย (บาท)</label>
               <input className="inv-form-field" style={field} type="number" value={value.costPerUnit} onChange={(e) => onChange({ ...value, costPerUnit: Number(e.target.value) })} />
