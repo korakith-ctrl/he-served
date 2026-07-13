@@ -22,7 +22,7 @@
   overflow: hidden;
   border: 0;
   border-radius: 0;
-  background: #f4efe7;
+  background: transparent;
   cursor: pointer;
 }
 
@@ -49,28 +49,27 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 20px;
+  height: 20px;
   padding: 0;
   border: 0;
   color: #fff;
   background: transparent;
-  font-size: 20px;
+  font-size: 15px;
   filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .55));
   cursor: pointer;
 }
 
 .promotion-takeover__close:focus-visible,
 .promotion-takeover__visual:focus-visible {
-  outline: 3px solid rgba(255, 179, 97, .9);
-  outline-offset: 3px;
+  outline: none;
 }
 
 @media (max-height: 620px) {
   .promotion-takeover { gap: 10px; padding-top: 12px; padding-bottom: 12px; }
   .promotion-takeover__visual,
   .promotion-takeover__image { max-height: 60.8dvh; }
-  .promotion-takeover__close { width: 28px; height: 28px; }
+  .promotion-takeover__close { width: 20px; height: 20px; }
 }
 
 @media (prefers-reduced-motion: no-preference) {

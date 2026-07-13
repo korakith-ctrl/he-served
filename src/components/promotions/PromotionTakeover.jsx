@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import "./promotion-takeover.css";
 
-const DISPLAY_SECONDS = 3;
+const DISPLAY_SECONDS = 5;
 
 export default function PromotionTakeover({ promo, imageUrl, onClose, onCta }) {
   const [imageFailed, setImageFailed] = useState(false);

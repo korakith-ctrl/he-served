@@ -4293,7 +4293,7 @@ function PromoSettingsTab({ form, setForm }) {
             <img src={form.popupImageUrl} alt="ตัวอย่าง Promotion Popup" style={{ width: "100%", maxHeight: 230, objectFit: "contain", borderRadius: 12, background: "#E9EDF2" }} />
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#6B7280", fontSize: 11.5, lineHeight: 1.5 }}>
-            <Icon name="clock" size={14} style={{ flexShrink: 0 }} /> รูปจะแสดงกลางหน้าสั่งโดยไม่ครอป กดเพื่อเปิดโปรโมชั่น หรือปิดอัตโนมัติใน 3 วินาที
+            <Icon name="clock" size={14} style={{ flexShrink: 0 }} /> รูปจะแสดงกลางหน้าสั่งโดยไม่ครอป กดเพื่อเปิดโปรโมชั่น หรือปิดอัตโนมัติใน 5 วินาที
           </div>
         </div>
       )}
