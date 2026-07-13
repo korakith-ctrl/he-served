@@ -2,34 +2,44 @@
   position: fixed;
   z-index: 1200;
   inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
   min-height: 100dvh;
-  overflow: hidden;
-  background: #071c33;
-  isolation: isolate;
+  overflow-y: auto;
+  padding: max(20px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom));
+  background: rgba(13, 25, 38, .58);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
 }
 
 .promotion-takeover__visual {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  display: grid;
+  width: min(88vw, 460px);
+  max-height: min(74dvh, 760px);
   padding: 0;
-  border: 0;
-  background: #071c33;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .35);
+  border-radius: 24px;
+  background: #f4efe7;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, .38);
   cursor: pointer;
 }
 
 .promotion-takeover__image {
   display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  max-width: 100%;
+  max-height: min(74dvh, 760px);
+  object-fit: contain;
 }
 
 .promotion-takeover__placeholder {
   display: grid;
-  width: 100%;
-  height: 100%;
+  width: min(88vw, 460px);
+  height: min(65dvh, 640px);
   place-items: center;
   font-size: 84px;
   color: #ffd09c;
@@ -37,21 +47,18 @@
 }
 
 .promotion-takeover__close {
-  position: fixed;
+  position: relative;
   z-index: 2;
-  top: max(14px, env(safe-area-inset-top));
-  right: max(14px, env(safe-area-inset-right));
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  min-width: 58px;
-  height: 44px;
-  padding: 0 12px;
-  border: 1px solid rgba(255, 255, 255, .28);
-  border-radius: 999px;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  border: 1.5px solid rgba(255, 255, 255, .72);
+  border-radius: 50%;
   color: #fff;
-  background: rgba(6, 24, 43, .52);
+  background: rgba(25, 35, 45, .4);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   font-size: 19px;
@@ -59,15 +66,32 @@
 }
 
 .promotion-takeover__countdown {
-  min-width: 12px;
-  font-size: 12px;
-  font-weight: 750;
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  display: grid;
+  width: 21px;
+  height: 21px;
+  place-items: center;
+  border: 2px solid rgba(13, 25, 38, .72);
+  border-radius: 50%;
+  color: #10253a;
+  background: #fff;
+  font-size: 10px;
+  font-weight: 800;
 }
 
 .promotion-takeover__close:focus-visible,
 .promotion-takeover__visual:focus-visible {
   outline: 3px solid rgba(255, 179, 97, .9);
-  outline-offset: -5px;
+  outline-offset: 3px;
+}
+
+@media (max-height: 620px) {
+  .promotion-takeover { gap: 10px; padding-top: 12px; padding-bottom: 12px; }
+  .promotion-takeover__visual,
+  .promotion-takeover__image { max-height: 76dvh; }
+  .promotion-takeover__close { width: 44px; height: 44px; }
 }
 
 @media (prefers-reduced-motion: no-preference) {
