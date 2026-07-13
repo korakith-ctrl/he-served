@@ -2664,18 +2664,164 @@ function compositionLabel(ing, ingredientsById) {
   }).join(" + ");
 }
 
+// พาเลตสีเฉพาะหน้าวัตถุดิบ & สต็อก (Inventory) — ระบบสีความหมาย (semantic) ใช้น้ำเงินเป็นสีหลัก
+// แยกจากธีม sage/espresso ของแท็บอื่น เพื่อให้หน้านี้ดูเป็น enterprise inventory ที่อ่านง่ายในการใช้งานทุกวัน
+const INV = {
+  primary: "#2563EB", primaryDark: "#1D4ED8", primarySoft: "rgba(37,99,235,.08)",
+  success: "#16A34A", successSoft: "#EAF7EE",
+  warning: "#D97706", warningSoft: "#FFF4E5",
+  danger: "#DC2626", dangerSoft: "#FDECEC",
+  gray: "#6B7280", ink: "#111827", border: "#ECE8E2", line: "#F1EFEA",
+};
+
+function invStatus(ing) {
+  if (ing.components && ing.components.length > 0) return "composite";
+  if (ing.stockQty <= 0) return "out";
+  if (ing.stockQty <= ing.lowStockThreshold) return "low";
+  return "normal";
+}
+
+function InvStatusBadge({ status }) {
+  const map = {
+    normal: { bg: INV.successSoft, color: "#15803D", icon: "circle-check", label: "ปกติ" },
+    low: { bg: INV.warningSoft, color: "#B45309", icon: "alert-triangle", label: "ใกล้หมด" },
+    out: { bg: INV.dangerSoft, color: "#B91C1C", icon: "alert-octagon", label: "หมดสต็อก" },
+    composite: { bg: "#F3F4F6", color: "#4B5563", icon: "flask", label: "คำนวณอัตโนมัติ" },
+  };
+  const t = map[status] || map.normal;
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, background: t.bg, color: t.color, fontSize: 12, fontWeight: 700, padding: "4px 10px", borderRadius: 999, whiteSpace: "nowrap" }}>
+      <Icon name={t.icon} size={12} /> {t.label}
+    </span>
+  );
+}
+
+function InvStatCard({ icon, label, value, sub, tone }) {
+  const tones = {
+    primary: { fg: INV.primaryDark, ic: INV.primary, icbg: INV.primarySoft },
+    warning: { fg: INV.warning, ic: INV.warning, icbg: INV.warningSoft },
+    danger: { fg: INV.danger, ic: INV.danger, icbg: INV.dangerSoft },
+    success: { fg: INV.success, ic: INV.success, icbg: INV.successSoft },
+    neutral: { fg: INV.ink, ic: INV.gray, icbg: "#F3F4F6" },
+  };
+  const t = tones[tone] || tones.neutral;
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${INV.border}`, borderRadius: 16, padding: "16px 18px", boxShadow: "0 8px 24px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", gap: 10, minHeight: 104 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ width: 28, height: 28, borderRadius: 8, background: t.icbg, color: t.ic, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon name={icon} size={15} /></div>
+        <span style={{ fontSize: 12.5, fontWeight: 600, color: INV.gray }}>{label}</span>
+      </div>
+      <div>
+        <div style={{ fontSize: 24, fontWeight: 700, color: t.fg, lineHeight: 1.1, fontFamily: "var(--f-body)" }}>{value}</div>
+        {sub && <div style={{ fontSize: 11.5, color: INV.gray, marginTop: 2 }}>{sub}</div>}
+      </div>
+    </div>
+  );
+}
+
+// เมนู "⋮ เพิ่มเติม" — วางกดจาก viewport (position: fixed) กันโดน overflow ของตารางตัดขอบ (เจอบั๊กแบบนี้มาก่อนในหน้าตัวเลือกเสริม)
+function InvActionsMenu({ items }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const btnRef = useRef(null);
+  function toggle() {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      setPos({ top: r.bottom + 6, left: Math.max(8, Math.min(r.right - 190, window.innerWidth - 198)) });
+    }
+    setOpen(!open);
+  }
+  return (
+    <>
+      <button ref={btnRef} className="inv-icon-btn" onClick={toggle} aria-label="ตัวเลือกเพิ่มเติม" aria-haspopup="menu" aria-expanded={open}>
+        <Icon name="dots-vertical" size={16} />
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 60 }} />
+          <div role="menu" style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 61, background: "#fff", borderRadius: 12, boxShadow: "0 12px 32px rgba(0,0,0,.16)", border: `1px solid ${INV.border}`, padding: 6, minWidth: 190 }}>
+            {items.map((it, i) => (
+              <button
+                key={i} role="menuitem"
+                onClick={() => { setOpen(false); it.onClick(); }}
+                style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", border: "none", background: "none", padding: "9px 10px", borderRadius: 8, fontSize: 13.5, fontWeight: 500, color: it.danger ? INV.danger : INV.ink, cursor: "pointer", textAlign: "left", minHeight: 40 }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = it.danger ? INV.dangerSoft : "#F5F5F3")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+              >
+                <Icon name={it.icon} size={15} style={{ color: it.danger ? INV.danger : INV.gray }} /> {it.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+function InvDrawer({ mode, initial, allIngredients, onClose, onSubmit }) {
+  const [form, setForm] = useState(initial);
+  return (
+    <div className="inv-drawer-overlay" onClick={onClose}>
+      <div className="inv-drawer" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={mode === "add" ? "เพิ่มวัตถุดิบใหม่" : "แก้ไขวัตถุดิบ"}>
+        <div className="inv-drawer-head">
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 19, fontWeight: 700, color: INV.ink }}>{mode === "add" ? "เพิ่มวัตถุดิบใหม่" : "แก้ไขวัตถุดิบ"}</div>
+            <div style={{ fontSize: 12.5, color: INV.gray, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {mode === "add" ? "กรอกข้อมูลวัตถุดิบและสต็อกตั้งต้น" : form.name}
+            </div>
+          </div>
+          <button className="inv-icon-btn" onClick={onClose} aria-label="ปิด"><Icon name="x" size={18} /></button>
+        </div>
+        <div className="inv-drawer-body">
+          <IngredientForm value={form} onChange={setForm} onSubmit={() => onSubmit(form)} submitLabel={mode === "add" ? "บันทึกวัตถุดิบ" : "บันทึกการแก้ไข"} allIngredients={allIngredients} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InvConfirmDialog({ title, message, confirmLabel, onConfirm, onCancel }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(17,24,39,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 16 }} onClick={onCancel}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 24, width: 380, maxWidth: "100%", boxShadow: "0 20px 60px rgba(0,0,0,.25)" }} role="alertdialog" aria-modal="true">
+        <div style={{ width: 44, height: 44, borderRadius: 12, background: INV.dangerSoft, color: INV.danger, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 14 }}><Icon name="trash" size={20} /></div>
+        <div style={{ fontSize: 18, fontWeight: 700, color: INV.ink, marginBottom: 6 }}>{title}</div>
+        <div style={{ fontSize: 13.5, color: INV.gray, lineHeight: 1.5, marginBottom: 20 }}>{message}</div>
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+          <button className="inv-btn-ghost" onClick={onCancel}>ยกเลิก</button>
+          <button className="inv-btn-danger" onClick={onConfirm}>{confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function IngredientsPanel({ data, updateData, showToast }) {
   const [restocking, setRestocking] = useState(null);
   const [adjusting, setAdjusting] = useState(null);
-  const [editingId, setEditingId] = useState(null);
-  const [adding, setAdding] = useState(false);
+  const [drawer, setDrawer] = useState(null); // null | { mode: "add" | "edit", initial }
+  const [confirmDel, setConfirmDel] = useState(null);
+  const [query, setQuery] = useState("");
+  const [catFilter, setCatFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("name");
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("invCollapsed") || "{}"); } catch { return {}; }
+  });
   const blankIng = { name: "", category: "coffee", unit: "g", costPerUnit: 0, stockQty: 0, lowStockThreshold: 100, altGroup: "", altUpcharge: 0, components: [] };
-  const [newIng, setNewIng] = useState(blankIng);
   const ingredientsById = useMemo(() => {
     const m = {};
     for (const i of data.ingredients) m[i.id] = i;
     return m;
   }, [data.ingredients]);
+
+  function toggleCat(id) {
+    setCollapsed((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      try { localStorage.setItem("invCollapsed", JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }
 
   function doRestock(id, addQty, totalPaid) {
     updateData((next) => {
@@ -2699,13 +2845,12 @@ function IngredientsPanel({ data, updateData, showToast }) {
     showToast("ปรับปรุงสต็อกให้ตรงกับที่นับได้แล้ว");
   }
 
-  function addIngredient() {
-    if (!newIng.name.trim()) return;
-    const components = (newIng.components || []).filter((c) => c.ingredientId);
-    if ((newIng.components || []).length > 0 && components.length === 0) { showToast("กรุณาเลือกวัตถุดิบในสูตรผสมให้ครบ"); return; }
-    updateData((next) => { next.ingredients.push({ ...newIng, altGroup: newIng.altGroup || null, components, id: genId("ing") }); });
-    setAdding(false);
-    setNewIng(blankIng);
+  function addIngredient(v) {
+    if (!v.name.trim()) { showToast("กรุณาใส่ชื่อวัตถุดิบ"); return; }
+    const components = (v.components || []).filter((c) => c.ingredientId);
+    if ((v.components || []).length > 0 && components.length === 0) { showToast("กรุณาเลือกวัตถุดิบในสูตรผสมให้ครบ"); return; }
+    updateData((next) => { next.ingredients.push({ ...v, altGroup: v.altGroup || null, components, id: genId("ing") }); });
+    setDrawer(null);
     showToast("เพิ่มวัตถุดิบแล้ว");
   }
 
@@ -2717,75 +2862,228 @@ function IngredientsPanel({ data, updateData, showToast }) {
       const idx = next.ingredients.findIndex((i) => i.id === ing.id);
       next.ingredients[idx] = { ...ing, altGroup: ing.altGroup || null };
     });
-    setEditingId(null);
+    setDrawer(null);
     showToast("บันทึกแล้ว");
+  }
+
+  function duplicateIngredient(ing) {
+    updateData((next) => {
+      next.ingredients.push({ ...ing, id: genId("ing"), name: ing.name + " (สำเนา)" });
+    });
+    showToast("ทำสำเนาวัตถุดิบแล้ว");
   }
 
   function deleteIngredient(id) {
     updateData((next) => { next.ingredients = next.ingredients.filter((i) => i.id !== id); });
+    setConfirmDel(null);
+    showToast("ลบวัตถุดิบแล้ว");
   }
 
+  // ตัวกรอง/ค้นหา/เรียงลำดับ ทำงานทันทีบนข้อมูลจริง (data.ingredients) — ไม่แตะ business logic การตัดสต็อก
+  const forcedOpen = query.trim() !== "" || statusFilter !== "all";
+  function visibleItems(items) {
+    let out = items;
+    if (query.trim()) { const q = query.trim().toLowerCase(); out = out.filter((i) => i.name.toLowerCase().includes(q)); }
+    if (statusFilter !== "all") out = out.filter((i) => invStatus(i) === statusFilter);
+    return [...out].sort((a, b) => {
+      if (sortBy === "stock") return (a.stockQty / (a.lowStockThreshold || 1)) - (b.stockQty / (b.lowStockThreshold || 1));
+      if (sortBy === "value") return (b.stockQty * b.costPerUnit) - (a.stockQty * a.costPerUnit);
+      return a.name.localeCompare(b.name, "th");
+    });
+  }
+
+  const nonComposite = data.ingredients.filter((i) => !(i.components && i.components.length > 0));
+  const lowCount = nonComposite.filter((i) => i.stockQty > 0 && i.stockQty <= i.lowStockThreshold).length;
+  const outCount = nonComposite.filter((i) => i.stockQty <= 0).length;
+  const invValue = nonComposite.reduce((s, i) => s + i.stockQty * i.costPerUnit, 0);
+  const catCount = CATEGORIES.filter((c) => data.ingredients.some((i) => i.category === c.id)).length;
+
+  const renderedCats = CATEGORIES
+    .filter((c) => catFilter === "all" || catFilter === c.id)
+    .map((cat) => {
+      const allItems = data.ingredients.filter((i) => i.category === cat.id);
+      if (allItems.length === 0) return null;
+      const items = visibleItems(allItems);
+      if (items.length === 0) return null;
+      const isOpen = forcedOpen || !collapsed[cat.id];
+      return { cat, allCount: allItems.length, items, isOpen };
+    })
+    .filter(Boolean);
+
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <SectionTitle icon="box-multiple" text="วัตถุดิบ & สต็อก" />
-        <button className="cbtn cbtn-accent" onClick={() => setAdding(!adding)}><Icon name="plus" size={14} /> วัตถุดิบใหม่</button>
+    <div className="inv-wrap">
+      <style>{`
+        .inv-wrap { --pri: ${INV.primary}; }
+        .inv-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+        .inv-kpi-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; margin-bottom: 24px; }
+        @media (max-width: 1100px) { .inv-kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+        @media (max-width: 620px) { .inv-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        .inv-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 20px; }
+        .inv-search { flex: 1; min-width: 200px; position: relative; display: flex; align-items: center; }
+        .inv-search input { width: 100%; height: 44px; border: 1px solid ${INV.border}; border-radius: 12px; background: #fff; padding: 0 38px 0 38px; font-size: 14px; color: ${INV.ink}; box-sizing: border-box; outline: none; transition: border 160ms, box-shadow 160ms; }
+        .inv-search input:focus { border-color: ${INV.primary}; box-shadow: 0 0 0 3px ${INV.primarySoft}; }
+        .inv-clear { position: absolute; right: 8px; width: 26px; height: 26px; border: none; background: #F0EFEC; border-radius: 8px; color: ${INV.gray}; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .inv-select { height: 44px; border: 1px solid ${INV.border}; border-radius: 12px; background: #fff; padding: 0 32px 0 14px; font-size: 13.5px; font-weight: 600; color: ${INV.ink}; cursor: pointer; outline: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; }
+        .inv-select:focus { border-color: ${INV.primary}; box-shadow: 0 0 0 3px ${INV.primarySoft}; }
+        .inv-btn-primary { display: inline-flex; align-items: center; gap: 7px; height: 44px; padding: 0 18px; border: none; border-radius: 12px; background: ${INV.primary}; color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 6px 18px rgba(37,99,235,.28); transition: background 160ms; }
+        .inv-btn-primary:hover { background: ${INV.primaryDark}; }
+        .inv-btn-ghost { height: 40px; padding: 0 16px; border: 1px solid ${INV.border}; border-radius: 10px; background: #fff; color: ${INV.ink}; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+        .inv-btn-danger { height: 40px; padding: 0 16px; border: none; border-radius: 10px; background: ${INV.danger}; color: #fff; font-size: 13.5px; font-weight: 700; cursor: pointer; }
+        .inv-add-stock { display: inline-flex; align-items: center; gap: 5px; height: 34px; padding: 0 12px; border: 1px solid ${INV.primary}; border-radius: 9px; background: ${INV.primarySoft}; color: ${INV.primaryDark}; font-size: 12.5px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+        .inv-add-stock:hover { background: rgba(37,99,235,.14); }
+        .inv-icon-btn { width: 36px; height: 36px; border: 1px solid ${INV.border}; border-radius: 9px; background: #fff; color: ${INV.gray}; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .inv-icon-btn:hover { background: #F5F5F3; color: ${INV.ink}; }
+        .inv-cat { background: #fff; border: 1px solid ${INV.border}; border-radius: 16px; margin-bottom: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.04); }
+        .inv-cat-head { display: flex; align-items: center; gap: 10px; width: 100%; padding: 14px 18px; border: none; background: none; cursor: pointer; text-align: left; }
+        .inv-cat-title { font-size: 15px; font-weight: 700; color: ${INV.ink}; }
+        .inv-cat-count { font-size: 12px; font-weight: 700; color: ${INV.gray}; background: #F3F4F6; border-radius: 999px; padding: 2px 9px; }
+        .inv-table-scroll { overflow-x: auto; }
+        .inv-table { width: 100%; border-collapse: collapse; }
+        .inv-table th { text-align: left; font-size: 11.5px; font-weight: 700; color: ${INV.gray}; padding: 9px 14px; border-top: 1px solid ${INV.line}; border-bottom: 1px solid ${INV.line}; background: #FBFAF8; text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; }
+        .inv-table td { padding: 12px 14px; border-bottom: 1px solid #F5F3EF; font-size: 13.5px; color: ${INV.ink}; vertical-align: middle; }
+        .inv-table tbody tr:last-child td { border-bottom: none; }
+        .inv-table tbody tr:hover { background: #FAFAF8; }
+        .inv-actions-cell { text-align: right; white-space: nowrap; }
+        .inv-row-actions { display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end; }
+        .inv-drawer-overlay { position: fixed; inset: 0; background: rgba(17,24,39,.35); z-index: 70; display: flex; justify-content: flex-end; animation: invFade 160ms ease; }
+        .inv-drawer { width: min(560px, 100%); height: 100%; background: var(--surface, #fff); box-shadow: -8px 0 40px rgba(0,0,0,.18); display: flex; flex-direction: column; animation: invSlide 240ms cubic-bezier(.2,.8,.2,1); }
+        .inv-drawer-head { padding: 20px 24px; border-bottom: 1px solid ${INV.border}; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+        .inv-drawer-body { padding: 20px 24px; overflow-y: auto; flex: 1; }
+        @keyframes invFade { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes invSlide { from { transform: translateX(100%); } to { transform: translateX(0); } }
+        @keyframes invSheet { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        @media (max-width: 560px) {
+          .inv-drawer-overlay { align-items: flex-end; }
+          .inv-drawer { width: 100%; height: auto; max-height: 92vh; border-radius: 20px 20px 0 0; animation: invSheet 240ms cubic-bezier(.2,.8,.2,1); }
+        }
+        @media (max-width: 720px) {
+          .inv-table thead { display: none; }
+          .inv-table, .inv-table tbody, .inv-table tr, .inv-table td { display: block; width: 100%; box-sizing: border-box; }
+          .inv-table tr { padding: 6px 4px 10px; border-bottom: 1px solid ${INV.line}; }
+          .inv-table tbody tr:last-child { border-bottom: none; }
+          .inv-table td { border: none; padding: 5px 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+          .inv-table td::before { content: attr(data-label); font-size: 11.5px; color: ${INV.gray}; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
+          .inv-table td.inv-actions-cell { justify-content: flex-end; padding-top: 8px; }
+          .inv-table td.inv-actions-cell::before { content: none; }
+          .inv-table td.inv-name-cell { flex-direction: column; align-items: flex-start; gap: 3px; }
+          .inv-table td.inv-name-cell::before { content: none; }
+        }
+      `}</style>
+
+      <div className="inv-header">
+        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+          <div style={{ width: 40, height: 40, borderRadius: 12, background: INV.primarySoft, color: INV.primary, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon name="box-multiple" size={21} /></div>
+          <div style={{ minWidth: 0 }}>
+            <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: INV.ink, lineHeight: 1.2 }}>วัตถุดิบ & สต็อก</h2>
+            <div style={{ fontSize: 12.5, color: INV.gray, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{data.settings.shopName} · {data.ingredients.length} รายการ</div>
+          </div>
+        </div>
+        <button className="inv-btn-primary" onClick={() => setDrawer({ mode: "add", initial: blankIng })}><Icon name="plus" size={16} /> เพิ่มวัตถุดิบ</button>
       </div>
 
-      {adding && <IngredientForm value={newIng} onChange={setNewIng} onSubmit={addIngredient} submitLabel="บันทึก" allIngredients={data.ingredients} />}
+      <div className="inv-kpi-grid">
+        <InvStatCard icon="package" label="วัตถุดิบทั้งหมด" value={data.ingredients.length} sub={`${catCount} หมวดหมู่`} tone="primary" />
+        <InvStatCard icon="alert-triangle" label="ใกล้หมด" value={lowCount} sub={lowCount ? "ควรเติมสต็อก" : "อยู่ในเกณฑ์"} tone={lowCount ? "warning" : "neutral"} />
+        <InvStatCard icon="alert-octagon" label="หมดสต็อก" value={outCount} sub={outCount ? "ต้องเติมด่วน" : "ไม่มี"} tone={outCount ? "danger" : "neutral"} />
+        <InvStatCard icon="coin" label="มูลค่าสต็อก" value={"฿" + money(invValue)} tone="success" />
+        <InvStatCard icon="category" label="หมวดหมู่" value={catCount} sub={`จาก ${CATEGORIES.length} หมวด`} tone="neutral" />
+      </div>
 
-      {CATEGORIES.map((cat) => {
-        const items = data.ingredients.filter((i) => i.category === cat.id);
-        if (items.length === 0) return null;
-        return (
-          <div key={cat.id} style={{ marginBottom: 18 }}>
-            <p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--espresso-3)", margin: "0 0 6px" }}>{cat.label}</p>
-            <div className="table-scroll">
-              <table className="cdata">
-                <thead><tr><th>รายการ</th><th>สต็อก</th><th>ต้นทุน/หน่วย</th><th>กลุ่มทางเลือก</th><th></th></tr></thead>
+      <div className="inv-toolbar">
+        <div className="inv-search">
+          <Icon name="search" size={15} style={{ position: "absolute", left: 13, color: INV.gray }} />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ค้นหาวัตถุดิบ..." aria-label="ค้นหาวัตถุดิบ" />
+          {query && <button className="inv-clear" onClick={() => setQuery("")} aria-label="ล้างการค้นหา"><Icon name="x" size={13} /></button>}
+        </div>
+        <select className="inv-select" value={catFilter} onChange={(e) => setCatFilter(e.target.value)} aria-label="กรองตามหมวด">
+          <option value="all">ทุกหมวด</option>
+          {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+        </select>
+        <select className="inv-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="กรองตามสถานะ">
+          <option value="all">ทุกสถานะ</option>
+          <option value="normal">ปกติ</option>
+          <option value="low">ใกล้หมด</option>
+          <option value="out">หมดสต็อก</option>
+          <option value="composite">วัตถุดิบผสม</option>
+        </select>
+        <select className="inv-select" value={sortBy} onChange={(e) => setSortBy(e.target.value)} aria-label="เรียงลำดับ">
+          <option value="name">เรียง: ชื่อ</option>
+          <option value="stock">เรียง: สต็อกน้อย→มาก</option>
+          <option value="value">เรียง: มูลค่ามาก→น้อย</option>
+        </select>
+      </div>
+
+      {renderedCats.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "48px 20px", background: "#fff", border: `1px solid ${INV.border}`, borderRadius: 16 }}>
+          <Icon name="search-off" size={30} style={{ color: INV.gray, opacity: 0.5 }} />
+          <p style={{ fontSize: 14, fontWeight: 600, color: INV.ink, margin: "12px 0 2px" }}>ไม่พบวัตถุดิบที่ตรงกับเงื่อนไข</p>
+          <p style={{ fontSize: 12.5, color: INV.gray, margin: 0 }}>ลองปรับคำค้นหาหรือตัวกรอง</p>
+        </div>
+      ) : renderedCats.map(({ cat, allCount, items, isOpen }) => (
+        <div key={cat.id} className="inv-cat">
+          <button className="inv-cat-head" onClick={() => toggleCat(cat.id)} aria-expanded={isOpen}>
+            <Icon name={isOpen ? "chevron-down" : "chevron-right"} size={16} style={{ color: INV.gray, flexShrink: 0 }} />
+            <span className="inv-cat-title">{cat.label}</span>
+            <span className="inv-cat-count">{allCount}</span>
+          </button>
+          {isOpen && (
+            <div className="inv-table-scroll">
+              <table className="inv-table">
+                <thead>
+                  <tr>
+                    <th>รายการ</th><th>สต็อก</th><th>หน่วย</th><th>ต้นทุน/หน่วย</th><th>กลุ่มทางเลือก</th><th>สถานะ</th><th style={{ textAlign: "right" }}>จัดการ</th>
+                  </tr>
+                </thead>
                 <tbody>
                   {items.map((ing) => {
                     const isMix = ing.components && ing.components.length > 0;
+                    const status = invStatus(ing);
+                    const stockLow = !isMix && ing.stockQty <= ing.lowStockThreshold;
                     return (
-                    <tr key={ing.id}>
-                      <td>
-                        {ing.name}
-                        {isMix && (
-                          <div style={{ fontSize: 10.5, color: "var(--espresso-2)", marginTop: 1 }}>
-                            <Icon name="flask" size={10} /> ผสม: {compositionLabel(ing, ingredientsById)}
-                          </div>
-                        )}
-                      </td>
-                      {isMix ? (
-                        <td style={{ whiteSpace: "nowrap", color: "var(--espresso-2)", fontSize: 12 }}>ตัดตามสัดส่วน (ไม่มีสต็อกของตัวเอง)</td>
-                      ) : (
-                        <td style={{ whiteSpace: "nowrap", color: ing.stockQty <= ing.lowStockThreshold ? "var(--danger)" : "var(--espresso-4)", fontWeight: ing.stockQty <= ing.lowStockThreshold ? 600 : 400 }}>
-                          {ing.stockQty} {UNITS[ing.unit]}
+                      <tr key={ing.id}>
+                        <td className="inv-name-cell" data-label="รายการ">
+                          <span style={{ fontWeight: 600 }}>{ing.name}</span>
+                          {isMix && (
+                            <span style={{ fontSize: 11, color: INV.gray, display: "flex", alignItems: "center", gap: 4 }}>
+                              <Icon name="flask" size={11} /> ผสม: {compositionLabel(ing, ingredientsById)}
+                            </span>
+                          )}
                         </td>
-                      )}
-                      <td style={{ whiteSpace: "nowrap" }}>฿{money(isMix ? compositeCostPerUnit(ing, ingredientsById) : ing.costPerUnit)}/{UNITS[ing.unit]}</td>
-                      <td>{ing.altGroup ? `${ing.altGroup}${ing.altUpcharge ? ` (+฿${ing.altUpcharge})` : ""}` : "—"}</td>
-                      <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                        {!isMix && (
-                          <>
-                            <button className="cbtn" style={{ padding: "4px 8px", marginRight: 4 }} onClick={() => setRestocking(ing.id)}>เติมสต็อก</button>
-                            <button className="cbtn" style={{ padding: "4px 8px", marginRight: 4 }} onClick={() => setAdjusting(ing.id)} title="ปรับปรุงสต็อกให้ตรงกับที่นับได้จริง (Cycle Count)"><Icon name="adjustments" size={12} /> ปรับสต็อก</button>
-                          </>
-                        )}
-                        <button className="cbtn cbtn-edit" style={{ padding: "4px 8px", marginRight: 4 }} onClick={() => setEditingId(ing.id)} title="แก้ไขวัตถุดิบ"><Icon name="edit" size={12} /></button>
-                        <button className="cbtn cbtn-danger" style={{ padding: "4px 8px" }} onClick={() => deleteIngredient(ing.id)} title="ลบวัตถุดิบ"><Icon name="trash" size={12} /></button>
-                      </td>
-                    </tr>
+                        <td data-label="สต็อก" style={{ whiteSpace: "nowrap", fontWeight: stockLow ? 700 : 500, color: isMix ? INV.gray : stockLow ? INV.danger : INV.ink }}>
+                          {isMix ? "ตัดตามสัดส่วน" : ing.stockQty}
+                        </td>
+                        <td data-label="หน่วย" style={{ color: INV.gray, whiteSpace: "nowrap" }}>{isMix ? "—" : UNITS[ing.unit]}</td>
+                        <td data-label="ต้นทุน/หน่วย" style={{ whiteSpace: "nowrap" }}>฿{money(isMix ? compositeCostPerUnit(ing, ingredientsById) : ing.costPerUnit)}<span style={{ color: INV.gray }}>/{UNITS[ing.unit]}</span></td>
+                        <td data-label="กลุ่มทางเลือก" style={{ color: ing.altGroup ? INV.ink : INV.gray }}>{ing.altGroup ? `${ing.altGroup}${ing.altUpcharge ? ` (+฿${ing.altUpcharge})` : ""}` : "—"}</td>
+                        <td data-label="สถานะ"><InvStatusBadge status={status} /></td>
+                        <td className="inv-actions-cell" data-label="">
+                          <div className="inv-row-actions">
+                            {!isMix && (
+                              <button className="inv-add-stock" onClick={() => setRestocking(ing.id)}><Icon name="plus" size={13} /> เติมสต็อก</button>
+                            )}
+                            <InvActionsMenu
+                              items={[
+                                ...(!isMix ? [{ icon: "adjustments", label: "ปรับสต็อก (นับจริง)", onClick: () => setAdjusting(ing.id) }] : []),
+                                { icon: "edit", label: "แก้ไข", onClick: () => setDrawer({ mode: "edit", initial: ing }) },
+                                { icon: "copy", label: "ทำสำเนา", onClick: () => duplicateIngredient(ing) },
+                                { icon: "trash", label: "ลบ", danger: true, onClick: () => setConfirmDel(ing) },
+                              ]}
+                            />
+                          </div>
+                        </td>
+                      </tr>
                     );
                   })}
                 </tbody>
               </table>
             </div>
-          </div>
-        );
-      })}
+          )}
+        </div>
+      ))}
 
-      <DefaultPackagingSection data={data} updateData={updateData} />
+      <div style={{ marginTop: 8 }}>
+        <DefaultPackagingSection data={data} updateData={updateData} />
+      </div>
 
       {restocking && (
         <RestockModal ingredient={data.ingredients.find((i) => i.id === restocking)} onClose={() => setRestocking(null)} onConfirm={doRestock} />
@@ -2793,8 +3091,24 @@ function IngredientsPanel({ data, updateData, showToast }) {
       {adjusting && (
         <StockAdjustModal ingredient={data.ingredients.find((i) => i.id === adjusting)} onClose={() => setAdjusting(null)} onConfirm={doAdjustStock} />
       )}
-      {editingId && (
-        <EditIngredientModal ingredient={data.ingredients.find((i) => i.id === editingId)} onClose={() => setEditingId(null)} onSave={saveEdit} allIngredients={data.ingredients} />
+      {drawer && (
+        <InvDrawer
+          key={drawer.mode + (drawer.initial?.id || "new")}
+          mode={drawer.mode}
+          initial={drawer.initial}
+          allIngredients={data.ingredients}
+          onClose={() => setDrawer(null)}
+          onSubmit={drawer.mode === "add" ? addIngredient : saveEdit}
+        />
+      )}
+      {confirmDel && (
+        <InvConfirmDialog
+          title="ลบวัตถุดิบนี้?"
+          message={`คุณกำลังจะลบ "${confirmDel.name}" ออกจากคลังถาวร การกระทำนี้ย้อนกลับไม่ได้`}
+          confirmLabel="ลบวัตถุดิบ"
+          onConfirm={() => deleteIngredient(confirmDel.id)}
+          onCancel={() => setConfirmDel(null)}
+        />
       )}
     </div>
   );
@@ -2860,68 +3174,105 @@ function IngredientForm({ value, onChange, onSubmit, submitLabel, allIngredients
     onChange({ ...value, components: value.components.filter((_, i) => i !== idx) });
   }
 
+  const lbl = { display: "block", fontSize: 12, fontWeight: 600, color: INV.gray, marginBottom: 5 };
+  const field = { width: "100%", height: 42, border: `1px solid ${INV.border}`, borderRadius: 10, background: "#fff", padding: "0 12px", fontSize: 14, color: INV.ink, boxSizing: "border-box", outline: "none" };
+
   return (
-    <div style={glass({ borderRadius: 12, padding: 14, marginBottom: 14 })}>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "end" }}>
-        <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>ชื่อ</label><input className="cfield" value={value.name} onChange={(e) => onChange({ ...value, name: e.target.value })} /></div>
-        <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>หมวด</label>
-          <select className="cfield" value={value.category} onChange={(e) => onChange({ ...value, category: e.target.value })}>
-            {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-          </select>
+    <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+      <style>{`
+        .inv-form-field:focus { border-color: ${INV.primary} !important; box-shadow: 0 0 0 3px ${INV.primarySoft}; }
+        .inv-form-sec-title { font-size: 12.5px; font-weight: 700; color: ${INV.gray}; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 12px; }
+        .inv-form-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+        @media (max-width: 420px) { .inv-form-grid2 { grid-template-columns: 1fr; } }
+      `}</style>
+
+      {/* หมวด 1 — ข้อมูลพื้นฐาน */}
+      <div>
+        <p className="inv-form-sec-title">ข้อมูลพื้นฐาน</p>
+        <div style={{ marginBottom: 14 }}>
+          <label style={lbl}>ชื่อวัตถุดิบ</label>
+          <input className="inv-form-field" style={field} value={value.name} onChange={(e) => onChange({ ...value, name: e.target.value })} placeholder="เช่น นมสด, เมล็ดกาแฟ" />
         </div>
-        <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>หน่วย</label>
-          <select className="cfield" value={value.unit} onChange={(e) => onChange({ ...value, unit: e.target.value })}>
-            {Object.entries(UNITS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-          </select>
+        <div className="inv-form-grid2">
+          <div>
+            <label style={lbl}>หมวดหมู่</label>
+            <select className="inv-form-field" style={field} value={value.category} onChange={(e) => onChange({ ...value, category: e.target.value })}>
+              {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={lbl}>หน่วยนับ</label>
+            <select className="inv-form-field" style={field} value={value.unit} onChange={(e) => onChange({ ...value, unit: e.target.value })}>
+              {Object.entries(UNITS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
         </div>
-        {!isMix && (
-          <>
-            <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>ต้นทุน/หน่วย</label><input className="cfield" type="number" value={value.costPerUnit} onChange={(e) => onChange({ ...value, costPerUnit: Number(e.target.value) })} style={{ width: 90 }} /></div>
-            <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>สต็อก</label><input className="cfield" type="number" value={value.stockQty} onChange={(e) => onChange({ ...value, stockQty: Number(e.target.value) })} style={{ width: 90 }} /></div>
-            <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>แจ้งเตือนต่ำกว่า</label><input className="cfield" type="number" value={value.lowStockThreshold} onChange={(e) => onChange({ ...value, lowStockThreshold: Number(e.target.value) })} style={{ width: 90 }} /></div>
-          </>
-        )}
-        <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>กลุ่มทางเลือก (เช่น milk)</label><input className="cfield" value={value.altGroup || ""} onChange={(e) => onChange({ ...value, altGroup: e.target.value })} style={{ width: 100 }} placeholder="ไม่มี" /></div>
-        <div><label style={{ fontSize: 11, color: "var(--espresso-2)" }}>ส่วนต่างราคา (บาท)</label><input className="cfield" type="number" value={value.altUpcharge} onChange={(e) => onChange({ ...value, altUpcharge: Number(e.target.value) })} style={{ width: 90 }} /></div>
-        <button className="cbtn cbtn-accent" onClick={onSubmit}>{submitLabel}</button>
       </div>
 
-      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--espresso-3)", marginTop: 12 }}>
-        <input type="checkbox" checked={isMix} onChange={(e) => toggleMix(e.target.checked)} />
-        วัตถุดิบนี้เป็น "ของผสม" จากวัตถุดิบอื่นตามสัดส่วน (เช่น mix milk = นมข้นหวาน + นมจืด)
-      </label>
-
-      {isMix && (
-        <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed var(--line)" }}>
-          <p style={{ fontSize: 11, color: "var(--espresso-2)", margin: "0 0 6px" }}>
-            ระบบจะตัดสต็อกวัตถุดิบจริงแต่ละตัวตามสัดส่วนที่ตั้งไว้ (ใส่เป็นตัวเลขสัดส่วน เช่น 2 กับ 1 = 2:1 ไม่ต้องรวมเป็น 100)
-          </p>
-          {value.components.map((c, idx) => (
-            <div key={idx} style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
-              <select className="cfield" value={c.ingredientId} onChange={(e) => setComponent(idx, { ingredientId: e.target.value })} style={{ flex: 1 }}>
-                <option value="">— เลือกวัตถุดิบ —</option>
-                {pickable.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
-              </select>
-              <input className="cfield" type="number" value={c.ratio} onChange={(e) => setComponent(idx, { ratio: Number(e.target.value) })} style={{ width: 70 }} placeholder="สัดส่วน" />
-              <button className="cbtn cbtn-danger" style={{ padding: "4px 8px" }} onClick={() => removeComponent(idx)}><Icon name="x" size={12} /></button>
+      {/* หมวด 2 — สต็อก & ต้นทุน (ซ่อนเมื่อเป็นวัตถุดิบผสม เพราะไม่มีสต็อก/ต้นทุนของตัวเอง) */}
+      {!isMix && (
+        <div>
+          <p className="inv-form-sec-title">สต็อก & ต้นทุน</p>
+          <div className="inv-form-grid2">
+            <div>
+              <label style={lbl}>สต็อกปัจจุบัน</label>
+              <input className="inv-form-field" style={field} type="number" value={value.stockQty} onChange={(e) => onChange({ ...value, stockQty: Number(e.target.value) })} />
             </div>
-          ))}
-          <button className="cbtn" style={{ fontSize: 11.5, padding: "4px 8px" }} onClick={addComponent}><Icon name="plus" size={11} /> เพิ่มวัตถุดิบในสูตรผสม</button>
+            <div>
+              <label style={lbl}>แจ้งเตือนเมื่อต่ำกว่า</label>
+              <input className="inv-form-field" style={field} type="number" value={value.lowStockThreshold} onChange={(e) => onChange({ ...value, lowStockThreshold: Number(e.target.value) })} />
+            </div>
+            <div>
+              <label style={lbl}>ต้นทุนต่อหน่วย (บาท)</label>
+              <input className="inv-form-field" style={field} type="number" value={value.costPerUnit} onChange={(e) => onChange({ ...value, costPerUnit: Number(e.target.value) })} />
+            </div>
+            <div>
+              <label style={lbl}>ส่วนต่างราคา (บาท)</label>
+              <input className="inv-form-field" style={field} type="number" value={value.altUpcharge} onChange={(e) => onChange({ ...value, altUpcharge: Number(e.target.value) })} />
+            </div>
+          </div>
         </div>
       )}
-    </div>
-  );
-}
 
-function EditIngredientModal({ ingredient, onClose, onSave, allIngredients }) {
-  const [form, setForm] = useState(ingredient);
-  if (!ingredient) return null;
-  return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(43,29,20,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
-      <div style={{ background: "var(--surface)", borderRadius: 14, padding: 20, width: 380 }}>
-        <p style={{ fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 17, margin: "0 0 12px" }}>แก้ไข: {ingredient.name}</p>
-        <IngredientForm value={form} onChange={setForm} onSubmit={() => onSave(form)} submitLabel="บันทึกการแก้ไข" allIngredients={allIngredients} />
-        <button className="cbtn" onClick={onClose}>ปิด</button>
+      {/* หมวด 3 — ตัวเลือก & สูตรผสม */}
+      <div>
+        <p className="inv-form-sec-title">ตัวเลือก & สูตรผสม</p>
+        <div style={{ marginBottom: 16 }}>
+          <label style={lbl}>กลุ่มทางเลือก (เช่น milk, bean)</label>
+          <input className="inv-form-field" style={field} value={value.altGroup || ""} onChange={(e) => onChange({ ...value, altGroup: e.target.value })} placeholder="ไม่มี" />
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: isMix ? 12 : 0 }}>
+          <OptgToggle checked={isMix} onChange={toggleMix} />
+          <span style={{ fontSize: 13.5, fontWeight: 600, color: INV.ink }}>วัตถุดิบผสม</span>
+          <span title="วัตถุดิบนี้ไม่มีสต็อกของตัวเอง ระบบจะตัดสต็อกจากวัตถุดิบอื่นตามสัดส่วนที่กำหนด (เช่น mix milk = นมข้นหวาน + นมจืด 2:1)" style={{ display: "inline-flex", cursor: "help", color: INV.gray }}>
+            <Icon name="info-circle" size={15} />
+          </span>
+        </div>
+
+        {isMix && (
+          <div style={{ background: "#FBFAF8", border: `1px solid ${INV.line}`, borderRadius: 12, padding: 14 }}>
+            <p style={{ fontSize: 11.5, color: INV.gray, margin: "0 0 10px", lineHeight: 1.5 }}>
+              ใส่เป็นตัวเลขสัดส่วน เช่น 2 กับ 1 = 2:1 (ไม่ต้องรวมเป็น 100) ระบบจะตัดสต็อกวัตถุดิบจริงแต่ละตัวตามสัดส่วนนี้
+            </p>
+            {value.components.map((c, idx) => (
+              <div key={idx} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
+                <select className="inv-form-field" style={{ ...field, flex: 1, height: 38 }} value={c.ingredientId} onChange={(e) => setComponent(idx, { ingredientId: e.target.value })}>
+                  <option value="">— เลือกวัตถุดิบ —</option>
+                  {pickable.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+                </select>
+                <input className="inv-form-field" style={{ ...field, width: 74, height: 38 }} type="number" value={c.ratio} onChange={(e) => setComponent(idx, { ratio: Number(e.target.value) })} placeholder="สัดส่วน" />
+                <button className="inv-icon-btn" style={{ width: 38, height: 38 }} onClick={() => removeComponent(idx)} aria-label="ลบวัตถุดิบในสูตร"><Icon name="x" size={14} /></button>
+              </div>
+            ))}
+            <button className="inv-btn-ghost" style={{ height: 36, fontSize: 12.5 }} onClick={addComponent}><Icon name="plus" size={13} /> เพิ่มวัตถุดิบในสูตร</button>
+          </div>
+        )}
+      </div>
+
+      {/* หมวด 4 — บันทึก */}
+      <div style={{ display: "flex", gap: 10, paddingTop: 4 }}>
+        <button className="inv-btn-primary" style={{ flex: 1, justifyContent: "center" }} onClick={onSubmit}>{submitLabel}</button>
       </div>
     </div>
   );
