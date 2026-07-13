@@ -44,6 +44,18 @@ const COLORS = {
   pending: "#B8860B", pendingLight: "#FCEFD1",
 };
 
+// ต้องซ้ำกับ LOYALTY_TIERS ใน App.jsx เพราะไฟล์นี้แยก bundle กันคนละหน้า (ลูกค้า vs แอดมิน) ไม่ได้ share module —
+// เรียงเกณฑ์เดียวกันเป๊ะ (0/20/50/100 เมล็ดสะสมตลอดกาล) ถ้าแก้ฝั่งแอดมินต้องแก้ที่นี่ด้วย
+const LOYALTY_TIERS = [
+  { id: "reserve", label: "Reserve", min: 100, color: "#8B5E00", bg: "#FBF0D9", icon: "💎" },
+  { id: "dark", label: "Dark Roast", min: 50, color: "#3B2410", bg: "#EDE4DA", icon: "⚫" },
+  { id: "medium", label: "Medium Roast", min: 20, color: "#B45309", bg: "#FFF1DE", icon: "🟤" },
+  { id: "light", label: "Light Roast", min: 0, color: "#8A6D3B", bg: "#FAF3E4", icon: "🌱" },
+];
+function loyaltyTierFor(lifetimeBeans) {
+  return LOYALTY_TIERS.find((t) => (lifetimeBeans || 0) >= t.min) || LOYALTY_TIERS[LOYALTY_TIERS.length - 1];
+}
+
 const STATUS_ICON = {
   pending: { icon: "clock", color: COLORS.pending, bg: COLORS.pendingLight, anim: "statusPulse 1.6s ease-in-out infinite" },
   paid: { icon: "checks", color: COLORS.espresso4, bg: "rgba(11,74,122,0.14)", anim: "cartBump .5s ease" },
@@ -1329,10 +1341,23 @@ export default function CustomerOrder({ shopUid }) {
               marginTop: 10, borderRadius: 12, padding: "10px 12px",
               background: beanGoalMet ? COLORS.sageLight : "#FBF7F1", border: `1px solid ${beanGoalMet ? COLORS.sage : COLORS.line}`,
             }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12.5, fontWeight: 600, color: COLORS.espresso4 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12.5, fontWeight: 600, color: COLORS.espresso4, flexWrap: "wrap", gap: 6 }}>
                 <span>🫘 เมล็ดสะสม {beanRecord.beans || 0} / {loyaltyBeanGoal}</span>
                 {!beanGoalMet && <span style={{ color: COLORS.espresso2, fontWeight: 500 }}>อีก {Math.max(0, loyaltyBeanGoal - (beanRecord.beans || 0))} แก้วครบแลกฟรี!</span>}
               </div>
+              {(() => {
+                const tier = loyaltyTierFor(beanRecord.lifetimeBeans);
+                const nextIdx = LOYALTY_TIERS.findIndex((t) => t.id === tier.id) - 1;
+                const next = nextIdx >= 0 ? LOYALTY_TIERS[nextIdx] : null;
+                return (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700, color: tier.color, background: tier.bg, borderRadius: 999, padding: "3px 9px" }}>
+                      {tier.icon} {tier.label}
+                    </span>
+                    {next && <span style={{ fontSize: 11, color: COLORS.espresso2 }}>อีก {next.min - (beanRecord.lifetimeBeans || 0)} เมล็ดถึง {next.label}</span>}
+                  </div>
+                );
+              })()}
               {beanGoalMet && (
                 <div style={{ marginTop: 8 }}>
                   <div style={{ fontSize: 12, color: COLORS.sageDark, fontWeight: 600, marginBottom: 6 }}>ครบแล้ว! เลือกแก้วที่อยากแลกฟรี 1 แก้ว:</div>

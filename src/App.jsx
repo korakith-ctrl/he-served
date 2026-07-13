@@ -1207,6 +1207,22 @@ const POS = {
   chipBg: "#F2EEE7",
 };
 
+// ระดับสมาชิกล้อธีมคั่วกาแฟ คำนวณจาก lifetimeBeans (เมล็ดสะสมตลอดกาล ไม่ลดตอนแลกของ) — เรียงจากสูงไปต่ำ
+// เพื่อหาระดับปัจจุบันง่ายๆ ด้วย .find() ตัวแรกที่ min ต่ำกว่าหรือเท่ากับที่มี เป็นแค่ป้ายแสดงสถานะ ยังไม่มีสิทธิพิเศษผูกกับระดับ
+const LOYALTY_TIERS = [
+  { id: "reserve", label: "Reserve", min: 100, color: "#8B5E00", bg: "#FBF0D9", icon: "💎" },
+  { id: "dark", label: "Dark Roast", min: 50, color: "#3B2410", bg: "#EDE4DA", icon: "⚫" },
+  { id: "medium", label: "Medium Roast", min: 20, color: "#B45309", bg: "#FFF1DE", icon: "🟤" },
+  { id: "light", label: "Light Roast", min: 0, color: "#8A6D3B", bg: "#FAF3E4", icon: "🌱" },
+];
+function loyaltyTierFor(lifetimeBeans) {
+  return LOYALTY_TIERS.find((t) => (lifetimeBeans || 0) >= t.min) || LOYALTY_TIERS[LOYALTY_TIERS.length - 1];
+}
+function loyaltyNextTier(lifetimeBeans) {
+  const idx = LOYALTY_TIERS.findIndex((t) => t.id === loyaltyTierFor(lifetimeBeans).id);
+  return idx > 0 ? LOYALTY_TIERS[idx - 1] : null;
+}
+
 function Segmented({ options, value, onChange, dense }) {
   return (
     <div style={{ display: "inline-flex", background: POS.chipBg, borderRadius: dense ? 10 : 14, padding: 3, gap: 2, flexWrap: "wrap" }}>
@@ -1636,6 +1652,19 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
 
 // รายชื่อลูกค้า/เมล็ดสะสม — อ่านจาก customers/{uid} (คนละโหนดจาก data ก้อนใหญ่ ดู awardLoyaltyBeans ว่าทำไม)
 // เรียงคนสะสมเยอะสุดขึ้นก่อน ค้นหาด้วยเบอร์/ชื่อได้ ปรับเมล็ดมือได้เผื่อกรณีพิเศษ
+function TierBadge({ lifetimeBeans, size }) {
+  const tier = loyaltyTierFor(lifetimeBeans);
+  const dense = size === "sm";
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 4, fontWeight: 700, borderRadius: 999, flexShrink: 0,
+      fontSize: dense ? 10.5 : 12, padding: dense ? "3px 8px" : "4px 10px", color: tier.color, background: tier.bg,
+    }}>
+      {tier.icon} {tier.label}
+    </span>
+  );
+}
+
 function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans, updateLoyaltyGoal, showToast, backfillEligibleCount, backfillLoyaltyBeans }) {
   const [search, setSearch] = useState("");
   const [goalInput, setGoalInput] = useState(String(loyaltyBeanGoal));
@@ -1655,6 +1684,12 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans,
   const totalCustomers = customers.length;
   const totalBeansOut = customers.reduce((s, c) => s + (c.beans || 0), 0);
   const eligibleCount = customers.filter((c) => (c.beans || 0) >= loyaltyBeanGoal).length;
+  const tierCounts = useMemo(() => {
+    const counts = {};
+    for (const t of LOYALTY_TIERS) counts[t.id] = 0;
+    for (const c of customers) counts[loyaltyTierFor(c.lifetimeBeans).id]++;
+    return counts;
+  }, [customers]);
 
   function saveGoal() {
     updateLoyaltyGoal(goalInput);
@@ -1709,6 +1744,14 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans,
         </div>
       </div>
 
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+        {LOYALTY_TIERS.slice().reverse().map((t) => (
+          <span key={t.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12.5, fontWeight: 600, color: t.color, background: t.bg, borderRadius: 999, padding: "5px 12px" }}>
+            {t.icon} {t.label} · {tierCounts[t.id]} คน
+          </span>
+        ))}
+      </div>
+
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
         <input
           value={search} onChange={(e) => setSearch(e.target.value)}
@@ -1730,7 +1773,10 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans,
             <div key={c.phone} className="loy-row">
               <div style={{ width: 40, height: 40, borderRadius: "50%", background: POS.chipBg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>🫘</div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700, fontSize: 14, color: POS.navy }}>{c.name || "(ไม่ทราบชื่อ)"} · {c.phone}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: POS.navy }}>{c.name || "(ไม่ทราบชื่อ)"} · {c.phone}</span>
+                  <TierBadge lifetimeBeans={c.lifetimeBeans} size="sm" />
+                </div>
                 <div style={{ fontSize: 12, color: POS.gray, marginTop: 1 }}>สะสม {c.beans || 0} / {loyaltyBeanGoal} เมล็ด · รวมตลอดกาล {c.lifetimeBeans || 0} เมล็ด</div>
               </div>
               {(c.beans || 0) >= loyaltyBeanGoal && (
@@ -1800,9 +1846,16 @@ function LoyaltyDetailModal({ customer, orders, loyaltyBeanGoal, onClose }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16 }} onClick={onClose}>
       <div style={{ background: "#fff", borderRadius: 18, padding: 22, width: 480, maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ fontWeight: 700, fontSize: 15, color: POS.navy, marginBottom: 2 }}>รายละเอียด — {customer.name || "(ไม่ทราบชื่อ)"} · {customer.phone}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 2 }}>
+          <span style={{ fontWeight: 700, fontSize: 15, color: POS.navy }}>รายละเอียด — {customer.name || "(ไม่ทราบชื่อ)"} · {customer.phone}</span>
+          <TierBadge lifetimeBeans={customer.lifetimeBeans} />
+        </div>
         <div style={{ fontSize: 12.5, color: POS.gray, marginBottom: 14 }}>
           พบออเดอร์เบอร์นี้ {exact.length} รายการ · นับเป็นเมล็ดแล้ว {countedCups} แก้ว (เฉพาะสถานะ "เสร็จ") · ปัจจุบันมี {customer.beans || 0} เมล็ด
+          {(() => {
+            const next = loyaltyNextTier(customer.lifetimeBeans);
+            return next ? ` · อีก ${next.min - (customer.lifetimeBeans || 0)} เมล็ดถึงระดับ ${next.label}` : " · ถึงระดับสูงสุดแล้ว";
+          })()}
         </div>
 
         {variants.length > 0 && (
