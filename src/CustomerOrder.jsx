@@ -6,6 +6,7 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import QRCode from "qrcode";
 import generatePayload from "promptpay-qr";
 import { firebaseConfig } from "./firebase";
+import LoyaltyCard from "./components/loyalty/LoyaltyCard.jsx";
 
 // Isolated secondary app so an anonymous customer session never shares
 // Auth persistence with the owner dashboard's login on the same device/browser.
@@ -44,71 +45,6 @@ const COLORS = {
   pending: "#B8860B", pendingLight: "#FCEFD1",
 };
 
-// ต้องซ้ำกับ LOYALTY_TIERS ใน App.jsx เพราะไฟล์นี้แยก bundle กันคนละหน้า (ลูกค้า vs แอดมิน) ไม่ได้ share module —
-// เรียงเกณฑ์เดียวกันเป๊ะ (0/20/50/100 เมล็ดสะสมตลอดกาล) ถ้าแก้ฝั่งแอดมินต้องแก้ที่นี่ด้วย
-const LOYALTY_TIERS = [
-  { id: "reserve", label: "Reserve", min: 100, color: "#8B5E00", bg: "#FBF0D9", icon: "💎" },
-  { id: "dark", label: "Dark Roast", min: 50, color: "#3B2410", bg: "#EDE4DA", icon: "⚫" },
-  { id: "medium", label: "Medium Roast", min: 20, color: "#B45309", bg: "#FFF1DE", icon: "🟤" },
-  { id: "light", label: "Light Roast", min: 0, color: "#8A6D3B", bg: "#FAF3E4", icon: "🌱" },
-];
-function loyaltyTierFor(lifetimeBeans) {
-  return LOYALTY_TIERS.find((t) => (lifetimeBeans || 0) >= t.min) || LOYALTY_TIERS[LOYALTY_TIERS.length - 1];
-}
-
-// สแตมป์ 10 ช่อง (หรือ progress bar ถ้าเป้าหมาย > 10) — ใส่ตัวเลขกำกับเสมอ ไม่พึ่งสีอย่างเดียว (WCAG)
-// current = เมล็ดที่มีอยู่แล้วจริง, pending = เมล็ดจากออเดอร์นี้ที่ยังไม่เข้าบัญชี (ยังไม่ได้รับเครื่องดื่ม)
-function LoyaltyStampProgress({ current, pending, goal }) {
-  const label = `สะสมแล้ว ${current} จาก ${goal} เมล็ด${pending > 0 ? ` กำลังรอยืนยันอีก ${pending} เมล็ด` : ""}`;
-  if (goal > 10) {
-    const pct = Math.min(100, (current / goal) * 100);
-    const pctWithPending = Math.min(100, ((current + pending) / goal) * 100);
-    return (
-      <div role="img" aria-label={label}>
-        <div style={{ height: 10, borderRadius: 999, background: "#EDE6DC", overflow: "hidden", position: "relative" }}>
-          {pending > 0 && (
-            <div style={{ position: "absolute", inset: 0, width: `${pctWithPending}%`, background: "repeating-linear-gradient(45deg, #F3D9BE, #F3D9BE 4px, transparent 4px, transparent 8px)", borderRadius: 999 }} />
-          )}
-          <div style={{ height: "100%", width: `${pct}%`, background: COLORS.sage, borderRadius: 999, transition: "width 300ms ease", position: "relative" }} />
-        </div>
-      </div>
-    );
-  }
-  const stamps = Array.from({ length: goal });
-  return (
-    <div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }} role="img" aria-label={label}>
-        {stamps.map((_, i) => {
-          const filled = i < current;
-          const isPending = !filled && i < current + pending;
-          return (
-            <span
-              key={i}
-              aria-hidden="true"
-              style={{
-                width: 27, height: 27, borderRadius: "50%", flexShrink: 0,
-                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700,
-                background: filled ? COLORS.sage : "transparent",
-                border: isPending ? `2px dashed ${COLORS.sage}` : filled ? "none" : "2px solid #E4DDD0",
-                color: filled ? "#fff" : COLORS.sage,
-                transition: "background 200ms ease, border-color 200ms ease",
-              }}
-            >
-              {filled ? "✓" : ""}
-            </span>
-          );
-        })}
-      </div>
-      {pending > 0 && (
-        <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 6, fontSize: 11.5, color: COLORS.espresso3 }}>
-          <span style={{ width: 12, height: 12, borderRadius: "50%", border: `2px dashed ${COLORS.sage}`, flexShrink: 0 }} aria-hidden="true" />
-          รอยืนยัน — เข้าบัญชีเมื่อได้รับเครื่องดื่มแล้ว
-        </div>
-      )}
-    </div>
-  );
-}
-
 function RewardTermsSheet({ goal, onClose }) {
   const { mounted, shown } = useSheetTransition(true);
   if (!mounted) return null;
@@ -127,172 +63,6 @@ function RewardTermsSheet({ goal, onClose }) {
         </ul>
         <button type="button" style={{ ...btn, width: "100%", marginTop: 18, textAlign: "center" }} onClick={onClose}>ปิด</button>
       </div>
-    </div>
-  );
-}
-
-// การ์ดสะสมเมล็ดหน้าสรุปออเดอร์ — ครอบคลุมทุกสถานะ: ยังไม่กรอกเบอร์ / กำลังโหลด / โหลดไม่สำเร็จ / กำลังสะสม / มีรางวัลพร้อมใช้
-function LoyaltyCard({
-  phone, loyaltyStatus, beanRecord, loyaltyBeanGoal, onRetry,
-  cart, cartCount, redeemMode, setRedeemMode, redeemLineId, setRedeemLineId, showRewardTerms, setShowRewardTerms,
-}) {
-  const digits = phone.replace(/\D/g, "");
-  const cardStyle = {
-    marginTop: 10, borderRadius: 14, padding: 16,
-    background: "#FBF9F5", border: `1px solid ${COLORS.line}`,
-  };
-
-  if (digits.length < 9) {
-    return (
-      <div style={{ ...cardStyle, textAlign: "left" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, fontWeight: 600, color: COLORS.espresso5 }}>
-          <i className="ti ti-coffee" style={{ fontSize: 16, color: COLORS.sage }} aria-label="สะสมเมล็ด" role="img"></i>
-          กรอกเบอร์โทรศัพท์เพื่อสะสมเมล็ด
-        </div>
-        <div style={{ fontSize: 12, color: COLORS.espresso3, marginTop: 4, lineHeight: 1.5 }}>
-          คะแนนและรางวัลจะผูกกับเบอร์โทรศัพท์ของคุณ ไม่ต้องสมัครสมาชิกเพิ่ม
-        </div>
-      </div>
-    );
-  }
-
-  if (loyaltyStatus === "loading") {
-    return (
-      <div style={cardStyle} aria-live="polite">
-        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: COLORS.espresso3 }}>
-          <i className="ti ti-loader-2" style={{ fontSize: 15, animation: "haloSpin 1s linear infinite" }} aria-hidden="true"></i>
-          กำลังโหลดข้อมูลสมาชิก...
-        </div>
-      </div>
-    );
-  }
-
-  if (loyaltyStatus === "error") {
-    return (
-      <div style={{ ...cardStyle, background: "#FBF1EF", borderColor: COLORS.danger }} aria-live="polite">
-        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: COLORS.danger }}>
-          <i className="ti ti-alert-circle" style={{ fontSize: 16 }} aria-hidden="true"></i>
-          ไม่สามารถโหลดข้อมูลสมาชิกได้
-        </div>
-        <div style={{ fontSize: 12, color: COLORS.espresso3, margin: "4px 0 10px" }}>คุณยังสั่งซื้อและชำระเงินต่อได้ตามปกติ</div>
-        <button type="button" style={{ ...btn, padding: "6px 14px", fontSize: 12.5 }} onClick={onRetry}>
-          <i className="ti ti-refresh" style={{ fontSize: 13, marginRight: 4 }} aria-hidden="true"></i>ลองอีกครั้ง
-        </button>
-      </div>
-    );
-  }
-
-  if (!beanRecord) return null;
-
-  const currentBeans = beanRecord.beans || 0;
-  const beanGoalMet = currentBeans >= loyaltyBeanGoal;
-
-  if (beanRecord.isNew && currentBeans === 0) {
-    return (
-      <div style={cardStyle}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, fontWeight: 600, color: COLORS.espresso5 }}>
-          <i className="ti ti-coffee" style={{ fontSize: 16, color: COLORS.sage }} aria-hidden="true"></i>
-          สะสมเมล็ดรับเครื่องดื่มฟรี
-        </div>
-        <div style={{ fontSize: 12.5, color: COLORS.espresso3, marginTop: 4 }}>เริ่มสะสมเมล็ดจากออเดอร์นี้ได้เลย — ออเดอร์นี้ได้รับ +{cartCount} เมล็ด</div>
-      </div>
-    );
-  }
-
-  // มีรางวัลพร้อมใช้
-  if (beanGoalMet) {
-    const redeemLine = redeemLineId ? cart.find((l) => l.lineId === redeemLineId) : null;
-    return (
-      <div style={{ ...cardStyle, background: COLORS.successLight, border: `1px solid ${COLORS.success}` }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14.5, fontWeight: 700, color: COLORS.successDark }}>
-          <i className="ti ti-confetti" style={{ fontSize: 18 }} aria-hidden="true"></i>
-          คุณมีรางวัลพร้อมใช้!
-        </div>
-        <div style={{ fontSize: 13, color: COLORS.espresso4, marginTop: 4, fontWeight: 600 }}>รับเครื่องดื่มฟรี 1 แก้ว</div>
-        <div style={{ fontSize: 11.5, color: COLORS.espresso3, marginTop: 2 }}>ใช้ {loyaltyBeanGoal} เมล็ด แลกเครื่องดื่ม 1 แก้วในตะกร้านี้</div>
-
-        {!redeemMode ? (
-          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-            <button
-              type="button" disabled={cart.length === 0}
-              style={{ ...btnAccent, width: "auto", flex: "1 1 auto", background: COLORS.success, borderColor: COLORS.success, opacity: cart.length === 0 ? 0.5 : 1, cursor: cart.length === 0 ? "not-allowed" : "pointer", minHeight: 44 }}
-              onClick={() => setRedeemMode(true)}
-            >
-              ใช้รางวัลกับออเดอร์นี้
-            </button>
-            <button type="button" style={{ ...btn, flex: "1 1 auto", minHeight: 44 }} onClick={() => setRedeemMode(false)}>เก็บไว้ใช้ครั้งถัดไป</button>
-          </div>
-        ) : (
-          <div style={{ marginTop: 12 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 600, color: COLORS.espresso4, marginBottom: 6 }}>เลือกแก้วที่อยากแลกฟรี:</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-              {cart.map((l) => (
-                <label key={l.lineId} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, cursor: "pointer", color: COLORS.espresso4, minHeight: 28 }}>
-                  <input type="radio" name="redeemLine" checked={redeemLineId === l.lineId} onChange={() => setRedeemLineId(l.lineId)} />
-                  {l.name} ({money(l.unitPrice)})
-                </label>
-              ))}
-            </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-              {redeemLineId && <button type="button" style={{ ...btn, fontSize: 12, padding: "6px 12px" }} onClick={() => setRedeemLineId(null)}>ไม่แลกแล้ว</button>}
-              <button type="button" style={{ ...btn, fontSize: 12, padding: "6px 12px" }} onClick={() => { setRedeemMode(false); setRedeemLineId(null); }}>ย้อนกลับ</button>
-            </div>
-          </div>
-        )}
-        {cart.length === 0 && !redeemMode && (
-          <div style={{ fontSize: 11.5, color: COLORS.espresso3, marginTop: 6 }}>เพิ่มเครื่องดื่มลงตะกร้าก่อนใช้รางวัล</div>
-        )}
-        <button type="button" onClick={() => setShowRewardTerms(true)} style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "none", border: "none", padding: 0, marginTop: 10, fontSize: 11.5, color: COLORS.espresso3, textDecoration: "underline", cursor: "pointer" }}>
-          <i className="ti ti-info-circle" style={{ fontSize: 12 }} aria-hidden="true"></i>ดูเงื่อนไขรางวัล
-        </button>
-        {showRewardTerms && <RewardTermsSheet goal={loyaltyBeanGoal} onClose={() => setShowRewardTerms(false)} />}
-      </div>
-    );
-  }
-
-  // กำลังสะสม — ยังไม่ครบเป้า
-  const projected = currentBeans + cartCount;
-  const remaining = Math.max(0, loyaltyBeanGoal - projected);
-  return (
-    <div style={cardStyle}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, fontWeight: 700, color: COLORS.sage }}>
-        <i className="ti ti-coffee" style={{ fontSize: 17 }} aria-hidden="true"></i>
-        สะสมเมล็ดรับเครื่องดื่มฟรี
-      </div>
-      <div style={{ fontSize: 13, color: COLORS.espresso4, marginTop: 5, fontWeight: 600 }}>ออเดอร์นี้ได้รับ +{cartCount} เมล็ด</div>
-      <div style={{ fontSize: 11.5, color: COLORS.espresso3, marginTop: 1 }}>เมล็ดจะเข้าบัญชีเมื่อได้รับเครื่องดื่มแล้ว</div>
-
-      <div style={{ marginTop: 12 }}>
-        <LoyaltyStampProgress current={currentBeans} pending={Math.min(cartCount, Math.max(0, loyaltyBeanGoal - currentBeans))} goal={loyaltyBeanGoal} />
-      </div>
-
-      <div style={{ fontSize: 12.5, color: COLORS.espresso3, marginTop: 8 }}>
-        หลังชำระ คุณจะมี {projected} จาก {loyaltyBeanGoal} เมล็ด
-      </div>
-      <div style={{ fontSize: 13, fontWeight: 700, color: COLORS.sageDark, marginTop: 2 }}>
-        {remaining > 0 ? `อีก ${remaining} เมล็ด รับเครื่องดื่มฟรี 1 แก้ว` : "ครบแล้ว! รับเครื่องดื่มฟรีได้ในออเดอร์ถัดไป"}
-      </div>
-
-      {(() => {
-        const tier = loyaltyTierFor(beanRecord.lifetimeBeans);
-        const nextIdx = LOYALTY_TIERS.findIndex((t) => t.id === tier.id) - 1;
-        const next = nextIdx >= 0 ? LOYALTY_TIERS[nextIdx] : null;
-        if (!next) return null;
-        return (
-          <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${COLORS.line}` }}>
-            <div style={{ fontSize: 10.5, color: COLORS.espresso3, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600 }}>ระดับปัจจุบัน</div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 3, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: COLORS.espresso4 }}>{tier.icon} {tier.label}</span>
-              <span style={{ fontSize: 11, color: COLORS.espresso3 }}>อีก {next.min - (beanRecord.lifetimeBeans || 0)} เมล็ด ถึงระดับ {next.label}</span>
-            </div>
-          </div>
-        );
-      })()}
-
-      <button type="button" onClick={() => setShowRewardTerms(true)} style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "none", border: "none", padding: 0, marginTop: 10, fontSize: 11.5, color: COLORS.espresso3, textDecoration: "underline", cursor: "pointer" }}>
-        <i className="ti ti-info-circle" style={{ fontSize: 12 }} aria-hidden="true"></i>ดูเงื่อนไขรางวัล
-      </button>
-      {showRewardTerms && <RewardTermsSheet goal={loyaltyBeanGoal} onClose={() => setShowRewardTerms(false)} />}
     </div>
   );
 }
@@ -1578,7 +1348,7 @@ export default function CustomerOrder({ shopUid }) {
           ))}
           {redeemDiscount > 0 && (
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: COLORS.sageDark, marginTop: 8 }}>
-              <span>🫘 แลกเมล็ดฟรี 1 แก้ว</span><span>-{money(redeemDiscount)}</span>
+              <span>แลกเมล็ดรับฟรี 1 แก้ว</span><span>-{money(redeemDiscount)}</span>
             </div>
           )}
           <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 600, fontSize: 15, borderTop: `1px dashed ${COLORS.line}`, marginTop: 8, paddingTop: 8 }}>
@@ -1603,9 +1373,9 @@ export default function CustomerOrder({ shopUid }) {
             setRedeemMode={setRedeemMode}
             redeemLineId={redeemLineId}
             setRedeemLineId={setRedeemLineId}
-            showRewardTerms={showRewardTerms}
-            setShowRewardTerms={setShowRewardTerms}
+            onShowRewardTerms={() => setShowRewardTerms(true)}
           />
+          {showRewardTerms && <RewardTermsSheet goal={loyaltyBeanGoal} onClose={() => setShowRewardTerms(false)} />}
 
           <label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>วิธีชำระเงิน</label>
           <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
