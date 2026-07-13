@@ -802,6 +802,9 @@ function ShopApp({ uid, user }) {
         "--sage": "#CE560D", "--sage-dark": "#A8440A", "--sage-light": "#FBEBDD",
         "--gold": "#CE560D", "--gold-dark": "#A8440A", "--gold-light": "#FBEBDD",
         "--info": "#3D6E8C", "--info-dark": "#2C5069", "--info-light": "#E4EDF2",
+        // "--sage"/"--gold" ทั้งคู่คือสีส้มแบรนด์ (ดูคอมเมนต์บรรทัดถัดไป) — ต้องมีโทนเขียวแยกต่างหากไว้ใช้กับ
+        // สถานะสำเร็จ/เปิดร้าน เพราะใช้สีส้มไม่ได้ (ดูเหมือนคำเตือน ไม่ใช่สถานะปกติ) เลขสีเดียวกับ COLORS.success ใน CustomerOrder.jsx
+        "--success": "#2E9E4F", "--success-dark": "#1F7A38", "--success-light": "#DFF3E3",
         "--danger": "#B23A2E", "--danger-line": "#E7CAC5", "--danger-light": "#FAEEEC",
         "--line": "#E4E8E5", "--line-soft": "#EEF1EF",
         "--f-display": "'Fraunces', serif", "--f-body": "'Manrope', 'Inter', sans-serif", "--f-mono": "'IBM Plex Mono', monospace",
@@ -5521,200 +5524,608 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
   );
 }
 
-function SettingsPanel({ data, updateData, showToast, uid }) {
-  const [shopName, setShopName] = useState(data.settings.shopName);
-  const [overhead, setOverhead] = useState(data.settings.overheadPerCup);
-  const [platforms, setPlatforms] = useState(data.settings.platforms);
-  const [promptpayId, setPromptpayId] = useState(data.settings.promptpayId || "");
-  const [bannerImageUrls, setBannerImageUrls] = useState(
-    data.settings.bannerImageUrls && data.settings.bannerImageUrls.length
-      ? data.settings.bannerImageUrls
-      : (data.settings.bannerImageUrl ? [data.settings.bannerImageUrl] : [])
+const KNOWN_DELIVERY_PLATFORMS = ["GrabFood", "LINE MAN", "foodpanda", "ShopeeFood"];
+
+// การ์ดตั้งค่าแบบมาตรฐาน — หัวข้อ 16-18px semibold ตามสเปก ต่างจาก SectionTitle เดิม (ตัวเล็ก uppercase) ที่ใช้เป็น
+// หัวข้อรองของแท็บอื่น เพราะบรีฟหน้านี้ต้องการ hierarchy ที่ชัดกว่าเดิมโดยเฉพาะ
+function SettingsCard({ icon, title, subtitle, children, style }) {
+  return (
+    <div className="set-card" style={style}>
+      <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: subtitle ? 2 : 14 }}>
+        <div style={{ width: 30, height: 30, borderRadius: 9, background: "var(--cream-2)", color: "var(--sage-dark)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <Icon name={icon} size={16} />
+        </div>
+        <div style={{ fontSize: 16.5, fontWeight: 600, color: "var(--espresso-5)" }}>{title}</div>
+      </div>
+      {subtitle && <div style={{ fontSize: 12.5, color: "var(--espresso-2)", marginBottom: 14, lineHeight: 1.5 }}>{subtitle}</div>}
+      {children}
+    </div>
   );
+}
+
+function SettingsField({ label, error, suffix, children }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--espresso-4)", marginBottom: 5 }}>{label}</label>
+      <div style={{ position: "relative" }}>
+        {children}
+        {suffix && <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", fontSize: 12.5, color: "var(--espresso-2)", fontWeight: 600, pointerEvents: "none" }}>{suffix}</span>}
+      </div>
+      {error && <div style={{ fontSize: 12, color: "var(--danger)", marginTop: 5, display: "flex", alignItems: "center", gap: 4 }}><Icon name="alert-circle" size={12} />{error}</div>}
+    </div>
+  );
+}
+
+// ไม่มี Accordion สำเร็จรูปในระบบมาก่อน สร้างใหม่แบบง่ายที่สุด — ปิดเป็นค่าเริ่มต้นเสมอตามสเปก
+function SettingsAccordion({ title, children }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="set-card" style={{ padding: 0, overflow: "hidden" }}>
+      <button
+        type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
+        style={{
+          width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+          padding: "16px 20px", background: "none", border: "none", cursor: "pointer", textAlign: "left",
+        }}
+      >
+        <span style={{ fontSize: 14.5, fontWeight: 600, color: "var(--espresso-4)" }}>{title}</span>
+        <Icon name="chevron-down" size={16} style={{ color: "var(--espresso-2)", transition: "transform 200ms ease", transform: open ? "rotate(180deg)" : "none", flexShrink: 0 }} />
+      </button>
+      {open && <div style={{ padding: "0 20px 18px" }}>{children}</div>}
+    </div>
+  );
+}
+
+function BannerThumbPreview({ url, alt }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [url]);
+  return (
+    <div className="set-banner-thumb">
+      {url && !failed ? (
+        <img src={url} alt={alt || "ตัวอย่างแบนเนอร์"} onError={() => setFailed(true)} />
+      ) : (
+        <div className="set-banner-thumb-empty"><Icon name="photo" size={20} /></div>
+      )}
+    </div>
+  );
+}
+
+function bannerNameFromUrl(url) {
+  if (!url) return "ยังไม่ได้ใส่รูป";
+  try {
+    const clean = url.split("?")[0];
+    const parts = clean.split("/");
+    return decodeURIComponent(parts[parts.length - 1] || url);
+  } catch {
+    return url;
+  }
+}
+
+function BannerCard({ url, index, editing, onEdit, onChange, onDelete, dragProps }) {
+  return (
+    <div
+      className="set-banner-card"
+      draggable
+      {...dragProps}
+    >
+      <span className="set-drag-handle" title="ลากเพื่อเรียงลำดับ" aria-label="ลากเพื่อเรียงลำดับ"><Icon name="grip-vertical" size={15} /></span>
+      <BannerThumbPreview url={url} alt={`แบนเนอร์ลำดับที่ ${index + 1}`} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--espresso-4)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {bannerNameFromUrl(url)}
+        </div>
+        <div style={{ fontSize: 11.5, color: "var(--espresso-2)", marginTop: 1 }}>แนะนำขนาด 1200 × 300 px</div>
+        {editing && (
+          <input
+            className="cfield" autoFocus value={url} onChange={(e) => onChange(e.target.value)}
+            placeholder="https://..." style={{ marginTop: 8 }}
+          />
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+        <button type="button" className="set-icon-btn" onClick={onEdit} title="เปลี่ยนรูป" aria-label="เปลี่ยนรูป">
+          <Icon name="replace" size={15} />
+        </button>
+        <button type="button" className="set-icon-btn set-icon-btn-danger" onClick={onDelete} title="ลบแบนเนอร์" aria-label="ลบแบนเนอร์">
+          <Icon name="trash" size={15} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function OrderLinkCard({ uid }) {
+  const [dataUrl, setDataUrl] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const orderUrl = `${window.location.origin}/order/${uid}`;
+
+  useEffect(() => {
+    let cancelled = false;
+    QRCode.toDataURL(orderUrl, { width: 240, margin: 1 }).then((url) => {
+      if (!cancelled) setDataUrl(url);
+    });
+    return () => { cancelled = true; };
+  }, [orderUrl]);
+
+  function copyLink() {
+    navigator.clipboard.writeText(orderUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    });
+  }
+
+  function downloadQr() {
+    if (!dataUrl) return;
+    const a = document.createElement("a");
+    a.href = dataUrl;
+    a.download = "qr-order-link.png";
+    a.click();
+  }
+
+  function printQr() {
+    if (!dataUrl) return;
+    const w = window.open("", "_blank");
+    if (!w) return;
+    w.document.write(`<html><head><title>QR สั่งซื้อ</title></head><body style="display:flex;align-items:center;justify-content:center;height:100vh;margin:0;"><img src="${dataUrl}" style="width:320px;height:320px;" onload="window.print()" /></body></html>`);
+    w.document.close();
+  }
+
+  return (
+    <SettingsCard icon="link" title="ลิงก์สั่งซื้อสำหรับลูกค้า" subtitle="ปริ้น QR นี้ติดหน้าร้าน ลูกค้าสแกนแล้วสั่ง+จ่ายได้เอง">
+      <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
+        {dataUrl
+          ? <img src={dataUrl} alt="QR โค้ดลิงก์สั่งซื้อของร้าน" width={180} height={180} style={{ borderRadius: 10, border: "1px solid var(--line)" }} />
+          : <div style={{ width: 180, height: 180, borderRadius: 10, background: "var(--cream-2)" }} />}
+      </div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+        <input className="cfield" readOnly value={orderUrl} style={{ fontFamily: "var(--f-mono)", fontSize: 11.5 }} onFocus={(e) => e.target.select()} />
+        <button type="button" className="cbtn" style={{ flexShrink: 0, whiteSpace: "nowrap" }} onClick={copyLink}>
+          <Icon name={copied ? "check" : "copy"} size={13} /> {copied ? "คัดลอกแล้ว" : "คัดลอกลิงก์"}
+        </button>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <a className="cbtn" href={orderUrl} target="_blank" rel="noreferrer" style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 5 }}>
+          <Icon name="external-link" size={13} /> เปิดหน้าร้าน
+        </a>
+        <button type="button" className="cbtn" onClick={downloadQr}><Icon name="download" size={13} /> ดาวน์โหลด QR</button>
+        <button type="button" className="cbtn" onClick={printQr}><Icon name="printer" size={13} /> พิมพ์ QR</button>
+      </div>
+    </SettingsCard>
+  );
+}
+
+function SettingsPanel({ data, updateData, showToast, uid }) {
+  const s = data.settings;
+  const [shopName, setShopName] = useState(s.shopName);
+  const [overhead, setOverhead] = useState(String(s.overheadPerCup));
+  const [platforms, setPlatforms] = useState(s.platforms);
+  const [promptpayId, setPromptpayId] = useState(s.promptpayId || "");
+  const originalBannerUrls = s.bannerImageUrls && s.bannerImageUrls.length ? s.bannerImageUrls : (s.bannerImageUrl ? [s.bannerImageUrl] : []);
+  const [bannerImageUrls, setBannerImageUrls] = useState(originalBannerUrls);
+  const [editingBannerIdx, setEditingBannerIdx] = useState(null);
+  const [dragBannerIdx, setDragBannerIdx] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [confirmCloseOrders, setConfirmCloseOrders] = useState(false);
+  const [confirmDeletePlatform, setConfirmDeletePlatform] = useState(null);
+  const [confirmDeleteBanner, setConfirmDeleteBanner] = useState(null);
+  const [addPlatformOpen, setAddPlatformOpen] = useState(false);
+
+  // เบอร์แพลตฟอร์มที่ "เคยถูกบันทึกแล้วจริง" ตอนโหลดหน้า — ใช้ตัดสินว่าลบแล้วต้อง confirm ไหม (แถวที่เพิ่งเพิ่มยังไม่เคยเซฟ ลบตรงๆ ได้เลย)
+  const savedPlatformIdsRef = useRef(new Set(s.platforms.map((p) => p.id)));
+  const savedBannerUrlsRef = useRef(new Set(originalBannerUrls));
 
   function updateBannerUrl(idx, value) {
     setBannerImageUrls((u) => u.map((x, i) => (i === idx ? value : x)));
   }
   function addBannerUrl() {
     setBannerImageUrls((u) => [...u, ""]);
+    setEditingBannerIdx(bannerImageUrls.length);
   }
-  function removeBannerUrl(idx) {
-    setBannerImageUrls((u) => u.filter((_, i) => i !== idx));
+  function requestRemoveBanner(idx) {
+    const url = bannerImageUrls[idx];
+    if (url && savedBannerUrlsRef.current.has(url)) {
+      setConfirmDeleteBanner(idx);
+    } else {
+      setBannerImageUrls((u) => u.filter((_, i) => i !== idx));
+    }
   }
-
-  function save() {
-    updateData((next) => {
-      next.settings.shopName = shopName;
-      next.settings.overheadPerCup = Number(overhead);
-      next.settings.platforms = platforms;
-      next.settings.promptpayId = promptpayId.trim();
-      next.settings.bannerImageUrls = bannerImageUrls.map((u) => u.trim()).filter(Boolean);
+  function reorderBanner(from, to) {
+    setBannerImageUrls((u) => {
+      const next = u.slice();
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
     });
-    showToast("บันทึกการตั้งค่าแล้ว");
   }
 
   function updatePlatform(idx, patch) {
     setPlatforms((p) => p.map((x, i) => (i === idx ? { ...x, ...patch } : x)));
   }
-  function addPlatform() {
-    setPlatforms((p) => [...p, { id: genId("plat"), name: "แพลตฟอร์มใหม่", gpPercent: 30 }]);
+  function addPlatform(name, gpPercent) {
+    setPlatforms((p) => [...p, { id: genId("plat"), name, gpPercent }]);
+    setAddPlatformOpen(false);
   }
-  function removePlatform(idx) {
-    setPlatforms((p) => p.filter((_, i) => i !== idx));
+  function requestRemovePlatform(idx) {
+    const plat = platforms[idx];
+    if (savedPlatformIdsRef.current.has(plat.id)) {
+      setConfirmDeletePlatform(idx);
+    } else {
+      setPlatforms((p) => p.filter((_, i) => i !== idx));
+    }
   }
 
   function toggleAcceptingOrders() {
-    updateData((next) => {
-      next.settings.acceptingOrders = !next.settings.acceptingOrders;
-    });
-    showToast(data.settings.acceptingOrders ? "ปิดรับออเดอร์ลูกค้าแล้ว" : "เปิดรับออเดอร์ลูกค้าแล้ว");
+    if (s.acceptingOrders) {
+      setConfirmCloseOrders(true);
+      return;
+    }
+    updateData((next) => { next.settings.acceptingOrders = true; });
+    showToast("เปิดรับออเดอร์ลูกค้าแล้ว");
+  }
+  function confirmCloseOrdersNow() {
+    updateData((next) => { next.settings.acceptingOrders = false; });
+    showToast("ปิดรับออเดอร์ลูกค้าแล้ว");
+    setConfirmCloseOrders(false);
   }
 
-  function toggleSlipTestMode() {
+  function toggleSlipTestMode(next) {
+    updateData((d) => { d.settings.slipTestMode = next; });
+    showToast(next ? "เปิดโหมดทดสอบสลิปแล้ว" : "ปิดโหมดทดสอบสลิปแล้ว");
+  }
+
+  // validation
+  const shopNameError = shopName.trim() ? "" : "กรุณาใส่ชื่อร้าน";
+  const overheadNum = Number(overhead);
+  const overheadError = overhead.trim() === "" || Number.isNaN(overheadNum) || overheadNum < 0 ? "กรอกตัวเลขที่มากกว่าหรือเท่ากับ 0" : "";
+  const platformNameCounts = useMemo(() => {
+    const counts = {};
+    for (const p of platforms) {
+      const key = (p.name || "").trim().toLowerCase();
+      if (!key) continue;
+      counts[key] = (counts[key] || 0) + 1;
+    }
+    return counts;
+  }, [platforms]);
+  function platformErrorFor(p) {
+    if (!p.name.trim()) return "กรุณาใส่ชื่อแพลตฟอร์ม";
+    if (platformNameCounts[p.name.trim().toLowerCase()] > 1) return "ชื่อแพลตฟอร์มนี้ซ้ำกับรายการอื่น";
+    const gp = Number(p.gpPercent);
+    if (p.gpPercent === "" || Number.isNaN(gp) || gp < 0 || gp > 100) return "GP ต้องอยู่ระหว่าง 0-100";
+    return "";
+  }
+  const hasErrors = !!shopNameError || !!overheadError || platforms.some((p) => !!platformErrorFor(p));
+
+  const dirty =
+    shopName !== s.shopName ||
+    overhead !== String(s.overheadPerCup) ||
+    JSON.stringify(platforms) !== JSON.stringify(s.platforms) ||
+    promptpayId !== (s.promptpayId || "") ||
+    JSON.stringify(bannerImageUrls) !== JSON.stringify(originalBannerUrls);
+
+  useEffect(() => {
+    function handler(e) {
+      if (!dirty) return;
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [dirty]);
+
+  function discardChanges() {
+    setShopName(s.shopName);
+    setOverhead(String(s.overheadPerCup));
+    setPlatforms(s.platforms);
+    setPromptpayId(s.promptpayId || "");
+    setBannerImageUrls(originalBannerUrls);
+    setEditingBannerIdx(null);
+  }
+
+  // updateData ในระบบนี้เป็น local state update ที่ sync ทันที + debounce เขียน Firebase เบื้องหลัง 400ms (fire-and-forget,
+  // error ของการเขียนจริงมี toast กลางระบบดักอยู่แล้วที่ ShopApp) หน้านี้จึงโชว์ loading สั้นๆ กันกดซ้ำ/ให้เห็น feedback
+  // ไม่ได้รอผลเขียนจริงจบเป็น promise เพราะ save() เดิมของทั้งระบบไม่เคยมี promise ให้ await อยู่แล้ว
+  function save() {
+    if (hasErrors || saving) return;
+    setSaving(true);
     updateData((next) => {
-      next.settings.slipTestMode = !next.settings.slipTestMode;
+      next.settings.shopName = shopName.trim();
+      next.settings.overheadPerCup = Number(overhead);
+      next.settings.platforms = platforms;
+      next.settings.promptpayId = promptpayId.trim();
+      next.settings.bannerImageUrls = bannerImageUrls.map((u) => u.trim()).filter(Boolean);
     });
-    showToast(data.settings.slipTestMode ? "ปิดโหมดทดสอบสลิปแล้ว" : "เปิดโหมดทดสอบสลิปแล้ว");
+    setTimeout(() => {
+      setSaving(false);
+      showToast("บันทึกการตั้งค่าแล้ว");
+    }, 400);
   }
 
   return (
-    <div style={{ maxWidth: 420 }}>
-      <SectionTitle icon="settings" text="ตั้งค่าร้าน" />
+    <div className="set-wrap">
+      <style>{`
+        .set-wrap { max-width: 1080px; }
+        .set-header { margin-bottom: 20px; }
+        .set-grid { display: grid; grid-template-columns: 1.15fr 1fr; gap: 20px; align-items: start; }
+        @media (max-width: 900px) { .set-grid { grid-template-columns: 1fr; } }
+        .set-col { display: flex; flex-direction: column; gap: 20px; }
+        .set-card { background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 20px; box-shadow: 0 2px 10px rgba(0,0,0,.03); }
+        .set-status-card { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; border-radius: 16px; padding: 16px 20px; margin-bottom: 20px; }
+        .set-icon-btn { width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--line); background: #fff; color: var(--espresso-3); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; transition: background 150ms ease, color 150ms ease; }
+        .set-icon-btn:hover { background: var(--cream-2); color: var(--espresso-4); }
+        .set-icon-btn-danger:hover { background: var(--danger-light); color: var(--danger); }
+        .set-platform-row { display: grid; grid-template-columns: 1fr 110px 40px; gap: 8px; align-items: start; padding: 10px 0; border-bottom: 1px solid var(--line); }
+        .set-platform-row:last-of-type { border-bottom: none; }
+        .set-platform-head { display: grid; grid-template-columns: 1fr 110px 40px; gap: 8px; font-size: 11.5px; font-weight: 600; color: var(--espresso-2); text-transform: uppercase; letter-spacing: .03em; padding-bottom: 8px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+        @media (max-width: 560px) {
+          .set-platform-head { display: none; }
+          .set-platform-row { grid-template-columns: 1fr; gap: 6px; background: var(--cream-2); border-radius: 10px; padding: 10px; margin-bottom: 8px; border-bottom: none; }
+          /* บนมือถือปุ่มสำคัญต้องมีพื้นที่กดอย่างน้อย 44px ตามสเปก — .cbtn ปกติเตี้ยกว่านั้นเพราะใช้ร่วมกับหน้าอื่นทั้งระบบ
+             จึงบังคับความสูงเฉพาะภายใน .set-wrap ตอนจอแคบ ไม่กระทบปุ่ม .cbtn ของแท็บอื่น */
+          .set-wrap .cbtn { min-height: 44px; }
+          .set-wrap .set-icon-btn { width: 44px; height: 44px; }
+        }
+        .set-banner-card { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 8px; background: #fff; cursor: grab; }
+        .set-banner-card:active { cursor: grabbing; }
+        .set-drag-handle { color: var(--espresso-2); flex-shrink: 0; cursor: grab; touch-action: none; }
+        .set-banner-thumb { width: 76px; height: 40px; border-radius: 8px; overflow: hidden; flex-shrink: 0; background: var(--cream-2); }
+        .set-banner-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .set-banner-thumb-empty { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--espresso-2); }
+        .set-alert { display: flex; gap: 8px; align-items: flex-start; background: var(--gold-light); border: 1px solid var(--gold); color: var(--gold-dark); border-radius: 10px; padding: 10px 12px; font-size: 12px; line-height: 1.5; margin-top: 10px; }
+        .set-savebar { position: sticky; bottom: 0; margin-top: 24px; background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 12px 18px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; box-shadow: 0 -4px 20px rgba(0,0,0,.06); z-index: 10; }
+        .set-empty { text-align: center; padding: 24px 10px; color: var(--espresso-2); font-size: 12.5px; }
+        .cbtn:focus-visible, .set-icon-btn:focus-visible, .cfield:focus-visible { outline: 2px solid var(--sage); outline-offset: 2px; }
+        .cbtn:disabled { opacity: .5; cursor: not-allowed; }
+        .cbtn:disabled:hover { background: #fff; }
+        .cbtn-accent:disabled:hover { background: var(--sage); }
+        .inv-btn-ghost { height: 40px; padding: 0 16px; border: 1px solid ${INV.border}; border-radius: 10px; background: #fff; color: ${INV.ink}; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+        .inv-btn-danger { height: 40px; padding: 0 16px; border: none; border-radius: 10px; background: ${INV.danger}; color: #fff; font-size: 13.5px; font-weight: 700; cursor: pointer; }
+      `}</style>
 
-      <div style={{
-        display: "flex", justifyContent: "space-between", alignItems: "center",
-        background: data.settings.acceptingOrders ? "var(--sage-light)" : "var(--danger-light)",
-        border: `1px solid ${data.settings.acceptingOrders ? "var(--sage)" : "var(--danger-line)"}`,
-        borderRadius: 12, padding: "12px 14px", marginBottom: 18,
+      <div className="set-header">
+        <p style={{ margin: 0, fontSize: 11.5, color: "var(--espresso-2)", fontWeight: 600 }}>{data.settings.shopName}</p>
+        <h1 style={{ margin: "2px 0 4px", fontSize: 22, fontWeight: 700, color: "var(--espresso-5)", fontFamily: "var(--f-display)" }}>การตั้งค่าร้าน</h1>
+        <p style={{ margin: 0, fontSize: 13, color: "var(--espresso-2)" }}>จัดการข้อมูลร้าน การรับออเดอร์ การชำระเงิน และหน้าสั่งซื้อ</p>
+      </div>
+
+      <div className="set-status-card" style={{
+        background: s.acceptingOrders ? "var(--success-light)" : "var(--cream-2)",
+        border: `1px solid ${s.acceptingOrders ? "var(--success)" : "var(--line)"}`,
       }}>
-        <div>
-          <div style={{ fontWeight: 600, fontSize: 13.5, color: data.settings.acceptingOrders ? "var(--sage-dark)" : "var(--danger)" }}>
-            {data.settings.acceptingOrders ? "เปิดรับออเดอร์ลูกค้าอยู่" : "ปิดรับออเดอร์ลูกค้าชั่วคราว"}
-          </div>
-          <div style={{ fontSize: 11.5, color: "var(--espresso-2)", marginTop: 2 }}>
-            {data.settings.acceptingOrders ? "ลูกค้าสั่งผ่านหน้าเว็บได้ตามปกติ" : "ลูกค้าจะเห็นข้อความว่าร้านปิดรับออเดอร์"}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{
+            width: 10, height: 10, borderRadius: "50%", flexShrink: 0,
+            background: s.acceptingOrders ? "var(--success-dark)" : "#9CA3AF",
+            boxShadow: s.acceptingOrders ? "0 0 0 4px rgba(46,158,79,.18)" : "none",
+          }} />
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 14, color: s.acceptingOrders ? "var(--success-dark)" : "var(--espresso-4)" }}>
+              {s.acceptingOrders ? "กำลังเปิดรับออเดอร์" : "ปิดรับออเดอร์ชั่วคราว"}
+            </div>
+            <div style={{ fontSize: 12, color: "var(--espresso-2)", marginTop: 1 }}>
+              {s.acceptingOrders ? "ลูกค้าสามารถสั่งซื้อผ่านหน้าร้านได้ตามปกติ" : "ลูกค้าจะเห็นข้อความว่าร้านปิดรับออเดอร์ชั่วคราว"}
+            </div>
           </div>
         </div>
-        <button
-          className={data.settings.acceptingOrders ? "cbtn cbtn-danger" : "cbtn cbtn-accent"}
-          onClick={toggleAcceptingOrders}
-        >
-          {data.settings.acceptingOrders ? "ปิดรับออเดอร์" : "เปิดรับออเดอร์"}
+        <button className={s.acceptingOrders ? "cbtn cbtn-danger" : "cbtn cbtn-accent"} onClick={toggleAcceptingOrders} style={{ flexShrink: 0 }}>
+          {s.acceptingOrders ? "ปิดรับออเดอร์" : "เปิดรับออเดอร์"}
         </button>
       </div>
 
-      <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ชื่อร้าน</label>
-      <input className="cfield" value={shopName} onChange={(e) => setShopName(e.target.value)} style={{ marginBottom: 12 }} />
-      <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ต้นทุนแฝงต่อแก้ว (ค่าไฟ+ค่าเสื่อมอุปกรณ์, บาท)</label>
-      <input className="cfield" type="number" value={overhead} onChange={(e) => setOverhead(e.target.value)} style={{ marginBottom: 18 }} />
+      <div className="set-grid">
+        <div className="set-col">
+          <SettingsCard icon="building-store" title="ข้อมูลร้านและต้นทุน">
+            <SettingsField label="ชื่อร้าน" error={shopNameError}>
+              <TextField className="cfield" style={{ height: 42 }} value={shopName} onChange={setShopName} />
+            </SettingsField>
+            <SettingsField label="ต้นทุนแฝงต่อแก้ว (ค่าไฟ + ค่าเสื่อมอุปกรณ์)" error={overheadError} suffix="บาท">
+              <input className="cfield" style={{ height: 42, paddingRight: 44 }} type="number" min="0" step="0.01" value={overhead} onChange={(e) => setOverhead(e.target.value)} />
+            </SettingsField>
+          </SettingsCard>
 
-      <SectionTitle icon="truck-delivery" text="แพลตฟอร์มเดลิเวอรี่ & % GP" />
-      {platforms.map((p, idx) => (
-        <div key={p.id} style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
-          <input className="cfield" value={p.name} onChange={(e) => updatePlatform(idx, { name: e.target.value })} />
-          <input className="cfield" style={{ width: 80 }} type="number" value={p.gpPercent} onChange={(e) => updatePlatform(idx, { gpPercent: Number(e.target.value) })} />
-          <span style={{ fontSize: 12, color: "var(--espresso-2)" }}>%</span>
-          <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => removePlatform(idx)} title="ลบแพลตฟอร์มนี้"><Icon name="x" size={13} /></button>
+          <SettingsCard icon="truck-delivery" title="แพลตฟอร์มเดลิเวอรีและ GP">
+            <div className="set-platform-head">
+              <span>แพลตฟอร์ม</span><span>GP (%)</span><span></span>
+            </div>
+            {platforms.map((p, idx) => {
+              const err = platformErrorFor(p);
+              return (
+                <div key={p.id} className="set-platform-row">
+                  <div>
+                    <TextField className="cfield" style={{ height: 40 }} value={p.name} onChange={(v) => updatePlatform(idx, { name: v })} placeholder="ชื่อแพลตฟอร์ม" />
+                    {err && <div style={{ fontSize: 11.5, color: "var(--danger)", marginTop: 4 }}>{err}</div>}
+                  </div>
+                  <div style={{ position: "relative" }}>
+                    <input
+                      className="cfield" style={{ height: 40, paddingRight: 26 }} type="number" min="0" max="100"
+                      value={p.gpPercent} onChange={(e) => updatePlatform(idx, { gpPercent: e.target.value === "" ? "" : Number(e.target.value) })}
+                    />
+                    <span style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", fontSize: 12, color: "var(--espresso-2)", pointerEvents: "none" }}>%</span>
+                  </div>
+                  <button className="set-icon-btn set-icon-btn-danger" onClick={() => requestRemovePlatform(idx)} title="ลบแพลตฟอร์ม" aria-label="ลบแพลตฟอร์ม">
+                    <Icon name="trash" size={15} />
+                  </button>
+                </div>
+              );
+            })}
+            {platforms.length === 0 && <div className="set-empty">ยังไม่มีแพลตฟอร์มเดลิเวอรี่</div>}
+            <button className="cbtn" style={{ marginTop: 12 }} onClick={() => setAddPlatformOpen(true)}>
+              <Icon name="plus" size={13} /> เพิ่มแพลตฟอร์ม
+            </button>
+          </SettingsCard>
+
+          <SettingsCard icon="qrcode" title="การชำระเงินและ PromptPay">
+            <SettingsField label="เบอร์พร้อมเพย์ / เลขบัตรประชาชน">
+              <TextField className="cfield" style={{ height: 42 }} value={promptpayId} onChange={setPromptpayId} placeholder="0812345678" />
+            </SettingsField>
+            <p style={{ fontSize: 12, color: "var(--espresso-2)", margin: "-6px 0 16px" }}>ใช้สำหรับสร้าง QR รับเงินในหน้าสั่งซื้อของลูกค้า ต้องบันทึกก่อนจึงจะใช้งานได้</p>
+
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, paddingTop: 4 }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13.5, color: "var(--espresso-4)" }}>โหมดทดสอบสลิป</div>
+                <div style={{ fontSize: 12, color: "var(--espresso-2)", marginTop: 1 }}>
+                  {s.slipTestMode ? "เปิดใช้งาน — แนบสลิปอะไรก็ได้แล้วผ่านทันที" : "แนบสลิปจริงต้องผ่านการตรวจสอบ SlipOK"}
+                </div>
+              </div>
+              <OptgToggle checked={s.slipTestMode} onChange={toggleSlipTestMode} color="var(--sage)" />
+            </div>
+            {s.slipTestMode && (
+              <div className="set-alert">
+                <Icon name="alert-triangle" size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>โหมดทดสอบสลิปเปิดอยู่ — ระบบจะไม่ตรวจสอบสลิปจริงผ่าน SlipOK จนกว่าจะปิดโหมดนี้ ใช้เฉพาะตอนทดสอบระบบเท่านั้น</span>
+              </div>
+            )}
+          </SettingsCard>
+
+          <SettingsAccordion title="วิธีคำนวณสต็อกและ GP">
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: "var(--espresso-3)", lineHeight: 1.8 }}>
+              <li>ข้อมูลทั้งหมด (วัตถุดิบ เมนู ยอดขาย) ถูกบันทึกไว้อัตโนมัติ และจะยังอยู่เมื่อกลับมาเปิดใหม่</li>
+              <li>"นมสด (รวม)" ใช้แทนแบรนด์เฉพาะ — ตัดสต็อกจากยอดรวมนมสดทุกครั้งที่ขาย</li>
+              <li>ยกเว้นตอนขายเลือก "นม Oat" ซึ่งจะตัดจากสต็อกนม Oat แยกต่างหาก ไม่ปนกับนมสด</li>
+              <li>แต่ละแพลตฟอร์มเดลิเวอรี่หัก GP ตาม % ที่ตั้งไว้ในการ์ด "แพลตฟอร์มเดลิเวอรีและ GP" ด้านบน</li>
+            </ul>
+          </SettingsAccordion>
         </div>
-      ))}
-      <button className="cbtn" onClick={addPlatform}><Icon name="plus" size={13} /> เพิ่มแพลตฟอร์ม</button>
 
-      <div style={{ marginTop: 18 }}>
-        <SectionTitle icon="qrcode" text="รับออเดอร์ลูกค้า & PromptPay" />
-        <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>เบอร์พร้อมเพย์ / เลขบัตรประชาชน (สำหรับ gen QR รับเงิน)</label>
-        <input className="cfield" value={promptpayId} onChange={(e) => setPromptpayId(e.target.value)} placeholder="0812345678" style={{ marginBottom: 6 }} />
-        <p style={{ fontSize: 11, color: "var(--espresso-2)", margin: "0 0 8px" }}>ใส่แล้วบันทึกก่อน จึงจะใช้หน้าสั่งซื้อลูกค้าได้ หน้าจ่ายเงินจะให้ลูกค้าแนบรูปสลิปเพื่อยืนยันยอดอัตโนมัติ</p>
+        <div className="set-col">
+          <OrderLinkCard uid={uid} />
 
-        <div style={{
-          display: "flex", justifyContent: "space-between", alignItems: "center",
-          background: data.settings.slipTestMode ? "var(--gold-light)" : "var(--cream-2)",
-          border: `1px solid ${data.settings.slipTestMode ? "var(--gold)" : "var(--line)"}`,
-          borderRadius: 12, padding: "12px 14px", marginTop: 10,
-        }}>
-          <div>
-            <div style={{ fontWeight: 600, fontSize: 13, color: data.settings.slipTestMode ? "var(--gold-dark)" : "var(--espresso-4)" }}>
-              โหมดทดสอบสลิป
-            </div>
-            <div style={{ fontSize: 11, color: "var(--espresso-2)", marginTop: 2 }}>
-              {data.settings.slipTestMode
-                ? "แนบสลิปอะไรก็ได้แล้วผ่านทันที ไม่เรียก SlipOK จริง (ไม่เสียโควต้า)"
-                : "เปิดไว้ตอนทดสอบระบบ เพื่อไม่ให้เสียโควต้า SlipOK จริง"}
-            </div>
-          </div>
-          <button
-            className={data.settings.slipTestMode ? "cbtn cbtn-danger" : "cbtn"}
-            onClick={toggleSlipTestMode}
-          >
-            {data.settings.slipTestMode ? "ปิดโหมดทดสอบ" : "เปิดโหมดทดสอบ"}
+          <SettingsCard icon="photo" title="แบนเนอร์หน้าลูกค้า" subtitle="ใส่ได้หลายรูป ระบบจะเลื่อนสไลด์วนอัตโนมัติที่หน้าลูกค้า ไม่ใส่รูปเลยถ้าไม่ต้องการแสดงแบนเนอร์">
+            {bannerImageUrls.length === 0 ? (
+              <div className="set-empty">
+                <Icon name="photo-off" size={26} style={{ display: "block", margin: "0 auto 8px", color: "var(--espresso-2)" }} />
+                ยังไม่มีแบนเนอร์ — ลูกค้าจะไม่เห็นสไลด์โฆษณาที่หน้าสั่งซื้อ
+              </div>
+            ) : (
+              bannerImageUrls.map((url, idx) => (
+                <BannerCard
+                  key={idx}
+                  url={url}
+                  index={idx}
+                  editing={editingBannerIdx === idx}
+                  onEdit={() => setEditingBannerIdx(editingBannerIdx === idx ? null : idx)}
+                  onChange={(v) => updateBannerUrl(idx, v)}
+                  onDelete={() => requestRemoveBanner(idx)}
+                  dragProps={{
+                    onDragStart: () => setDragBannerIdx(idx),
+                    onDragOver: (e) => e.preventDefault(),
+                    onDrop: () => {
+                      if (dragBannerIdx !== null && dragBannerIdx !== idx) reorderBanner(dragBannerIdx, idx);
+                      setDragBannerIdx(null);
+                    },
+                  }}
+                />
+              ))
+            )}
+            <button className="cbtn" style={{ marginTop: 6 }} onClick={addBannerUrl}>
+              <Icon name="plus" size={13} /> เพิ่มแบนเนอร์
+            </button>
+          </SettingsCard>
+        </div>
+      </div>
+
+      <div className="set-savebar">
+        <div style={{ fontSize: 12.5, color: dirty ? "var(--gold-dark)" : "var(--espresso-2)", fontWeight: dirty ? 600 : 400, display: "flex", alignItems: "center", gap: 6 }}>
+          {dirty && <Icon name="alert-circle" size={14} />}
+          {dirty ? "มีการเปลี่ยนแปลงที่ยังไม่ได้บันทึก" : "ไม่มีการเปลี่ยนแปลง"}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="cbtn" disabled={!dirty || saving} style={{ opacity: !dirty || saving ? 0.5 : 1 }} onClick={discardChanges}>ยกเลิกการเปลี่ยนแปลง</button>
+          <button className="cbtn cbtn-accent" disabled={!dirty || hasErrors || saving} style={{ opacity: !dirty || hasErrors || saving ? 0.5 : 1, minWidth: 132 }} onClick={save}>
+            {saving ? "กำลังบันทึก..." : "บันทึกการตั้งค่า"}
           </button>
         </div>
       </div>
 
-      <div style={{ marginTop: 18 }}>
-        <SectionTitle icon="photo" text="แบนเนอร์โฆษณาหน้าลูกค้า" />
-        <p style={{ fontSize: 11, color: "var(--espresso-2)", margin: "-6px 0 10px" }}>
-          ใส่ได้หลายรูป ระบบจะเลื่อนสไลด์วนอัตโนมัติที่หน้าลูกค้า แนะนำรูปอัตราส่วนยาว ๆ (เช่น 1200×300px) ไม่ใส่รูปเลยถ้าไม่ต้องการแสดงแบนเนอร์
-        </p>
-        {bannerImageUrls.map((url, idx) => (
-          <div key={idx} style={{ display: "flex", gap: 6, marginBottom: 8, alignItems: "flex-start" }}>
-            <div style={{ flex: 1 }}>
-              <input className="cfield" value={url} onChange={(e) => updateBannerUrl(idx, e.target.value)} placeholder="https://..." />
-              <BannerThumbPreview url={url} />
-            </div>
-            <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => removeBannerUrl(idx)} title="ลบรูปนี้"><Icon name="x" size={13} /></button>
-          </div>
-        ))}
-        <button className="cbtn" onClick={addBannerUrl}><Icon name="plus" size={13} /> เพิ่มรูปแบนเนอร์</button>
-      </div>
+      {addPlatformOpen && (
+        <AddPlatformModal
+          existingNames={platforms.map((p) => p.name.trim().toLowerCase())}
+          onAdd={addPlatform}
+          onClose={() => setAddPlatformOpen(false)}
+        />
+      )}
 
-      <div style={{ marginTop: 6 }}>
-        <button className="cbtn cbtn-accent" onClick={save}>บันทึกการตั้งค่า</button>
-      </div>
+      {confirmCloseOrders && (
+        <InvConfirmDialog
+          title="ปิดรับออเดอร์ลูกค้า?"
+          message="ลูกค้าจะไม่สามารถสั่งซื้อผ่านหน้าร้านออนไลน์ได้จนกว่าจะเปิดรับออเดอร์อีกครั้ง"
+          confirmLabel="ปิดรับออเดอร์"
+          onConfirm={confirmCloseOrdersNow}
+          onCancel={() => setConfirmCloseOrders(false)}
+        />
+      )}
 
-      {uid && <OrderLinkCard uid={uid} />}
+      {confirmDeletePlatform !== null && (
+        <InvConfirmDialog
+          title="ลบแพลตฟอร์มนี้?"
+          message={`"${platforms[confirmDeletePlatform]?.name || "แพลตฟอร์มนี้"}" เคยถูกบันทึกไว้แล้ว ลบแล้วออเดอร์เก่าที่ผูกกับแพลตฟอร์มนี้จะยังอยู่ แต่จะเลือกแพลตฟอร์มนี้ตอนขายใหม่ไม่ได้อีก`}
+          confirmLabel="ลบแพลตฟอร์ม"
+          onConfirm={() => { setPlatforms((p) => p.filter((_, i) => i !== confirmDeletePlatform)); setConfirmDeletePlatform(null); }}
+          onCancel={() => setConfirmDeletePlatform(null)}
+        />
+      )}
 
-      <p style={{ fontSize: 11.5, color: "var(--espresso-2)", marginTop: 20, lineHeight: 1.6 }}>
-        ข้อมูลทั้งหมด (วัตถุดิบ เมนู ยอดขาย) ถูกบันทึกไว้อัตโนมัติ และจะยังอยู่เมื่อกลับมาเปิดใหม่ นมสด (รวม) ใช้แทนแบรนด์เฉพาะ — ตัดสต็อกจากยอดรวมนมสด ยกเว้นตอนขายเลือก "นม Oat" ซึ่งจะตัดจากสต็อกนม Oat แยกต่างหาก แต่ละแพลตฟอร์มเดลิเวอรี่หัก GP ตาม % ที่ตั้งไว้ด้านบน
-      </p>
+      {confirmDeleteBanner !== null && (
+        <InvConfirmDialog
+          title="ลบแบนเนอร์นี้?"
+          message="แบนเนอร์นี้จะหายไปจากสไลด์โฆษณาหน้าลูกค้าทันทีหลังบันทึก"
+          confirmLabel="ลบแบนเนอร์"
+          onConfirm={() => { setBannerImageUrls((u) => u.filter((_, i) => i !== confirmDeleteBanner)); setConfirmDeleteBanner(null); }}
+          onCancel={() => setConfirmDeleteBanner(null)}
+        />
+      )}
     </div>
   );
 }
 
-function BannerThumbPreview({ url }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [url]);
-  if (!url || failed) return null;
-  return (
-    <img
-      src={url}
-      alt="ตัวอย่างแบนเนอร์"
-      style={{ width: "100%", maxHeight: 70, objectFit: "cover", borderRadius: 8, border: "1px solid var(--line)", marginTop: 4 }}
-      onError={() => setFailed(true)}
-    />
-  );
-}
+function AddPlatformModal({ existingNames, onAdd, onClose }) {
+  useEscape(onClose);
+  const available = KNOWN_DELIVERY_PLATFORMS.filter((n) => !existingNames.includes(n.toLowerCase()));
+  const [choice, setChoice] = useState(available[0] || "custom");
+  const [customName, setCustomName] = useState("");
+  const [gp, setGp] = useState(30);
 
-function OrderLinkCard({ uid }) {
-  const [dataUrl, setDataUrl] = useState(null);
-  const orderUrl = `${window.location.origin}/order/${uid}`;
-
-  useEffect(() => {
-    let cancelled = false;
-    QRCode.toDataURL(orderUrl, { width: 220, margin: 1 }).then((url) => {
-      if (!cancelled) setDataUrl(url);
-    });
-    return () => { cancelled = true; };
-  }, [orderUrl]);
+  const finalName = choice === "custom" ? customName.trim() : choice;
+  const isDuplicate = finalName && existingNames.includes(finalName.toLowerCase());
+  const gpNum = Number(gp);
+  const gpValid = gp !== "" && !Number.isNaN(gpNum) && gpNum >= 0 && gpNum <= 100;
+  const canAdd = finalName.length > 0 && !isDuplicate && gpValid;
 
   return (
-    <div style={glass({ borderRadius: 12, padding: 16, marginTop: 18 })}>
-      <SectionTitle icon="link" text="ลิงก์สั่งซื้อสำหรับลูกค้า" />
-      <p style={{ fontSize: 12, color: "var(--espresso-2)", margin: "0 0 10px" }}>ปริ้น QR นี้ติดหน้าร้าน ลูกค้าสแกนแล้วสั่ง+จ่ายได้เอง</p>
-      {dataUrl && <img src={dataUrl} alt="QR ลิงก์สั่งซื้อ" width={160} height={160} style={{ borderRadius: 8, border: "1px solid var(--line)" }} />}
-      <p style={{ fontFamily: "var(--f-mono)", fontSize: 11.5, color: "var(--espresso-3)", wordBreak: "break-all", marginTop: 10 }}>{orderUrl}</p>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(17,24,39,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 16 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 24, width: 380, maxWidth: "100%", boxShadow: "0 20px 60px rgba(0,0,0,.25)" }} role="dialog" aria-modal="true">
+        <div style={{ fontSize: 17, fontWeight: 700, color: "var(--espresso-5)", marginBottom: 14 }}>เพิ่มแพลตฟอร์มเดลิเวอรี่</div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+          {available.map((name) => (
+            <label key={name} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, color: "var(--espresso-4)", cursor: "pointer" }}>
+              <input type="radio" name="platform-choice" checked={choice === name} onChange={() => setChoice(name)} /> {name}
+            </label>
+          ))}
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, color: "var(--espresso-4)", cursor: "pointer" }}>
+            <input type="radio" name="platform-choice" checked={choice === "custom"} onChange={() => setChoice("custom")} /> อื่นๆ (ระบุชื่อ)
+          </label>
+          {choice === "custom" && (
+            <input className="cfield" style={{ marginTop: 2, marginLeft: 22, width: "calc(100% - 22px)" }} value={customName} onChange={(e) => setCustomName(e.target.value)} placeholder="ชื่อแพลตฟอร์ม" autoFocus />
+          )}
+          {isDuplicate && <div style={{ fontSize: 11.5, color: "var(--danger)", marginLeft: 22 }}>มีแพลตฟอร์มชื่อนี้อยู่แล้ว</div>}
+        </div>
+
+        <label style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--espresso-4)", marginBottom: 5 }}>GP (%)</label>
+        <div style={{ position: "relative", marginBottom: 6 }}>
+          <input className="cfield" style={{ height: 42, paddingRight: 30 }} type="number" min="0" max="100" value={gp} onChange={(e) => setGp(e.target.value === "" ? "" : Number(e.target.value))} />
+          <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", fontSize: 12.5, color: "var(--espresso-2)" }}>%</span>
+        </div>
+        {!gpValid && <div style={{ fontSize: 11.5, color: "var(--danger)", marginBottom: 6 }}>GP ต้องอยู่ระหว่าง 0-100</div>}
+
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 16 }}>
+          <button className="inv-btn-ghost" onClick={onClose}>ยกเลิก</button>
+          <button className="cbtn cbtn-accent" style={{ height: 40 }} disabled={!canAdd} onClick={() => canAdd && onAdd(finalName, gpNum)}>เพิ่มแพลตฟอร์ม</button>
+        </div>
+      </div>
     </div>
   );
 }
+
 
 export default function App() {
   const [user, setUser] = useState(undefined);
