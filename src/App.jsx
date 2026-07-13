@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { auth, db } from "./firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { ref, onValue, set, update, push } from "firebase/database";
+import { ref, onValue, set, update, push, runTransaction } from "firebase/database";
 import QRCode from "qrcode";
 import Login from "./Login.jsx";
 import CustomerOrder from "./CustomerOrder.jsx";
@@ -155,7 +155,7 @@ function defaultState() {
     menus,
     sales: [],
     purchases: [],
-    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true, slipTestMode: false, bannerImageUrl: "", bannerImageUrls: [], categoryOrder: [], defaultPackagingLines: [] },
+    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true, slipTestMode: false, bannerImageUrl: "", bannerImageUrls: [], categoryOrder: [], defaultPackagingLines: [], loyaltyBeanGoal: 10 },
     optionGroups,
     promotions: [],
   };
@@ -183,6 +183,7 @@ function normalizeData(raw) {
       bannerImageUrls: raw.settings?.bannerImageUrls || [],
       categoryOrder: raw.settings?.categoryOrder || [],
       defaultPackagingLines: raw.settings?.defaultPackagingLines || [],
+      loyaltyBeanGoal: raw.settings?.loyaltyBeanGoal || 10,
     },
     optionGroups: (raw.optionGroups || []).filter(Boolean).map((g) => ({
       ...g,
@@ -475,6 +476,7 @@ const TABS = [
   { id: "orders", label: "Orders", icon: "receipt" },
   { id: "menus", label: "Menu & Recipes", icon: "cup" },
   { id: "promotions", label: "Promotions", icon: "discount" },
+  { id: "loyalty", label: "Loyalty Beans", icon: "coffee" },
   { id: "options", label: "Add-on Options", icon: "list-details" },
   { id: "ingredients", label: "Inventory & Stock", icon: "box-multiple" },
   { id: "reports", label: "Reports", icon: "chart-line" },
@@ -489,6 +491,7 @@ function ShopApp({ uid, user }) {
     () => typeof window !== "undefined" && window.matchMedia("(max-width: 1024px)").matches
   );
   const [orders, setOrders] = useState([]);
+  const [customers, setCustomers] = useState([]);
   // เช็คแค่ตอน mount ครั้งเดียวไม่พอ — ถ้าหน้าจอเปลี่ยนขนาดทีหลัง (resize, หมุนแท็บเล็ต) โดยไม่ reload หน้า
   // sidebarCollapsed จะค้างค่าตอน mount ตลอด ทำให้ sidebar เต็มบีบเนื้อหาแคบเกินจนอ่านไม่ออกบนจอมือถือจริง
   useEffect(() => {
@@ -517,6 +520,16 @@ function ShopApp({ uid, user }) {
       prevPendingCount.current = pendingCount;
       isFirstOrdersSnapshot.current = false;
       setOrders(list);
+    });
+    return () => unsub();
+  }, [uid]);
+
+  // เก็บลูกค้า/เมล็ดสะสมแยกโหนดจาก shops/{uid} เหมือน orders — เพราะลูกค้าเขียนแลกเมล็ดตรงจากหน้า QR เอง
+  // (คนละ session กับแอดมิน) ถ้าฝากไว้ใน data ก้อนใหญ่ที่ set() ทับทั้งก้อนทุก 400ms จะโดนค่าเก่าทับหายได้
+  useEffect(() => {
+    const unsub = onValue(ref(db, `customers/${uid}`), (snap) => {
+      const val = snap.val() || {};
+      setCustomers(Object.values(val));
     });
     return () => unsub();
   }, [uid]);
@@ -554,7 +567,8 @@ function ShopApp({ uid, user }) {
           const upcharge = (item.options || []).reduce((s, x) => s + (x.priceDelta || 0), 0);
           const itemMenu = data.menus.find((m) => m.id === item.menuId);
           const substitutions = itemMenu ? resolveIngredientAdjustmentsFromOptions(itemMenu, item.options, ingredientsById) : {};
-          recordSale(item.menuId, item.qty, "online", { upcharge, substitutions, milkLabel: (item.options || []).map((x) => x.label).join(", ") || null, orderId: o.id });
+          const promoDiscount = item.freeUnit && itemMenu ? itemMenu.priceStore + upcharge : 0;
+          recordSale(item.menuId, item.qty, "online", { upcharge, substitutions, promoDiscount, milkLabel: (item.options || []).map((x) => x.label).join(", ") || null, orderId: o.id });
         }
         // สลิปยืนยันอัตโนมัติทำให้ order ค้างที่ status "paid" ซึ่งไม่ใช่หนึ่งใน 4 คอลัมน์ Kanban แล้ว
         // ต้องเลื่อนเข้า "preparing" ทันที เหมือนตอนบาริสต้ากดยืนยันรับเงินสดเอง ไม่งั้นการ์ดจะหายไปจากบอร์ด
@@ -649,7 +663,7 @@ function ShopApp({ uid, user }) {
 
   // ออเดอร์ที่ขายจากหน้า admin ต้องขึ้นบอร์ด Kanban เหมือนออเดอร์ลูกค้า ไม่งั้นบาริสต้าจะไม่มีการ์ดให้ไล่ทำตามสถานะ
   // จ่ายเงินแล้วที่หน้าร้านตอนกดขาย จึงเข้าคอลัมน์ "กำลังดำเนินการ" ทันที ข้ามสถานะ "รอยืนยัน" (เหมือนสลิปยืนยันอัตโนมัติ)
-  function createInstoreOrder(cart, note) {
+  function createInstoreOrder(cart, note, customerPhone) {
     const items = cart.map((line) => ({
       menuId: line.menuId, name: line.menuName, unitPrice: line.unitPrice, qty: line.qty, options: line.options,
     }));
@@ -658,7 +672,7 @@ function ShopApp({ uid, user }) {
     const customerName = platformNames.length > 0 ? platformNames.join(", ") : "ขายหน้าร้าน";
     const newRef = push(ref(db, `orders/${uid}`));
     set(newRef, {
-      customerName, customerPhone: "", note: note || "",
+      customerName, customerPhone: customerPhone || "", note: note || "",
       paymentMethod: "cash", pickupDate: new Date().toISOString().slice(0, 10),
       items, total, status: "preparing", createdAt: new Date().toISOString(),
       saleRecorded: true, source: "admin-pos",
@@ -690,6 +704,39 @@ function ShopApp({ uid, user }) {
     update(ref(db, `orders/${uid}/${order.id}`), { status: "cancelled", saleRecorded: false })
       .catch((err) => showToast("ยกเลิกไม่สำเร็จ: " + err.message));
     showToast(order.saleRecorded ? "ยกเลิกออเดอร์แล้ว คืนสต็อกและตัดยอดขายออกให้อัตโนมัติ" : "ยกเลิกออเดอร์แล้ว");
+  }
+
+  // ให้เมล็ดสะสมตอนออเดอร์ถึงสถานะ "เสร็จ" (done) เท่านั้น — ไม่ใช่ตอนยืนยันจ่ายเงิน เพราะกว่าจะถึงมือลูกค้าจริงๆ
+  // คือตอนรับแก้วที่หน้าร้าน กันเคสยกเลิก/พลาดหลังจ่ายเงินแล้วนับแต้มไปก่อน — เมล็ด 1 แก้ว = 1 หน่วย นับตาม qty รวมในออเดอร์
+  function awardLoyaltyBeans(order) {
+    const phoneKey = (order.customerPhone || "").replace(/\D/g, "");
+    if (!phoneKey) return;
+    const cups = (order.items || []).reduce((s, it) => s + (it.qty || 0), 0);
+    if (cups <= 0) return;
+    runTransaction(ref(db, `customers/${uid}/${phoneKey}`), (cur) => {
+      const prev = cur || { phone: phoneKey, name: "", beans: 0, lifetimeBeans: 0, redeemedCount: 0, createdAt: new Date().toISOString() };
+      return {
+        ...prev,
+        phone: phoneKey,
+        name: order.customerName && order.customerName !== "ขายหน้าร้าน" ? order.customerName : prev.name || "",
+        beans: (prev.beans || 0) + cups,
+        lifetimeBeans: (prev.lifetimeBeans || 0) + cups,
+        updatedAt: new Date().toISOString(),
+      };
+    }).catch((err) => showToast("บันทึกเมล็ดสะสมไม่สำเร็จ: " + err.message));
+  }
+
+  // แอดมินปรับเมล็ดมือ (เช่น ลูกค้าทำใบเสร็จหาย/ชดเชยกรณีพิเศษ) — บวก/ลบตรงจากค่าปัจจุบัน กันชนกันด้วย transaction เหมือนกัน
+  function adjustCustomerBeans(phoneKey, delta, name) {
+    runTransaction(ref(db, `customers/${uid}/${phoneKey}`), (cur) => {
+      const prev = cur || { phone: phoneKey, name: name || "", beans: 0, lifetimeBeans: 0, redeemedCount: 0, createdAt: new Date().toISOString() };
+      return { ...prev, phone: phoneKey, beans: Math.max(0, (prev.beans || 0) + delta), updatedAt: new Date().toISOString() };
+    }).then(() => showToast(delta > 0 ? `เพิ่มเมล็ดให้แล้ว +${delta}` : `หักเมล็ดแล้ว ${delta}`))
+      .catch((err) => showToast("ปรับเมล็ดไม่สำเร็จ: " + err.message));
+  }
+
+  function updateLoyaltyGoal(goal) {
+    updateData((next) => { next.settings.loyaltyBeanGoal = Math.max(1, Number(goal) || 10); });
   }
 
   const activeTabInfo = TABS.find((t) => t.id === tab);
@@ -872,6 +919,7 @@ function ShopApp({ uid, user }) {
           {tab === "promotions" && <PromotionsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "reports" && <ReportsPanel data={dataForDisplay} />}
+          {tab === "loyalty" && <LoyaltyPanel customers={customers} loyaltyBeanGoal={data.settings.loyaltyBeanGoal} adjustCustomerBeans={adjustCustomerBeans} updateLoyaltyGoal={updateLoyaltyGoal} showToast={showToast} />}
           {tab === "options" && <OptionGroupsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "settings" && <SettingsPanel data={data} updateData={updateData} showToast={showToast} uid={uid} />}
         </main>
@@ -1242,6 +1290,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
   const [state, setState] = useState({});
   const [cart, setCart] = useState([]);
   const [cartNote, setCartNote] = useState("");
+  const [cartPhone, setCartPhone] = useState("");
   // ช่องทางขาย/แพลตฟอร์ม/โปรโมชั่น ยกขึ้นมาเป็นตัวเลือกกลางตัวเดียวเหนือกริดสินค้า แทนที่จะให้ทุกการ์ดมีชุดของตัวเอง
   const [channel, setChannel] = useState("store");
   const [platformId, setPlatformId] = useState(data.settings.platforms[0]?.id || "");
@@ -1310,7 +1359,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
   }
 
   function checkout() {
-    const orderId = createInstoreOrder(cart, cartNote.trim());
+    const orderId = createInstoreOrder(cart, cartNote.trim(), cartPhone.trim());
     for (const line of cart) {
       recordSale(line.menuId, line.qty, line.channel, {
         substitutions: line.substitutions, upcharge: line.upcharge,
@@ -1320,6 +1369,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
     }
     setCart([]);
     setCartNote("");
+    setCartPhone("");
     setPromo(0);
   }
 
@@ -1545,6 +1595,13 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
             </div>
           )}
 
+          <label style={{ fontSize: 11, color: POS.gray, marginBottom: 4, fontWeight: 600 }}>เบอร์โทรลูกค้า (ถ้ามี — สะสมเมล็ดให้อัตโนมัติ)</label>
+          <input
+            value={cartPhone} onChange={(e) => setCartPhone(e.target.value)}
+            placeholder="เช่น 0812345678" inputMode="tel"
+            style={{ marginBottom: 10, fontFamily: "inherit", padding: "9px 11px", borderRadius: 12, border: `1px solid ${POS.border}`, fontSize: 13.5, width: "100%", boxSizing: "border-box" }}
+          />
+
           <label style={{ fontSize: 11, color: POS.gray, marginBottom: 4, fontWeight: 600 }}>หมายเหตุ (ถ้ามี)</label>
           <textarea
             value={cartNote} onChange={(e) => setCartNote(e.target.value)}
@@ -1560,6 +1617,118 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// รายชื่อลูกค้า/เมล็ดสะสม — อ่านจาก customers/{uid} (คนละโหนดจาก data ก้อนใหญ่ ดู awardLoyaltyBeans ว่าทำไม)
+// เรียงคนสะสมเยอะสุดขึ้นก่อน ค้นหาด้วยเบอร์/ชื่อได้ ปรับเมล็ดมือได้เผื่อกรณีพิเศษ
+function LoyaltyPanel({ customers, loyaltyBeanGoal, adjustCustomerBeans, updateLoyaltyGoal, showToast }) {
+  const [search, setSearch] = useState("");
+  const [goalInput, setGoalInput] = useState(String(loyaltyBeanGoal));
+  const [adjustFor, setAdjustFor] = useState(null);
+  const [adjustAmount, setAdjustAmount] = useState("1");
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const list = q
+      ? customers.filter((c) => c.phone.includes(q) || (c.name || "").toLowerCase().includes(q))
+      : customers;
+    return [...list].sort((a, b) => (b.beans || 0) - (a.beans || 0));
+  }, [customers, search]);
+
+  const totalCustomers = customers.length;
+  const totalBeansOut = customers.reduce((s, c) => s + (c.beans || 0), 0);
+  const eligibleCount = customers.filter((c) => (c.beans || 0) >= loyaltyBeanGoal).length;
+
+  function saveGoal() {
+    updateLoyaltyGoal(goalInput);
+    showToast("บันทึกเกณฑ์แลกแล้ว");
+  }
+
+  function submitAdjust(sign) {
+    const n = Math.max(1, Number(adjustAmount) || 1);
+    adjustCustomerBeans(adjustFor.phone, n * sign, adjustFor.name);
+    setAdjustFor(null);
+    setAdjustAmount("1");
+  }
+
+  return (
+    <div>
+      <style>{`
+        .loy-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 18px; }
+        @media (max-width: 720px) { .loy-stats { grid-template-columns: 1fr; } }
+        .loy-stat { background: #fff; border: 1px solid ${POS.border}; border-radius: 18px; padding: 16px 18px; }
+        .loy-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; border: 1px solid ${POS.border}; background: #fff; margin-bottom: 8px; }
+        .loy-goal-input { padding: 8px 10px; border-radius: 10px; border: 1px solid ${POS.border}; font-size: 13.5px; width: 80px; font-family: inherit; }
+      `}</style>
+
+      <SectionTitle icon="coffee" text="ลูกค้า / เมล็ดสะสม" />
+
+      <div className="loy-stats">
+        <div className="loy-stat">
+          <div style={{ fontSize: 12, color: POS.gray, fontWeight: 600 }}>ลูกค้าทั้งหมด</div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: POS.navy, marginTop: 4 }}>{totalCustomers} คน</div>
+        </div>
+        <div className="loy-stat">
+          <div style={{ fontSize: 12, color: POS.gray, fontWeight: 600 }}>เมล็ดสะสมค้างอยู่ (ยังไม่แลก)</div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: POS.primary, marginTop: 4 }}>🫘 {totalBeansOut}</div>
+        </div>
+        <div className="loy-stat">
+          <div style={{ fontSize: 12, color: POS.gray, fontWeight: 600 }}>พร้อมแลกฟรีตอนนี้</div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: "#15803D", marginTop: 4 }}>{eligibleCount} คน</div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <input
+          value={search} onChange={(e) => setSearch(e.target.value)}
+          placeholder="ค้นหาเบอร์โทร/ชื่อลูกค้า..."
+          style={{ padding: "9px 14px", borderRadius: 12, border: `1px solid ${POS.border}`, fontSize: 13.5, minWidth: 220, fontFamily: "inherit" }}
+        />
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 13, color: POS.gray, fontWeight: 600 }}>สะสมกี่เมล็ดแลกฟรี 1 แก้ว</span>
+          <input className="loy-goal-input" value={goalInput} onChange={(e) => setGoalInput(e.target.value)} inputMode="numeric" />
+          <button className="cbtn cbtn-accent" style={{ padding: "8px 14px", fontSize: 13 }} onClick={saveGoal}>บันทึก</button>
+        </div>
+      </div>
+
+      {filtered.length === 0 ? (
+        <EmptyNote text="ยังไม่มีลูกค้าสะสมเมล็ด — เมล็ดจะเริ่มนับอัตโนมัติเมื่อออเดอร์ที่มีเบอร์โทรลูกค้าถูกทำเสร็จ (สถานะ “เสร็จ” บนบอร์ดออเดอร์)" />
+      ) : (
+        <div>
+          {filtered.map((c) => (
+            <div key={c.phone} className="loy-row">
+              <div style={{ width: 40, height: 40, borderRadius: "50%", background: POS.chipBg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>🫘</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: POS.navy }}>{c.name || "(ไม่ทราบชื่อ)"} · {c.phone}</div>
+                <div style={{ fontSize: 12, color: POS.gray, marginTop: 1 }}>สะสม {c.beans || 0} / {loyaltyBeanGoal} เมล็ด · รวมตลอดกาล {c.lifetimeBeans || 0} เมล็ด</div>
+              </div>
+              {(c.beans || 0) >= loyaltyBeanGoal && (
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#15803D", background: "#EAF7EE", borderRadius: 999, padding: "4px 10px", flexShrink: 0 }}>แลกฟรีได้</span>
+              )}
+              <button className="cbtn" style={{ padding: "7px 12px", fontSize: 12.5, flexShrink: 0 }} onClick={() => setAdjustFor(c)}>ปรับเมล็ด</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {adjustFor && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }} onClick={() => setAdjustFor(null)}>
+          <div style={{ background: "#fff", borderRadius: 18, padding: 22, width: 300 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: POS.navy, marginBottom: 4 }}>ปรับเมล็ด — {adjustFor.name || adjustFor.phone}</div>
+            <div style={{ fontSize: 12, color: POS.gray, marginBottom: 12 }}>ปัจจุบัน {adjustFor.beans || 0} เมล็ด</div>
+            <input
+              value={adjustAmount} onChange={(e) => setAdjustAmount(e.target.value)} inputMode="numeric"
+              style={{ width: "100%", boxSizing: "border-box", padding: "9px 11px", borderRadius: 10, border: `1px solid ${POS.border}`, fontSize: 14, marginBottom: 12, fontFamily: "inherit" }}
+            />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="cbtn cbtn-accent" style={{ flex: 1, padding: "9px 0" }} onClick={() => submitAdjust(1)}>+ เพิ่ม</button>
+              <button className="cbtn cbtn-danger" style={{ flex: 1, padding: "9px 0" }} onClick={() => submitAdjust(-1)}>− หัก</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1640,7 +1809,10 @@ function OrderItemLines({ items, note, compact, onEditItem }) {
       {items.map((i, idx) => (
         <div key={idx} style={{ marginBottom: compact ? 5 : 9, paddingBottom: compact ? 5 : 9, borderBottom: idx < items.length - 1 ? "1px dashed var(--line-soft)" : "none" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: compact ? 5 : 10 }}>
-            <span style={{ fontSize: compact ? 11.5 : 16, fontWeight: 700, color: "var(--espresso-5)", lineHeight: 1.25 }}>{i.name} <span style={{ color: "var(--sage-dark)" }}>x{i.qty}</span></span>
+            <span style={{ fontSize: compact ? 11.5 : 16, fontWeight: 700, color: "var(--espresso-5)", lineHeight: 1.25 }}>
+              {i.name} <span style={{ color: "var(--sage-dark)" }}>x{i.qty}</span>
+              {i.freeUnit && <span style={{ marginLeft: 5, fontSize: compact ? 9.5 : 11, fontWeight: 700, color: "#B45309", background: "#FFF4E5", borderRadius: 999, padding: "1px 7px" }}>🫘 ฟรี</span>}
+            </span>
             <span style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
               {onEditItem && !compact && (
                 <button
@@ -1707,7 +1879,11 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, showToast, data, in
   }, [orders]);
 
   function setStatus(order, status) {
-    update(ref(db, `orders/${uid}/${order.id}`), { status }).catch((err) => showToast("อัปเดตไม่สำเร็จ: " + err.message));
+    // ให้เมล็ดสะสมแค่ครั้งเดียวตอนเข้า "done" ครั้งแรก (กันการ์ดถูกลากออกแล้วลากกลับเข้ามาใหม่นับซ้ำ)
+    const awarding = status === "done" && order.status !== "done" && !order.beansAwarded;
+    const patch = awarding ? { status, beansAwarded: true } : { status };
+    update(ref(db, `orders/${uid}/${order.id}`), patch).catch((err) => showToast("อัปเดตไม่สำเร็จ: " + err.message));
+    if (awarding) awardLoyaltyBeans(order);
   }
 
   // แก้ option ได้เฉพาะตอนออเดอร์ยังไม่ยืนยันจ่ายเงิน (ก่อนตัดสต็อก/บันทึกยอดขาย) กันไม่ให้ตัวเลขสต็อก/ต้นทุนที่บันทึกไปแล้วเพี้ยน
@@ -1737,7 +1913,9 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, showToast, data, in
       const upcharge = (item.options || []).reduce((s, o) => s + (o.priceDelta || 0), 0);
       const itemMenu = data.menus.find((m) => m.id === item.menuId);
       const substitutions = itemMenu ? resolveIngredientAdjustmentsFromOptions(itemMenu, item.options, ingredientsById) : {};
-      recordSale(item.menuId, item.qty, "online", { upcharge, substitutions, milkLabel: (item.options || []).map((o) => o.label).join(", ") || null, orderId: order.id });
+      // แลกเมล็ดฟรี 1 แก้ว — หักรายได้ที่บันทึกออกเท่าราคาแก้วนั้น (1 หน่วย) ไม่งั้นยอดขาย/กำไรจะเพี้ยนสูงเกินจริงทั้งที่ลูกค้าไม่ได้จ่าย
+      const promoDiscount = item.freeUnit && itemMenu ? itemMenu.priceStore + upcharge : 0;
+      recordSale(item.menuId, item.qty, "online", { upcharge, substitutions, promoDiscount, milkLabel: (item.options || []).map((o) => o.label).join(", ") || null, orderId: order.id });
     }
     showToast(`ยืนยันออเดอร์ ${order.customerName || order.customerPhone} แล้ว บันทึกยอดขายให้อัตโนมัติ`);
   }

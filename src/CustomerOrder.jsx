@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { getDatabase, ref, onValue, get, push, set } from "firebase/database";
+import { getDatabase, ref, onValue, get, push, set, runTransaction } from "firebase/database";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import QRCode from "qrcode";
 import generatePayload from "promptpay-qr";
@@ -590,6 +590,10 @@ export default function CustomerOrder({ shopUid }) {
   const [bannerImageUrl, setBannerImageUrl] = useState("");
   const [bannerImageUrls, setBannerImageUrls] = useState([]);
   const [categoryOrder, setCategoryOrder] = useState([]);
+  const [loyaltyBeanGoal, setLoyaltyBeanGoal] = useState(10);
+  const [beanRecord, setBeanRecord] = useState(null);
+  const beanUnsubRef = useRef(null);
+  const [redeemLineId, setRedeemLineId] = useState(null);
   const [cart, setCart] = useState([]);
   const [flyItems, setFlyItems] = useState([]);
   const [cartBump, setCartBump] = useState(false);
@@ -659,6 +663,7 @@ export default function CustomerOrder({ shopUid }) {
     const unsub7 = onValue(ref(db, `shops/${shopUid}/settings/bannerImageUrl`), (snap) => setBannerImageUrl(snap.val() || ""));
     const unsub7b = onValue(ref(db, `shops/${shopUid}/settings/bannerImageUrls`), (snap) => setBannerImageUrls(snap.val() || []));
     const unsub9 = onValue(ref(db, `shops/${shopUid}/settings/categoryOrder`), (snap) => setCategoryOrder(snap.val() || []));
+    const unsub10 = onValue(ref(db, `shops/${shopUid}/settings/loyaltyBeanGoal`), (snap) => setLoyaltyBeanGoal(snap.val() || 10));
     const unsub8 = onValue(ref(db, `shops/${shopUid}/promotions`), (snap) => {
       const list = snap.val() || [];
       setPromotions(list.map((p) => ({
@@ -668,8 +673,22 @@ export default function CustomerOrder({ shopUid }) {
         chooseCount: p.chooseCount || 2,
       })));
     });
-    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); unsub7(); unsub7b(); unsub8(); unsub9(); };
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); unsub7(); unsub7b(); unsub8(); unsub9(); unsub10(); };
   }, [authUid, shopUid]);
+
+  // เช็คเมล็ดสะสมของเบอร์นี้แบบสด — debounce กันยิง query ทุกครั้งที่พิมพ์ และรอให้เบอร์ครบอย่างน้อย 9 หลักก่อน
+  useEffect(() => {
+    const digits = phone.replace(/\D/g, "");
+    if (digits.length < 9) { setBeanRecord(null); return; }
+    const t = setTimeout(() => {
+      const unsub = onValue(ref(db, `customers/${shopUid}/${digits}`), (snap) => setBeanRecord(snap.val() || { beans: 0, lifetimeBeans: 0 }));
+      beanUnsubRef.current = unsub;
+    }, 400);
+    return () => {
+      clearTimeout(t);
+      if (beanUnsubRef.current) { beanUnsubRef.current(); beanUnsubRef.current = null; }
+    };
+  }, [phone, shopUid]);
 
   useEffect(() => {
     if (!order) return;
@@ -707,6 +726,7 @@ export default function CustomerOrder({ shopUid }) {
     setOrder(null);
     setQrDataUrl(null);
     setError("");
+    setRedeemLineId(null);
   }
 
   const menusById = useMemo(() => {
@@ -969,8 +989,16 @@ export default function CustomerOrder({ shopUid }) {
     }));
   }
 
-  const total = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0);
+  const beanGoalMet = (beanRecord?.beans || 0) >= loyaltyBeanGoal;
+  const redeemLine = redeemLineId ? cart.find((l) => l.lineId === redeemLineId) : null;
+  const redeemDiscount = beanGoalMet && redeemLine ? redeemLine.unitPrice : 0;
+  const total = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0) - redeemDiscount;
   const cartCount = cart.reduce((s, l) => s + l.qty, 0);
+
+  // ถ้าเมล็ดไม่พอ/ลบรายการที่เลือกแลกออกจากตะกร้าไปแล้ว ต้องเคลียร์การแลกทิ้งกันตัวเลขค้างผิด
+  useEffect(() => {
+    if (redeemLineId && (!beanGoalMet || !cart.some((l) => l.lineId === redeemLineId))) setRedeemLineId(null);
+  }, [redeemLineId, beanGoalMet, cart]);
 
   useEffect(() => {
     if (cartCount > prevCartCountRef.current) {
@@ -999,6 +1027,23 @@ export default function CustomerOrder({ shopUid }) {
         uidToUse = cred.user.uid;
         setAuthUid(uidToUse);
       }
+      const phoneDigits = phone.trim().replace(/\D/g, "");
+      let redeemedThisOrder = false;
+      // หักเมล็ดก่อนเขียนออเดอร์เสมอ เช็คยอดสดๆ ผ่าน transaction กันแลกซ้ำ/แลกทันเวลาชนกัน (เช่นเปิด 2 แท็บ)
+      // return undefined = ยกเลิก transaction (Firebase ถือว่า committed:false ไม่เขียนอะไรเลย)
+      if (redeemLine && phoneDigits) {
+        const result = await runTransaction(ref(db, `customers/${shopUid}/${phoneDigits}`), (cur) => {
+          if (!cur || (cur.beans || 0) < loyaltyBeanGoal) return undefined;
+          return { ...cur, beans: cur.beans - loyaltyBeanGoal, redeemedCount: (cur.redeemedCount || 0) + 1, updatedAt: new Date().toISOString() };
+        });
+        redeemedThisOrder = result.committed;
+      }
+      if (redeemLine && !redeemedThisOrder) {
+        setRedeemLineId(null);
+        setError("เมล็ดสะสมไม่พอสำหรับแลกฟรีแล้ว (อาจถูกแลกไปจากที่อื่น) กรุณากดยืนยันสั่งซื้ออีกครั้ง");
+        setSubmitting(false);
+        return;
+      }
       const newRef = push(ref(db, `orders/${shopUid}`));
       const orderData = {
         customerUid: uidToUse,
@@ -1007,8 +1052,9 @@ export default function CustomerOrder({ shopUid }) {
         note: note.trim(),
         paymentMethod,
         pickupDate,
-        items: cart.map(({ lineId, ...rest }) => rest),
+        items: cart.map(({ lineId, ...rest }) => (redeemedThisOrder && lineId === redeemLineId ? { ...rest, freeUnit: true } : rest)),
         total,
+        ...(redeemedThisOrder ? { redeemedBeans: true, beansUsed: loyaltyBeanGoal } : {}),
         status: "pending",
         createdAt: new Date().toISOString(),
       };
@@ -1263,6 +1309,11 @@ export default function CustomerOrder({ shopUid }) {
               {l.options.length > 0 && <div style={{ fontSize: 11, color: COLORS.espresso2 }}>{l.options.map((o) => o.label).join(", ")}</div>}
             </div>
           ))}
+          {redeemDiscount > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: COLORS.sageDark, marginTop: 8 }}>
+              <span>🫘 แลกเมล็ดฟรี 1 แก้ว</span><span>-{money(redeemDiscount)}</span>
+            </div>
+          )}
           <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 600, fontSize: 15, borderTop: `1px dashed ${COLORS.line}`, marginTop: 8, paddingTop: 8 }}>
             <span>รวม</span><span>{money(total)}</span>
           </div>
@@ -1272,6 +1323,37 @@ export default function CustomerOrder({ shopUid }) {
 
           <label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>เบอร์โทรศัพท์</label>
           <input style={field} type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="08xxxxxxxx" />
+
+          {beanRecord && (
+            <div style={{
+              marginTop: 10, borderRadius: 12, padding: "10px 12px",
+              background: beanGoalMet ? COLORS.sageLight : "#FBF7F1", border: `1px solid ${beanGoalMet ? COLORS.sage : COLORS.line}`,
+            }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12.5, fontWeight: 600, color: COLORS.espresso4 }}>
+                <span>🫘 เมล็ดสะสม {beanRecord.beans || 0} / {loyaltyBeanGoal}</span>
+                {!beanGoalMet && <span style={{ color: COLORS.espresso2, fontWeight: 500 }}>อีก {Math.max(0, loyaltyBeanGoal - (beanRecord.beans || 0))} แก้วครบแลกฟรี!</span>}
+              </div>
+              {beanGoalMet && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontSize: 12, color: COLORS.sageDark, fontWeight: 600, marginBottom: 6 }}>ครบแล้ว! เลือกแก้วที่อยากแลกฟรี 1 แก้ว:</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                    {cart.map((l) => (
+                      <label key={l.lineId} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, cursor: "pointer" }}>
+                        <input
+                          type="radio" name="redeemLine" checked={redeemLineId === l.lineId}
+                          onChange={() => setRedeemLineId(l.lineId)}
+                        />
+                        {l.name} ({money(l.unitPrice)})
+                      </label>
+                    ))}
+                    {redeemLineId && (
+                      <button type="button" style={{ ...btn, fontSize: 11.5, padding: "4px 10px", alignSelf: "flex-start", marginTop: 2 }} onClick={() => setRedeemLineId(null)}>ไม่แลกแล้ว</button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           <label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>วิธีชำระเงิน</label>
           <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
