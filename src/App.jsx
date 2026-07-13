@@ -713,7 +713,7 @@ function ShopApp({ uid, user }) {
         .cbtn-edit:hover { background: var(--info); color: #fff; }
         .cfield { border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font-size: 13px; background: #fff; color: var(--espresso-4); width: 100%; }
         .cfield:focus { outline: 2px solid var(--sage); outline-offset: 1px; }
-        .navitem { border: none; border-left: 3px solid transparent; background: transparent; color: var(--espresso-3); padding: 11px 14px 11px 12px; margin: 1px 0; font-size: 13.5px; font-weight: 500; border-radius: 10px; display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; transition: background .15s ease, color .15s ease, border-color .15s ease; }
+        .navitem { border: none; border-left: 3px solid transparent; background: transparent; color: var(--espresso-3); padding: 11px 14px 11px 12px; margin: 1px 0; font-family: var(--f-body); font-size: 13.5px; font-weight: 500; border-radius: 10px; display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; transition: background .15s ease, color .15s ease, border-color .15s ease; }
         .navitem:hover { background: rgba(37,99,235,.06); color: #1D4ED8; }
         .navitem.active { background: rgba(37,99,235,.08); border-left-color: #2563EB; color: #1D4ED8; font-weight: 700; }
         table.cdata { width: 100%; border-collapse: collapse; font-size: 13px; }
