@@ -2341,15 +2341,15 @@ function openOrderStickerPrint(orderOrOrders, shopName) {
         <meta charset="utf-8" />
         <title>สติ๊กเกอร์ออเดอร์ ${escapePrintHtml(printTitle)}</title>
         <style>
-          @page { size: 170mm 220mm; margin: 0; }
+          @page { size: 168mm 220mm; margin: 0; }
           * { box-sizing: border-box; }
-          html, body { width: 170mm; margin: 0; padding: 0; color: #000; background: #fff; font-family: Tahoma, Arial, sans-serif; }
+          html, body { width: 168mm; margin: 0; padding: 0; color: #000; background: #fff; font-family: Tahoma, Arial, sans-serif; }
           .sheet {
             display: grid;
             grid-template-columns: repeat(3, 53mm);
             grid-template-rows: repeat(10, 22mm);
             align-content: start;
-            width: 170mm;
+            width: 168mm;
             height: 219.8mm;
             padding: 2mm 0 0 6mm;
             overflow: hidden;
@@ -2377,7 +2377,7 @@ function openOrderStickerPrint(orderOrOrders, shopName) {
           .label__bottom span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
           .label__bottom b { flex-shrink: 0; }
           @media screen {
-            body::before { content: "${escapePrintHtml(shopName || "ร้านกาแฟ")} · แผ่น 170 × 220 มม. · ดวง 50 × 19 มม. · Margins: None / Scale: 100%"; display: block; position: fixed; z-index: 2; top: 8px; left: 50%; transform: translateX(-50%); padding: 8px 12px; border-radius: 8px; color: #fff; background: #173b63; font-size: 12px; white-space: nowrap; }
+            body::before { content: "${escapePrintHtml(shopName || "ร้านกาแฟ")} · แผ่น 168 × 220 มม. · ดวง 50 × 19 มม. · Margins: None / Scale: 100%"; display: block; position: fixed; z-index: 2; top: 8px; left: 50%; transform: translateX(-50%); padding: 8px 12px; border-radius: 8px; color: #fff; background: #173b63; font-size: 12px; white-space: nowrap; }
             body { padding: 24px; background: #e7e7e7; }
             .sheet { margin: 24px auto; background: #fff; box-shadow: 0 4px 24px rgba(0,0,0,.16); }
             .label:not(.label--blank) { outline: 1px dashed #aaa; }
