@@ -2512,6 +2512,20 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, showToast, data, in
     });
   }
 
+  function toggleColumnSelection(columnOrders) {
+    const orderIds = columnOrders.map((order) => order.id);
+    if (orderIds.length === 0) return;
+    setSelectedOrderIds((selected) => {
+      const next = new Set(selected);
+      const allSelected = orderIds.every((orderId) => next.has(orderId));
+      for (const orderId of orderIds) {
+        if (allSelected) next.delete(orderId);
+        else next.add(orderId);
+      }
+      return next;
+    });
+  }
+
   function printSelectedOrderStickers() {
     const selectedOrders = orders.filter((order) => selectedOrderIds.has(order.id) && ["pending", "paid", "preparing", "ready", "done"].includes(order.status));
     if (selectedOrders.length === 0) {
@@ -2630,6 +2644,7 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, showToast, data, in
       }}>
         {KANBAN_COLUMNS.map((col) => {
           const list = columns[col.id];
+          const allInColumnSelected = list.length > 0 && list.every((order) => selectedOrderIds.has(order.id));
           const isOver = overCol === col.id && dragId;
           const c = STATUS_COLORS[col.id];
           return (
@@ -2649,7 +2664,21 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, showToast, data, in
                   <span className="status-dot" style={{ background: c.dot, width: compact ? 7 : 10, height: compact ? 7 : 10, flexShrink: 0 }} />
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{col.label}</span>
                 </div>
-                <span style={{ fontSize: compact ? 10.5 : 12, fontWeight: 700, color: "var(--espresso-2)", background: "var(--cream-2)", borderRadius: 999, padding: compact ? "1px 6px" : "1px 9px", flexShrink: 0 }}>{list.length}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                  <button
+                    type="button"
+                    className="cbtn"
+                    disabled={list.length === 0}
+                    onClick={() => toggleColumnSelection(list)}
+                    title={allInColumnSelected ? `ยกเลิกเลือกสถานะ ${col.label}` : `เลือกออเดอร์ทั้งหมดในสถานะ ${col.label}`}
+                    aria-label={allInColumnSelected ? `ยกเลิกเลือกสถานะ ${col.label}` : `เลือกสถานะ ${col.label}`}
+                    aria-pressed={allInColumnSelected}
+                    style={{ display: "grid", width: compact ? 24 : 28, height: compact ? 24 : 28, padding: 0, placeItems: "center" }}
+                  >
+                    <Icon name={allInColumnSelected ? "square-check" : "square"} size={compact ? 12 : 14} />
+                  </button>
+                  <span style={{ fontSize: compact ? 10.5 : 12, fontWeight: 700, color: "var(--espresso-2)", background: "var(--cream-2)", borderRadius: 999, padding: compact ? "1px 6px" : "1px 9px" }}>{list.length}</span>
+                </div>
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: compact ? 6 : 10, minHeight: 60 }}>
