@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { initializeApp, getApps, getApp } from "firebase/app";
 import {
   getAuth, signInAnonymously, onAuthStateChanged, PhoneAuthProvider, RecaptchaVerifier,
@@ -11,6 +11,7 @@ import generatePayload from "promptpay-qr";
 import { firebaseConfig } from "./firebase";
 import LoyaltyCard from "./components/loyalty/LoyaltyCard.jsx";
 import RewardOtpModal from "./components/loyalty/RewardOtpModal.jsx";
+import PromotionTakeover from "./components/promotions/PromotionTakeover.jsx";
 
 // Isolated secondary app so an anonymous customer session never shares
 // Auth persistence with the owner dashboard's login on the same device/browser.
@@ -736,6 +737,7 @@ export default function CustomerOrder({ shopUid }) {
   const [activeCategory, setActiveCategory] = useState(null);
   const [showCart, setShowCart] = useState(false);
   const [splashDone, setSplashDone] = useState(false);
+  const [takeoverPromo, setTakeoverPromo] = useState(null);
   const [hasActiveOrder, setHasActiveOrder] = useState(false);
   const [headerRipple, setHeaderRipple] = useState(false);
 
@@ -883,6 +885,22 @@ export default function CustomerOrder({ shopUid }) {
     });
   }, [promotions, menusById]);
 
+  const closePromotionTakeover = useCallback(() => setTakeoverPromo(null), []);
+
+  useEffect(() => {
+    if (!splashDone || !acceptingOrders || step !== "menu") return;
+    const featuredPromo = activePromotions.find((promo) => promo.showAsPopup === true);
+    if (!featuredPromo) return;
+    const sessionKey = `promotionTakeover:${shopUid}:${featuredPromo.id}`;
+    try {
+      if (sessionStorage.getItem(sessionKey)) return;
+      sessionStorage.setItem(sessionKey, "shown");
+    } catch {
+      // เปิดต่อได้แม้ browser จำกัด sessionStorage เช่น private/in-app browser บางรุ่น
+    }
+    setTakeoverPromo(featuredPromo);
+  }, [splashDone, acceptingOrders, step, activePromotions, shopUid]);
+
   const categories = useMemo(() => {
     if (!menus) return [];
     const seen = [];
@@ -1023,6 +1041,20 @@ export default function CustomerOrder({ shopUid }) {
       return;
     }
     setBundleFlow({ promo, queue: needsOptions, index: 0, optionsByMenuId: {} });
+  }
+
+  function openTakeoverPromotion(promo) {
+    closePromotionTakeover();
+    if (promo.type === "choice") {
+      setPickingChoicePromo(promo);
+      return;
+    }
+    if (promo.type === "bundle") {
+      startBundleFlow(promo);
+      return;
+    }
+    const menu = menusById[promo.menuIds?.[0]];
+    if (menu) openMenu(menu, promo);
   }
 
   function confirmBundleFlowStep(qty, options) {
@@ -1715,6 +1747,15 @@ export default function CustomerOrder({ shopUid }) {
     <div className="corder" style={{ height: "100vh", display: "flex", flexDirection: "column", fontFamily: "'Inter', sans-serif", color: COLORS.espresso4, animation: "pageIn .32s cubic-bezier(.22,1,.36,1) both" }}>
       <style>{GLOBAL_CSS}</style>
       <GlassBackdrop />
+
+      {takeoverPromo && (
+        <PromotionTakeover
+          promo={takeoverPromo}
+          imageUrl={takeoverPromo.popupImageUrl || menusById[takeoverPromo.menuIds?.[0]]?.imageUrl || ""}
+          onClose={closePromotionTakeover}
+          onCta={() => openTakeoverPromotion(takeoverPromo)}
+        />
+      )}
 
       {flyItems.map((f) => (
         <div

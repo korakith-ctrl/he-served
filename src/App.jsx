@@ -203,6 +203,11 @@ function normalizeData(raw) {
       chooseCount: p.chooseCount || 2,
       startAt: p.startAt || null,
       endAt: p.endAt || null,
+      showAsPopup: p.showAsPopup === true,
+      popupImageUrl: p.popupImageUrl || "",
+      popupTitle: p.popupTitle || "",
+      popupDescription: p.popupDescription || "",
+      popupCtaLabel: p.popupCtaLabel || "",
     })),
   };
 }
@@ -3663,6 +3668,11 @@ function PromoCard({ promo, menusById, priceNode, status, daysRemaining, moreIte
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <PromoTypeBadge type={type} />
             <PromoStatusBadge status={status} />
+            {promo.showAsPopup && (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700, borderRadius: 999, padding: "3px 9px", color: "#7C3AED", background: "#F3E8FF", whiteSpace: "nowrap" }}>
+                <Icon name="browser" size={11} /> Popup
+              </span>
+            )}
           </div>
         </div>
         <div style={{ fontSize: 16.5, fontWeight: 700, color: POS.navy, lineHeight: 1.3, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{displayName}</div>
@@ -3712,7 +3722,7 @@ function PromotionsPanel({ data, updateData, showToast }) {
   const promotions = data.promotions || [];
 
   function newPromo() {
-    setInspector({ mode: "add", tab: "overview", promo: { id: null, name: "", type: "single", menuIds: [], discountType: "percent", discountValue: 10, minQty: 2, chooseCount: 2, active: true, startAt: null, endAt: null } });
+    setInspector({ mode: "add", tab: "overview", promo: { id: null, name: "", type: "single", menuIds: [], discountType: "percent", discountValue: 10, minQty: 2, chooseCount: 2, active: true, startAt: null, endAt: null, showAsPopup: false, popupImageUrl: "", popupTitle: "", popupDescription: "", popupCtaLabel: "" } });
   }
 
   function savePromo(promo) {
@@ -3721,11 +3731,17 @@ function PromotionsPanel({ data, updateData, showToast }) {
     if (promo.type === "choice" && promo.menuIds.length < promo.chooseCount) { showToast("จำนวนเมนูในกลุ่มต้องมากกว่าหรือเท่ากับจำนวนที่ให้เลือก"); return; }
     updateData((next) => {
       if (!next.promotions) next.promotions = [];
+      const savedPromo = promo.id ? promo : { ...promo, id: genId("promo") };
+      if (savedPromo.showAsPopup) {
+        next.promotions.forEach((item) => {
+          if (item.id !== savedPromo.id) item.showAsPopup = false;
+        });
+      }
       if (promo.id) {
         const idx = next.promotions.findIndex((p) => p.id === promo.id);
-        next.promotions[idx] = promo;
+        next.promotions[idx] = savedPromo;
       } else {
-        next.promotions.push({ ...promo, id: genId("promo") });
+        next.promotions.push(savedPromo);
       }
     });
     setInspector(null);
@@ -3750,7 +3766,7 @@ function PromotionsPanel({ data, updateData, showToast }) {
     updateData((next) => {
       if (!next.promotions) next.promotions = [];
       const idx = next.promotions.findIndex((p) => p.id === promo.id);
-      const copy = { ...promo, id: genId("promo"), name: (promo.name || "โปรโมชั่น") + " (สำเนา)", active: false };
+      const copy = { ...promo, id: genId("promo"), name: (promo.name || "โปรโมชั่น") + " (สำเนา)", active: false, showAsPopup: false };
       next.promotions.splice(idx + 1, 0, copy);
     });
     showToast("ทำสำเนาโปรโมชั่นแล้ว");
@@ -4248,6 +4264,8 @@ function PromoAnalyticsTab() {
 }
 
 function PromoSettingsTab({ form, setForm }) {
+  const field = { width: "100%", minHeight: 44, border: `1px solid ${POS.border}`, borderRadius: 10, background: "#fff", padding: "0 12px", fontSize: 14, color: "#1F2937", boxSizing: "border-box", outline: "none" };
+  const label = { display: "block", fontSize: 12, fontWeight: 600, color: "#6B7280", marginBottom: 6 };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <label style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 4px" }}>
@@ -4257,6 +4275,43 @@ function PromoSettingsTab({ form, setForm }) {
       <p style={{ fontSize: 12, color: "#9C9690", margin: "8px 0 0", lineHeight: 1.5 }}>
         โปรโมชั่นที่เปิดใช้งานจะแสดงในหมวด "ดีลพิเศษ" อันดับแรกสุดของหน้าลูกค้า พร้อมราคาปกติขีดฆ่าและราคาโปรสีแดง ปิดใช้งานเพื่อซ่อนชั่วคราวโดยไม่ต้องลบ
       </p>
+
+      <div style={{ height: 1, background: POS.border, margin: "20px 0 12px" }} />
+      <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 4px" }}>
+        <span>
+          <span style={{ display: "block", fontSize: 13.5, fontWeight: 700, color: "#1F2937" }}>แสดงเป็น Popup หลัง Splash Screen</span>
+          <span style={{ display: "block", marginTop: 2, color: "#9C9690", fontSize: 11.5 }}>เลือกได้ครั้งละหนึ่งโปรโมชั่น และแสดงหนึ่งครั้งต่อ session</span>
+        </span>
+        <OptgToggle checked={form.showAsPopup === true} onChange={(v) => setForm({ ...form, showAsPopup: v })} color={POS.primary} />
+      </label>
+
+      {form.showAsPopup && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 14, padding: 16, borderRadius: 14, background: "#F7F8FA", border: `1px solid ${POS.border}` }}>
+          <div>
+            <label style={label}>URL รูป Popup (แนะนำรูปแนวตั้ง 4:5 หรือ 9:16)</label>
+            <TextField className="promo-field" style={field} value={form.popupImageUrl || ""} onChange={(v) => setForm({ ...form, popupImageUrl: v })} placeholder="https://..." />
+            <span style={{ display: "block", marginTop: 5, color: "#9C9690", fontSize: 11 }}>หากเว้นว่าง ระบบจะใช้รูปของเมนูแรกในโปรโมชั่น</span>
+          </div>
+          {form.popupImageUrl && (
+            <img src={form.popupImageUrl} alt="ตัวอย่าง Promotion Popup" style={{ width: "100%", maxHeight: 230, objectFit: "contain", borderRadius: 12, background: "#E9EDF2" }} />
+          )}
+          <div>
+            <label style={label}>หัวข้อบน Popup</label>
+            <TextField className="promo-field" style={field} value={form.popupTitle || ""} onChange={(v) => setForm({ ...form, popupTitle: v })} placeholder={form.name || "โปรโมชั่นพิเศษ"} />
+          </div>
+          <div>
+            <label style={label}>คำอธิบายสั้นๆ</label>
+            <textarea className="promo-field" style={{ ...field, minHeight: 76, padding: 12, resize: "vertical", fontFamily: "inherit" }} value={form.popupDescription || ""} onChange={(e) => setForm({ ...form, popupDescription: e.target.value })} placeholder="บอกจุดเด่นของโปรโมชั่นนี้" />
+          </div>
+          <div>
+            <label style={label}>ข้อความบนปุ่ม</label>
+            <TextField className="promo-field" style={field} value={form.popupCtaLabel || ""} onChange={(v) => setForm({ ...form, popupCtaLabel: v })} placeholder="ดูโปรโมชั่น" />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#6B7280", fontSize: 11.5, lineHeight: 1.5 }}>
+            <Icon name="clock" size={14} style={{ flexShrink: 0 }} /> ลูกค้าปิดได้ทันที หรือ Popup จะปิดอัตโนมัติใน 5 วินาที
+          </div>
+        </div>
+      )}
     </div>
   );
 }
