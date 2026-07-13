@@ -932,7 +932,7 @@ function ShopApp({ uid, user }) {
           {tab === "promotions" && <PromotionsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "reports" && <ReportsPanel data={dataForDisplay} />}
-          {tab === "loyalty" && <LoyaltyPanel customers={customers} loyaltyBeanGoal={data.settings.loyaltyBeanGoal} adjustCustomerBeans={adjustCustomerBeans} updateLoyaltyGoal={updateLoyaltyGoal} showToast={showToast} backfillEligibleCount={backfillEligibleOrders.length} backfillLoyaltyBeans={backfillLoyaltyBeans} />}
+          {tab === "loyalty" && <LoyaltyPanel customers={customers} orders={orders} loyaltyBeanGoal={data.settings.loyaltyBeanGoal} adjustCustomerBeans={adjustCustomerBeans} updateLoyaltyGoal={updateLoyaltyGoal} showToast={showToast} backfillEligibleCount={backfillEligibleOrders.length} backfillLoyaltyBeans={backfillLoyaltyBeans} />}
           {tab === "options" && <OptionGroupsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "settings" && <SettingsPanel data={data} updateData={updateData} showToast={showToast} uid={uid} />}
         </main>
@@ -1636,12 +1636,13 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
 
 // รายชื่อลูกค้า/เมล็ดสะสม — อ่านจาก customers/{uid} (คนละโหนดจาก data ก้อนใหญ่ ดู awardLoyaltyBeans ว่าทำไม)
 // เรียงคนสะสมเยอะสุดขึ้นก่อน ค้นหาด้วยเบอร์/ชื่อได้ ปรับเมล็ดมือได้เผื่อกรณีพิเศษ
-function LoyaltyPanel({ customers, loyaltyBeanGoal, adjustCustomerBeans, updateLoyaltyGoal, showToast, backfillEligibleCount, backfillLoyaltyBeans }) {
+function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans, updateLoyaltyGoal, showToast, backfillEligibleCount, backfillLoyaltyBeans }) {
   const [search, setSearch] = useState("");
   const [goalInput, setGoalInput] = useState(String(loyaltyBeanGoal));
   const [adjustFor, setAdjustFor] = useState(null);
   const [adjustAmount, setAdjustAmount] = useState("1");
   const [confirmBackfill, setConfirmBackfill] = useState(false);
+  const [detailFor, setDetailFor] = useState(null);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -1735,10 +1736,15 @@ function LoyaltyPanel({ customers, loyaltyBeanGoal, adjustCustomerBeans, updateL
               {(c.beans || 0) >= loyaltyBeanGoal && (
                 <span style={{ fontSize: 11, fontWeight: 700, color: "#15803D", background: "#EAF7EE", borderRadius: 999, padding: "4px 10px", flexShrink: 0 }}>แลกฟรีได้</span>
               )}
+              <button className="cbtn" style={{ padding: "7px 12px", fontSize: 12.5, flexShrink: 0 }} onClick={() => setDetailFor(c)}>รายละเอียด</button>
               <button className="cbtn" style={{ padding: "7px 12px", fontSize: 12.5, flexShrink: 0 }} onClick={() => setAdjustFor(c)}>ปรับเมล็ด</button>
             </div>
           ))}
         </div>
+      )}
+
+      {detailFor && (
+        <LoyaltyDetailModal customer={detailFor} orders={orders} loyaltyBeanGoal={loyaltyBeanGoal} onClose={() => setDetailFor(null)} />
       )}
 
       {adjustFor && (
@@ -1772,6 +1778,70 @@ function LoyaltyPanel({ customers, loyaltyBeanGoal, adjustCustomerBeans, updateL
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ไล่ดูออเดอร์ทั้งหมดของเบอร์นี้ ว่านับเป็นเมล็ดไปกี่ออเดอร์ ไม่นับกี่ออเดอร์ (และเพราะอะไร) — ไว้ตรวจสอบเวลาตัวเลขดูไม่ตรงกับที่คาดไว้
+// เทียบด้วย "9 หลักท้าย" ด้วย ไม่ใช่แค่ตรงเป๊ะ เผื่อเบอร์เดียวกันถูกบันทึกคนละฟอร์แมต (เช่น มี +66 นำหน้าบางออเดอร์) ทำให้แยกเป็นคนละ key กัน
+function LoyaltyDetailModal({ customer, orders, loyaltyBeanGoal, onClose }) {
+  const last9 = customer.phone.slice(-9);
+  const matches = useMemo(() => {
+    return (orders || [])
+      .map((o) => ({ order: o, digits: (o.customerPhone || "").replace(/\D/g, "") }))
+      .filter((x) => x.digits.slice(-9) === last9 && x.digits.length > 0);
+  }, [orders, last9]);
+
+  const exact = matches.filter((x) => x.digits === customer.phone);
+  const variants = matches.filter((x) => x.digits !== customer.phone);
+  const cupsOf = (o) => (o.items || []).reduce((s, it) => s + (it.qty || 0), 0);
+  const countedCups = exact.filter((x) => x.order.status === "done").reduce((s, x) => s + cupsOf(x.order), 0);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16 }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: 18, padding: 22, width: 480, maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ fontWeight: 700, fontSize: 15, color: POS.navy, marginBottom: 2 }}>รายละเอียด — {customer.name || "(ไม่ทราบชื่อ)"} · {customer.phone}</div>
+        <div style={{ fontSize: 12.5, color: POS.gray, marginBottom: 14 }}>
+          พบออเดอร์เบอร์นี้ {exact.length} รายการ · นับเป็นเมล็ดแล้ว {countedCups} แก้ว (เฉพาะสถานะ "เสร็จ") · ปัจจุบันมี {customer.beans || 0} เมล็ด
+        </div>
+
+        {variants.length > 0 && (
+          <div style={{ background: "#FFF4E5", border: "1px solid #FBD5B5", borderRadius: 12, padding: "10px 12px", marginBottom: 14, fontSize: 12.5, color: "#92400E" }}>
+            <b>พบเบอร์ใกล้เคียงที่บันทึกคนละฟอร์แมต {variants.length} ออเดอร์</b> (9 หลักท้ายตรงกันแต่ไม่ตรงเป๊ะ — อาจมี +66 หรืออักขระอื่นปนมา) ยังไม่ถูกนับรวมให้เพราะระบบถือเป็นคนละเบอร์:
+            <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 3 }}>
+              {variants.map((x) => (
+                <div key={x.order.id}>เบอร์ที่บันทึก "{x.order.customerPhone}" ({ORDER_STATUS_LABEL[x.order.status] || x.order.status}, {cupsOf(x.order)} แก้ว)</div>
+              ))}
+            </div>
+            <div style={{ marginTop: 6 }}>ถ้าใช่เบอร์เดียวกันจริง ใช้ปุ่ม "ปรับเมล็ด" เพิ่มจำนวนแก้วจากรายการข้างบนให้เองได้เลย</div>
+          </div>
+        )}
+
+        {exact.length === 0 ? (
+          <EmptyNote text="ไม่พบออเดอร์ที่ตรงเบอร์นี้เป๊ะๆ" />
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {exact.map((x) => {
+              const counted = x.order.status === "done";
+              return (
+                <div key={x.order.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 10, border: `1px solid ${POS.border}`, background: counted ? "#fff" : "#FAFAFA" }}>
+                  <div style={{ fontSize: 12.5, color: POS.navy }}>
+                    {new Date(x.order.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })} · {cupsOf(x.order)} แก้ว
+                  </div>
+                  <span style={{
+                    fontSize: 11, fontWeight: 700, borderRadius: 999, padding: "3px 9px", flexShrink: 0,
+                    color: counted ? "#15803D" : "#92400E", background: counted ? "#EAF7EE" : "#FFF4E5",
+                  }}>
+                    {counted ? "นับแล้ว" : `ยังไม่นับ (${ORDER_STATUS_LABEL[x.order.status] || x.order.status})`}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <button className="cbtn" style={{ width: "100%", marginTop: 16, padding: "9px 0" }} onClick={onClose}>ปิด</button>
+      </div>
     </div>
   );
 }
