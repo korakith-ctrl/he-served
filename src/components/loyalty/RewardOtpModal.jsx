@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 function maskPhone(phone) {
   const digits = String(phone || "").replace(/\D/g, "");
@@ -32,12 +33,21 @@ export default function RewardOtpModal({
     if (open && status === "code-sent") inputRef.current?.focus();
   }, [open, status]);
 
+  useEffect(() => {
+    if (!open) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open]);
+
   if (!open) return null;
 
   const secondsLeft = Math.max(0, Math.ceil((resendAvailableAt - now) / 1000));
   const busy = status === "requesting" || status === "verifying";
 
-  return (
+  return createPortal(
     <div className="reward-otp-overlay" role="presentation" onMouseDown={(event) => {
       if (event.target === event.currentTarget && !busy) onClose();
     }}>
@@ -104,6 +114,7 @@ export default function RewardOtpModal({
         </button>
         <div id="reward-otp-recaptcha" />
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
