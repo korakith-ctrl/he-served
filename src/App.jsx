@@ -4056,11 +4056,11 @@ function PromoInspector({ mode, initial, initialTab, menus, menusById, onSave, o
 
   const TABS = [
     ["overview", "Overview", "info-circle"],
+    ["settings", "Popup & Settings", "browser"],
     ["menus", "Menus", "cup"],
     ["pricing", "Pricing", "chart-line"],
     ["schedule", "Schedule", "calendar-event"],
     ["analytics", "Analytics", "chart-bar"],
-    ["settings", "Settings", "adjustments"],
   ];
 
   return (

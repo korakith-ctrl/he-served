@@ -747,7 +747,7 @@ export default function CustomerOrder({ shopUid }) {
   const [offerRippleId, setOfferRippleId] = useState(null);
 
   useEffect(() => {
-    const t = setTimeout(() => setSplashDone(true), 3000);
+    const t = setTimeout(() => setSplashDone(true), 2000);
     return () => clearTimeout(t);
   }, []);
 
