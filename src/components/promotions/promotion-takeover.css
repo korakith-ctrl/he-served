@@ -2,117 +2,38 @@
   position: fixed;
   z-index: 1200;
   inset: 0;
-  display: grid;
   min-height: 100dvh;
   overflow: hidden;
-  color: #fff;
   background: #071c33;
-  font-family: 'Inter', sans-serif;
   isolation: isolate;
 }
 
-.promotion-takeover__backdrop,
-.promotion-takeover__scrim {
+.promotion-takeover__visual {
   position: absolute;
-  inset: -28px;
-  z-index: -2;
-}
-
-.promotion-takeover__backdrop {
-  background-position: center;
-  background-size: cover;
-  filter: blur(28px) saturate(115%);
-  opacity: .72;
-  transform: scale(1.12);
-}
-
-.promotion-takeover__scrim {
-  z-index: -1;
-  background: linear-gradient(180deg, rgba(4, 18, 34, .18) 0%, rgba(4, 18, 34, .38) 48%, rgba(4, 18, 34, .96) 100%);
-}
-
-.promotion-takeover__content {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  width: min(100%, 560px);
-  height: 100dvh;
-  margin: 0 auto;
-  padding: max(70px, calc(env(safe-area-inset-top) + 60px)) 18px max(24px, env(safe-area-inset-bottom));
-}
-
-.promotion-takeover__image,
-.promotion-takeover__placeholder {
+  inset: 0;
   width: 100%;
   height: 100%;
-  min-height: 0;
-  border: 1px solid rgba(255, 255, 255, .2);
-  border-radius: 26px;
-  background: rgba(255, 255, 255, .1);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, .28);
+  padding: 0;
+  border: 0;
+  background: #071c33;
+  cursor: pointer;
 }
 
 .promotion-takeover__image {
   display: block;
-  object-fit: contain;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .promotion-takeover__placeholder {
   display: grid;
+  width: 100%;
+  height: 100%;
   place-items: center;
   font-size: 84px;
   color: #ffd09c;
-}
-
-.promotion-takeover__copy {
-  padding: 22px 6px 0;
-  text-align: center;
-}
-
-.promotion-takeover__eyebrow {
-  color: #ffb361;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: .18em;
-}
-
-.promotion-takeover__copy h2 {
-  margin: 7px 0 0;
-  font-family: 'Space Grotesk', sans-serif;
-  font-size: clamp(25px, 7vw, 38px);
-  line-height: 1.1;
-}
-
-.promotion-takeover__copy p {
-  margin: 8px auto 0;
-  max-width: 420px;
-  color: rgba(255, 255, 255, .78);
-  font-size: 13px;
-  line-height: 1.55;
-}
-
-.promotion-takeover__cta {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 50px;
-  margin-top: 17px;
-  border: 0;
-  border-radius: 16px;
-  color: #063360;
-  background: #fff;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, .2);
-  font: inherit;
-  font-weight: 750;
-  cursor: pointer;
-}
-
-.promotion-takeover__auto-close {
-  display: block;
-  margin-top: 10px;
-  color: rgba(255, 255, 255, .66);
-  font-size: 11px;
+  background: radial-gradient(circle at 50% 35%, #174f78, #071c33 70%);
 }
 
 .promotion-takeover__close {
@@ -144,23 +65,14 @@
 }
 
 .promotion-takeover__close:focus-visible,
-.promotion-takeover__cta:focus-visible {
+.promotion-takeover__visual:focus-visible {
   outline: 3px solid rgba(255, 179, 97, .9);
-  outline-offset: 3px;
-}
-
-@media (max-height: 650px) {
-  .promotion-takeover__content { padding-top: 62px; }
-  .promotion-takeover__copy { padding-top: 12px; }
-  .promotion-takeover__copy h2 { font-size: 23px; }
-  .promotion-takeover__copy p { display: none; }
-  .promotion-takeover__cta { min-height: 44px; margin-top: 11px; }
+  outline-offset: -5px;
 }
 
 @media (prefers-reduced-motion: no-preference) {
   .promotion-takeover { animation: promotion-takeover-in 260ms ease-out both; }
-  .promotion-takeover__image,
-  .promotion-takeover__placeholder { animation: promotion-takeover-image-in 420ms cubic-bezier(.22, 1, .36, 1) both; }
+  .promotion-takeover__visual { animation: promotion-takeover-image-in 420ms cubic-bezier(.22, 1, .36, 1) both; }
 }
 
 @keyframes promotion-takeover-in {

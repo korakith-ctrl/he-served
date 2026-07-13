@@ -205,9 +205,6 @@ function normalizeData(raw) {
       endAt: p.endAt || null,
       showAsPopup: p.showAsPopup === true,
       popupImageUrl: p.popupImageUrl || "",
-      popupTitle: p.popupTitle || "",
-      popupDescription: p.popupDescription || "",
-      popupCtaLabel: p.popupCtaLabel || "",
     })),
   };
 }
@@ -3722,7 +3719,7 @@ function PromotionsPanel({ data, updateData, showToast }) {
   const promotions = data.promotions || [];
 
   function newPromo() {
-    setInspector({ mode: "add", tab: "overview", promo: { id: null, name: "", type: "single", menuIds: [], discountType: "percent", discountValue: 10, minQty: 2, chooseCount: 2, active: true, startAt: null, endAt: null, showAsPopup: false, popupImageUrl: "", popupTitle: "", popupDescription: "", popupCtaLabel: "" } });
+    setInspector({ mode: "add", tab: "overview", promo: { id: null, name: "", type: "single", menuIds: [], discountType: "percent", discountValue: 10, minQty: 2, chooseCount: 2, active: true, startAt: null, endAt: null, showAsPopup: false, popupImageUrl: "" } });
   }
 
   function savePromo(promo) {
@@ -4288,27 +4285,15 @@ function PromoSettingsTab({ form, setForm }) {
       {form.showAsPopup && (
         <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 14, padding: 16, borderRadius: 14, background: "#F7F8FA", border: `1px solid ${POS.border}` }}>
           <div>
-            <label style={label}>URL รูป Popup (แนะนำรูปแนวตั้ง 4:5 หรือ 9:16)</label>
+            <label style={label}>URL รูปเต็มจอ (แนะนำ 9:16)</label>
             <TextField className="promo-field" style={field} value={form.popupImageUrl || ""} onChange={(v) => setForm({ ...form, popupImageUrl: v })} placeholder="https://..." />
             <span style={{ display: "block", marginTop: 5, color: "#9C9690", fontSize: 11 }}>หากเว้นว่าง ระบบจะใช้รูปของเมนูแรกในโปรโมชั่น</span>
           </div>
           {form.popupImageUrl && (
             <img src={form.popupImageUrl} alt="ตัวอย่าง Promotion Popup" style={{ width: "100%", maxHeight: 230, objectFit: "contain", borderRadius: 12, background: "#E9EDF2" }} />
           )}
-          <div>
-            <label style={label}>หัวข้อบน Popup</label>
-            <TextField className="promo-field" style={field} value={form.popupTitle || ""} onChange={(v) => setForm({ ...form, popupTitle: v })} placeholder={form.name || "โปรโมชั่นพิเศษ"} />
-          </div>
-          <div>
-            <label style={label}>คำอธิบายสั้นๆ</label>
-            <textarea className="promo-field" style={{ ...field, minHeight: 76, padding: 12, resize: "vertical", fontFamily: "inherit" }} value={form.popupDescription || ""} onChange={(e) => setForm({ ...form, popupDescription: e.target.value })} placeholder="บอกจุดเด่นของโปรโมชั่นนี้" />
-          </div>
-          <div>
-            <label style={label}>ข้อความบนปุ่ม</label>
-            <TextField className="promo-field" style={field} value={form.popupCtaLabel || ""} onChange={(v) => setForm({ ...form, popupCtaLabel: v })} placeholder="ดูโปรโมชั่น" />
-          </div>
           <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#6B7280", fontSize: 11.5, lineHeight: 1.5 }}>
-            <Icon name="clock" size={14} style={{ flexShrink: 0 }} /> ลูกค้าปิดได้ทันที หรือ Popup จะปิดอัตโนมัติใน 5 วินาที
+            <Icon name="clock" size={14} style={{ flexShrink: 0 }} /> ภาพเต็มจอสามารถกดเพื่อเปิดโปรโมชั่น ปิดได้ทันที หรือปิดอัตโนมัติใน 5 วินาที
           </div>
         </div>
       )}

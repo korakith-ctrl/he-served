@@ -6,6 +6,7 @@ const DISPLAY_SECONDS = 5;
 
 export default function PromotionTakeover({ promo, imageUrl, onClose, onCta }) {
   const [secondsLeft, setSecondsLeft] = useState(DISPLAY_SECONDS);
+  const [imageFailed, setImageFailed] = useState(false);
   const closeRef = useRef(null);
 
   useEffect(() => {
@@ -38,19 +39,24 @@ export default function PromotionTakeover({ promo, imageUrl, onClose, onCta }) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
-  const title = promo.popupTitle?.trim() || promo.name || "โปรโมชั่นพิเศษ";
-  const ctaLabel = promo.popupCtaLabel?.trim() || "ดูโปรโมชั่น";
+  const title = promo.name || "โปรโมชั่นพิเศษ";
 
   return createPortal(
-    <div className="promotion-takeover" role="dialog" aria-modal="true" aria-labelledby="promotion-takeover-title">
-      {imageUrl && (
-        <div
-          className="promotion-takeover__backdrop"
-          style={{ backgroundImage: `url(${imageUrl})` }}
-          aria-hidden="true"
-        />
-      )}
-      <div className="promotion-takeover__scrim" aria-hidden="true" />
+    <div className="promotion-takeover" role="dialog" aria-modal="true" aria-label={title}>
+      <button type="button" className="promotion-takeover__visual" onClick={onCta} aria-label={`เปิด${title}`}>
+        {imageUrl && !imageFailed ? (
+          <img
+            className="promotion-takeover__image"
+            src={imageUrl}
+            alt=""
+            onError={() => setImageFailed(true)}
+          />
+        ) : (
+          <span className="promotion-takeover__placeholder" aria-hidden="true">
+            <i className="ti ti-discount-2" />
+          </span>
+        )}
+      </button>
 
       <button
         ref={closeRef}
@@ -62,26 +68,6 @@ export default function PromotionTakeover({ promo, imageUrl, onClose, onCta }) {
         <span className="promotion-takeover__countdown" aria-hidden="true">{secondsLeft}</span>
         <i className="ti ti-x" aria-hidden="true" />
       </button>
-
-      <div className="promotion-takeover__content">
-        {imageUrl ? (
-          <img className="promotion-takeover__image" src={imageUrl} alt={title} />
-        ) : (
-          <div className="promotion-takeover__placeholder" aria-hidden="true">
-            <i className="ti ti-discount-2" />
-          </div>
-        )}
-        <div className="promotion-takeover__copy">
-          <span className="promotion-takeover__eyebrow">LIMITED OFFER</span>
-          <h2 id="promotion-takeover-title">{title}</h2>
-          {promo.popupDescription?.trim() && <p>{promo.popupDescription.trim()}</p>}
-          <button type="button" className="promotion-takeover__cta" onClick={onCta}>
-            {ctaLabel}
-            <i className="ti ti-arrow-right" aria-hidden="true" />
-          </button>
-          <span className="promotion-takeover__auto-close">ปิดอัตโนมัติใน {secondsLeft} วินาที</span>
-        </div>
-      </div>
     </div>,
     document.body,
   );
