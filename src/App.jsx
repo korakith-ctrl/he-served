@@ -413,8 +413,8 @@ function playOrderChime() {
   }
 }
 
-function Icon({ name, size = 18, style }) {
-  return <i className={"ti ti-" + name} style={{ fontSize: size, ...style }} aria-hidden="true"></i>;
+function Icon({ name, size = 18, style, className }) {
+  return <i className={"ti ti-" + name + (className ? " " + className : "")} style={{ fontSize: size, ...style }} aria-hidden="true"></i>;
 }
 
 function SidebarLogo({ title, size = 34 }) {
@@ -2676,6 +2676,29 @@ const INV = {
   gray: "#6B7280", ink: "#111827", border: "#ECE8E2", line: "#F1EFEA",
 };
 
+// ปิด overlay ด้วยปุ่ม Escape — ใช้ร่วมกันทุก modal/drawer ของหน้าวัตถุดิบ
+function useEscape(onClose) {
+  useEffect(() => {
+    const h = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [onClose]);
+}
+
+// จำนวนสต็อกอ่านง่ายขึ้นด้วยตัวคั่นหลักพัน (คงทศนิยมไว้ถ้ามี เช่น 1805.002)
+function fmtQty(n) {
+  const v = Number(n) || 0;
+  return v.toLocaleString("en-US", { maximumFractionDigits: 4 });
+}
+
+// สไตล์ฟอร์มกลางของหน้าวัตถุดิบ ใช้ร่วมกันในทุก modal ให้หน้าตาเหมือนกันหมด (input/label/โฟกัสวงแหวนน้ำเงิน)
+const invLabelStyle = { display: "block", fontSize: 12, fontWeight: 600, color: INV.gray, marginBottom: 6 };
+const invFieldStyle = { width: "100%", height: 44, border: `1px solid ${INV.border}`, borderRadius: 10, background: "#fff", padding: "0 12px", fontSize: 15, color: INV.ink, boxSizing: "border-box", outline: "none", transition: "border-color 160ms, box-shadow 160ms" };
+const invFocusProps = {
+  onFocus: (e) => { e.currentTarget.style.borderColor = INV.primary; e.currentTarget.style.boxShadow = `0 0 0 3px ${INV.primarySoft}`; },
+  onBlur: (e) => { e.currentTarget.style.borderColor = INV.border; e.currentTarget.style.boxShadow = "none"; },
+};
+
 function invStatus(ing) {
   if (ing.components && ing.components.length > 0) return "composite";
   if (ing.unlimited) return "unlimited";
@@ -2735,6 +2758,15 @@ function InvActionsMenu({ items }) {
     }
     setOpen(!open);
   }
+  // เมนูลอยด้วย position: fixed — ต้องปิดเมื่อเลื่อนหน้าจอ/กด Escape ไม่งั้นจะค้างลอยผิดตำแหน่ง
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("scroll", close, true); window.removeEventListener("keydown", onKey); };
+  }, [open]);
   return (
     <>
       <button ref={btnRef} className="inv-icon-btn" onClick={toggle} aria-label="ตัวเลือกเพิ่มเติม" aria-haspopup="menu" aria-expanded={open}>
@@ -2764,6 +2796,7 @@ function InvActionsMenu({ items }) {
 
 function InvDrawer({ mode, initial, allIngredients, onClose, onSubmit }) {
   const [form, setForm] = useState(initial);
+  useEscape(onClose);
   return (
     <div className="inv-drawer-overlay" onClick={onClose}>
       <div className="inv-drawer" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={mode === "add" ? "เพิ่มวัตถุดิบใหม่" : "แก้ไขวัตถุดิบ"}>
@@ -2777,7 +2810,7 @@ function InvDrawer({ mode, initial, allIngredients, onClose, onSubmit }) {
           <button className="inv-icon-btn" onClick={onClose} aria-label="ปิด"><Icon name="x" size={18} /></button>
         </div>
         <div className="inv-drawer-body">
-          <IngredientForm value={form} onChange={setForm} onSubmit={() => onSubmit(form)} submitLabel={mode === "add" ? "บันทึกวัตถุดิบ" : "บันทึกการแก้ไข"} allIngredients={allIngredients} />
+          <IngredientForm value={form} onChange={setForm} onSubmit={() => onSubmit(form)} onCancel={onClose} submitLabel={mode === "add" ? "บันทึกวัตถุดิบ" : "บันทึกการแก้ไข"} allIngredients={allIngredients} />
         </div>
       </div>
     </div>
@@ -2785,6 +2818,9 @@ function InvDrawer({ mode, initial, allIngredients, onClose, onSubmit }) {
 }
 
 function InvConfirmDialog({ title, message, confirmLabel, onConfirm, onCancel }) {
+  useEscape(onCancel);
+  const cancelRef = useRef(null);
+  useEffect(() => { cancelRef.current?.focus(); }, []);
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(17,24,39,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 16 }} onClick={onCancel}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 24, width: 380, maxWidth: "100%", boxShadow: "0 20px 60px rgba(0,0,0,.25)" }} role="alertdialog" aria-modal="true">
@@ -2792,7 +2828,7 @@ function InvConfirmDialog({ title, message, confirmLabel, onConfirm, onCancel })
         <div style={{ fontSize: 18, fontWeight: 700, color: INV.ink, marginBottom: 6 }}>{title}</div>
         <div style={{ fontSize: 13.5, color: INV.gray, lineHeight: 1.5, marginBottom: 20 }}>{message}</div>
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-          <button className="inv-btn-ghost" onClick={onCancel}>ยกเลิก</button>
+          <button ref={cancelRef} className="inv-btn-ghost" onClick={onCancel}>ยกเลิก</button>
           <button className="inv-btn-danger" onClick={onConfirm}>{confirmLabel}</button>
         </div>
       </div>
@@ -2939,7 +2975,10 @@ function IngredientsPanel({ data, updateData, showToast }) {
         .inv-icon-btn { width: 36px; height: 36px; border: 1px solid ${INV.border}; border-radius: 9px; background: #fff; color: ${INV.gray}; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
         .inv-icon-btn:hover { background: #F5F5F3; color: ${INV.ink}; }
         .inv-cat { background: #fff; border: 1px solid ${INV.border}; border-radius: 16px; margin-bottom: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.04); }
-        .inv-cat-head { display: flex; align-items: center; gap: 10px; width: 100%; padding: 14px 18px; border: none; background: none; cursor: pointer; text-align: left; }
+        .inv-cat-head { display: flex; align-items: center; gap: 10px; width: 100%; padding: 14px 18px; border: none; background: none; cursor: pointer; text-align: left; transition: background 140ms ease; }
+        .inv-cat-head:hover { background: #FAFAF8; }
+        .inv-cat-head .inv-chev { transition: transform 180ms ease; }
+        .inv-toolbar-spacer { flex: 1; min-width: 0; }
         .inv-cat-title { font-size: 15px; font-weight: 700; color: ${INV.ink}; }
         .inv-cat-count { font-size: 12px; font-weight: 700; color: ${INV.gray}; background: #F3F4F6; border-radius: 999px; padding: 2px 9px; }
         .inv-table-scroll { overflow-x: auto; }
@@ -2961,7 +3000,7 @@ function IngredientsPanel({ data, updateData, showToast }) {
           .inv-drawer-overlay { align-items: flex-end; }
           .inv-drawer { width: 100%; height: auto; max-height: 92vh; border-radius: 20px 20px 0 0; animation: invSheet 240ms cubic-bezier(.2,.8,.2,1); }
         }
-        @media (max-width: 720px) {
+        @media (max-width: 900px) {
           .inv-table thead { display: none; }
           .inv-table, .inv-table tbody, .inv-table tr, .inv-table td { display: block; width: 100%; box-sizing: border-box; }
           .inv-table tr { padding: 6px 4px 10px; border-bottom: 1px solid ${INV.line}; }
@@ -2975,22 +3014,11 @@ function IngredientsPanel({ data, updateData, showToast }) {
         }
       `}</style>
 
-      <div className="inv-header">
-        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
-          <div style={{ width: 40, height: 40, borderRadius: 12, background: INV.primarySoft, color: INV.primary, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon name="box-multiple" size={21} /></div>
-          <div style={{ minWidth: 0 }}>
-            <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: INV.ink, lineHeight: 1.2 }}>วัตถุดิบ & สต็อก</h2>
-            <div style={{ fontSize: 12.5, color: INV.gray, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{data.settings.shopName} · {data.ingredients.length} รายการ</div>
-          </div>
-        </div>
-        <button className="inv-btn-primary" onClick={() => setDrawer({ mode: "add", initial: blankIng })}><Icon name="plus" size={16} /> เพิ่มวัตถุดิบ</button>
-      </div>
-
       <div className="inv-kpi-grid">
         <InvStatCard icon="package" label="วัตถุดิบทั้งหมด" value={data.ingredients.length} sub={`${catCount} หมวดหมู่`} tone="primary" />
         <InvStatCard icon="alert-triangle" label="ใกล้หมด" value={lowCount} sub={lowCount ? "ควรเติมสต็อก" : "อยู่ในเกณฑ์"} tone={lowCount ? "warning" : "neutral"} />
         <InvStatCard icon="alert-octagon" label="หมดสต็อก" value={outCount} sub={outCount ? "ต้องเติมด่วน" : "ไม่มี"} tone={outCount ? "danger" : "neutral"} />
-        <InvStatCard icon="coin" label="มูลค่าสต็อก" value={"฿" + money(invValue)} tone="success" />
+        <InvStatCard icon="coin" label="มูลค่าสต็อก" value={"฿" + money(invValue)} sub="ไม่รวมของไม่จำกัด" tone="neutral" />
         <InvStatCard icon="category" label="หมวดหมู่" value={catCount} sub={`จาก ${CATEGORIES.length} หมวด`} tone="neutral" />
       </div>
 
@@ -3016,6 +3044,8 @@ function IngredientsPanel({ data, updateData, showToast }) {
           <option value="stock">เรียง: สต็อกน้อย→มาก</option>
           <option value="value">เรียง: มูลค่ามาก→น้อย</option>
         </select>
+        <div className="inv-toolbar-spacer" />
+        <button className="inv-btn-primary" onClick={() => setDrawer({ mode: "add", initial: blankIng })}><Icon name="plus" size={16} /> เพิ่มวัตถุดิบ</button>
       </div>
 
       {renderedCats.length === 0 ? (
@@ -3026,10 +3056,10 @@ function IngredientsPanel({ data, updateData, showToast }) {
         </div>
       ) : renderedCats.map(({ cat, allCount, items, isOpen }) => (
         <div key={cat.id} className="inv-cat">
-          <button className="inv-cat-head" onClick={() => toggleCat(cat.id)} aria-expanded={isOpen}>
-            <Icon name={isOpen ? "chevron-down" : "chevron-right"} size={16} style={{ color: INV.gray, flexShrink: 0 }} />
+          <button className="inv-cat-head" style={{ borderRadius: isOpen ? "16px 16px 0 0" : 16 }} onClick={() => toggleCat(cat.id)} aria-expanded={isOpen}>
+            <Icon name="chevron-right" size={16} className="inv-chev" style={{ color: INV.gray, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none" }} />
             <span className="inv-cat-title">{cat.label}</span>
-            <span className="inv-cat-count">{allCount}</span>
+            <span className="inv-cat-count">{items.length < allCount ? `${items.length}/${allCount}` : allCount}</span>
           </button>
           {isOpen && (
             <div className="inv-table-scroll">
@@ -3056,10 +3086,10 @@ function IngredientsPanel({ data, updateData, showToast }) {
                           )}
                         </td>
                         <td data-label="สต็อก" style={{ whiteSpace: "nowrap", fontWeight: stockLow ? 700 : 500, color: noStock ? INV.gray : stockLow ? INV.danger : INV.ink }}>
-                          {isMix ? "ตัดตามสัดส่วน" : ing.unlimited ? "ไม่จำกัด" : ing.stockQty}
+                          {isMix ? "ตัดตามสัดส่วน" : ing.unlimited ? "ไม่จำกัด" : fmtQty(ing.stockQty)}
                         </td>
                         <td data-label="หน่วย" style={{ color: INV.gray, whiteSpace: "nowrap" }}>{isMix ? "—" : UNITS[ing.unit]}</td>
-                        <td data-label="ต้นทุน/หน่วย" style={{ whiteSpace: "nowrap" }}>฿{money(isMix ? compositeCostPerUnit(ing, ingredientsById) : ing.costPerUnit)}<span style={{ color: INV.gray }}>/{UNITS[ing.unit]}</span></td>
+                        <td data-label="ต้นทุน/หน่วย" style={{ whiteSpace: "nowrap" }}><span>฿{money(isMix ? compositeCostPerUnit(ing, ingredientsById) : ing.costPerUnit)}<span style={{ color: INV.gray }}>/{UNITS[ing.unit]}</span></span></td>
                         <td data-label="กลุ่มทางเลือก" style={{ color: ing.altGroup ? INV.ink : INV.gray }}>{ing.altGroup ? `${ing.altGroup}${ing.altUpcharge ? ` (+฿${ing.altUpcharge})` : ""}` : "—"}</td>
                         <td data-label="สถานะ"><InvStatusBadge status={status} /></td>
                         <td className="inv-actions-cell" data-label="">
@@ -3143,28 +3173,34 @@ function DefaultPackagingSection({ data, updateData }) {
   if (packagingIngredients.length === 0) return null;
 
   return (
-    <div style={glass({ borderRadius: 12, padding: 14, marginTop: 8 })}>
-      <SectionTitle icon="box" text="บรรจุภัณฑ์เริ่มต้นสำหรับเมนูใหม่" />
-      <p style={{ fontSize: 11.5, color: "var(--espresso-2)", margin: "-6px 0 12px" }}>
+    <div style={{ background: "#fff", border: `1px solid ${INV.border}`, borderRadius: 16, padding: 20, marginTop: 4, boxShadow: "0 8px 24px rgba(0,0,0,.04)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+        <div style={{ width: 30, height: 30, borderRadius: 9, background: "#F3F4F6", color: INV.gray, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon name="box" size={16} /></div>
+        <span style={{ fontSize: 15, fontWeight: 700, color: INV.ink }}>บรรจุภัณฑ์เริ่มต้นสำหรับเมนูใหม่</span>
+      </div>
+      <p style={{ fontSize: 12, color: INV.gray, margin: "0 0 16px 40px", lineHeight: 1.5 }}>
         ตั้งไว้ครั้งเดียว ระบบจะใส่รายการเหล่านี้ให้อัตโนมัติทุกครั้งที่กด "เพิ่มเมนู" ใหม่ (แก้ไขเพิ่ม/ลบต่อเมนูได้ตามปกติภายหลัง)
       </p>
       {lines.map((line, idx) => (
-        <div key={idx} style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
-          <select className="cfield" value={line.ingredientId} onChange={(e) => updateLine(idx, { ingredientId: e.target.value })}>
+        <div key={idx} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
+          <select {...invFocusProps} style={{ ...invFieldStyle, flex: 1, height: 42 }} value={line.ingredientId} onChange={(e) => updateLine(idx, { ingredientId: e.target.value })}>
             {packagingIngredients.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
           </select>
-          <input className="cfield" style={{ width: 80 }} type="number" value={line.qty} onChange={(e) => updateLine(idx, { qty: Number(e.target.value) })} />
-          <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => removeLine(idx)} title="ลบรายการนี้"><Icon name="x" size={13} /></button>
+          <input {...invFocusProps} style={{ ...invFieldStyle, width: 90, height: 42 }} type="number" min="0" value={line.qty} onChange={(e) => updateLine(idx, { qty: Number(e.target.value) })} />
+          <button className="inv-icon-btn" style={{ width: 42, height: 42 }} onClick={() => removeLine(idx)} aria-label="ลบรายการนี้"><Icon name="x" size={15} /></button>
         </div>
       ))}
-      <button className="cbtn" onClick={addLine}><Icon name="plus" size={13} /> เพิ่มบรรจุภัณฑ์เริ่มต้น</button>
+      <button className="inv-btn-ghost" style={{ height: 40 }} onClick={addLine}><Icon name="plus" size={14} /> เพิ่มบรรจุภัณฑ์เริ่มต้น</button>
     </div>
   );
 }
 
-function IngredientForm({ value, onChange, onSubmit, submitLabel, allIngredients }) {
+function IngredientForm({ value, onChange, onSubmit, onCancel, submitLabel, allIngredients }) {
   const isMix = value.components && value.components.length > 0;
   const pickable = (allIngredients || []).filter((i) => i.id !== value.id && (!i.components || i.components.length === 0));
+  const nameRef = useRef(null);
+  useEffect(() => { nameRef.current?.focus(); }, []);
+  const canSave = value.name.trim() !== "";
 
   function toggleMix(on) {
     onChange({ ...value, components: on ? [{ ingredientId: "", ratio: 1 }] : [] });
@@ -3197,7 +3233,7 @@ function IngredientForm({ value, onChange, onSubmit, submitLabel, allIngredients
         <p className="inv-form-sec-title">ข้อมูลพื้นฐาน</p>
         <div style={{ marginBottom: 14 }}>
           <label style={lbl}>ชื่อวัตถุดิบ</label>
-          <input className="inv-form-field" style={field} value={value.name} onChange={(e) => onChange({ ...value, name: e.target.value })} placeholder="เช่น นมสด, เมล็ดกาแฟ" />
+          <input ref={nameRef} className="inv-form-field" style={field} value={value.name} onChange={(e) => onChange({ ...value, name: e.target.value })} placeholder="เช่น นมสด, เมล็ดกาแฟ" />
         </div>
         <div className="inv-form-grid2">
           <div>
@@ -3231,21 +3267,21 @@ function IngredientForm({ value, onChange, onSubmit, submitLabel, allIngredients
               <>
                 <div>
                   <label style={lbl}>สต็อกปัจจุบัน</label>
-                  <input className="inv-form-field" style={field} type="number" value={value.stockQty} onChange={(e) => onChange({ ...value, stockQty: Number(e.target.value) })} />
+                  <input className="inv-form-field" style={field} type="number" min="0" value={value.stockQty} onChange={(e) => onChange({ ...value, stockQty: Number(e.target.value) })} />
                 </div>
                 <div>
                   <label style={lbl}>แจ้งเตือนเมื่อต่ำกว่า</label>
-                  <input className="inv-form-field" style={field} type="number" value={value.lowStockThreshold} onChange={(e) => onChange({ ...value, lowStockThreshold: Number(e.target.value) })} />
+                  <input className="inv-form-field" style={field} type="number" min="0" value={value.lowStockThreshold} onChange={(e) => onChange({ ...value, lowStockThreshold: Number(e.target.value) })} />
                 </div>
               </>
             )}
             <div>
               <label style={lbl}>ต้นทุนต่อหน่วย (บาท)</label>
-              <input className="inv-form-field" style={field} type="number" value={value.costPerUnit} onChange={(e) => onChange({ ...value, costPerUnit: Number(e.target.value) })} />
+              <input className="inv-form-field" style={field} type="number" min="0" value={value.costPerUnit} onChange={(e) => onChange({ ...value, costPerUnit: Number(e.target.value) })} />
             </div>
             <div>
               <label style={lbl}>ส่วนต่างราคา (บาท)</label>
-              <input className="inv-form-field" style={field} type="number" value={value.altUpcharge} onChange={(e) => onChange({ ...value, altUpcharge: Number(e.target.value) })} />
+              <input className="inv-form-field" style={field} type="number" min="0" value={value.altUpcharge} onChange={(e) => onChange({ ...value, altUpcharge: Number(e.target.value) })} />
             </div>
           </div>
         </div>
@@ -3278,7 +3314,7 @@ function IngredientForm({ value, onChange, onSubmit, submitLabel, allIngredients
                   <option value="">— เลือกวัตถุดิบ —</option>
                   {pickable.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
                 </select>
-                <input className="inv-form-field" style={{ ...field, width: 74, height: 38 }} type="number" value={c.ratio} onChange={(e) => setComponent(idx, { ratio: Number(e.target.value) })} placeholder="สัดส่วน" />
+                <input className="inv-form-field" style={{ ...field, width: 74, height: 38 }} type="number" min="0" value={c.ratio} onChange={(e) => setComponent(idx, { ratio: Number(e.target.value) })} placeholder="สัดส่วน" />
                 <button className="inv-icon-btn" style={{ width: 38, height: 38 }} onClick={() => removeComponent(idx)} aria-label="ลบวัตถุดิบในสูตร"><Icon name="x" size={14} /></button>
               </div>
             ))}
@@ -3289,61 +3325,109 @@ function IngredientForm({ value, onChange, onSubmit, submitLabel, allIngredients
 
       {/* หมวด 4 — บันทึก */}
       <div style={{ display: "flex", gap: 10, paddingTop: 4 }}>
-        <button className="inv-btn-primary" style={{ flex: 1, justifyContent: "center" }} onClick={onSubmit}>{submitLabel}</button>
+        {onCancel && <button className="inv-btn-ghost" style={{ height: 44, flex: "0 0 auto" }} onClick={onCancel}>ยกเลิก</button>}
+        <button className="inv-btn-primary" style={{ flex: 1, justifyContent: "center", opacity: canSave ? 1 : 0.55, cursor: canSave ? "pointer" : "not-allowed" }} disabled={!canSave} onClick={onSubmit}>{submitLabel}</button>
+      </div>
+    </div>
+  );
+}
+
+function InvModalShell({ icon, iconTone, title, subtitle, onClose, children }) {
+  const tones = {
+    primary: { bg: INV.primarySoft, color: INV.primary },
+    neutral: { bg: "#F3F4F6", color: INV.gray },
+  };
+  const t = tones[iconTone] || tones.primary;
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(17,24,39,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 16 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title} style={{ background: "#fff", borderRadius: 18, padding: 24, width: 380, maxWidth: "100%", boxShadow: "0 24px 64px rgba(0,0,0,.28)" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 18 }}>
+          <div style={{ width: 40, height: 40, borderRadius: 11, background: t.bg, color: t.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon name={icon} size={20} /></div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: INV.ink }}>{title}</div>
+            <div style={{ fontSize: 12.5, color: INV.gray, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{subtitle}</div>
+          </div>
+          <button className="inv-icon-btn" onClick={onClose} aria-label="ปิด" style={{ width: 32, height: 32 }}><Icon name="x" size={16} /></button>
+        </div>
+        {children}
       </div>
     </div>
   );
 }
 
 function RestockModal({ ingredient, onClose, onConfirm }) {
-  const [qty, setQty] = useState(0);
-  const [total, setTotal] = useState(0);
+  const [qty, setQty] = useState("");
+  const [total, setTotal] = useState("");
+  const qtyRef = useRef(null);
+  useEscape(onClose);
+  useEffect(() => { qtyRef.current?.focus(); }, []);
   if (!ingredient) return null;
+  const qtyNum = Number(qty) || 0;
+  const totalNum = Number(total) || 0;
+  const valid = qtyNum > 0;
+  const newCost = valid && totalNum > 0 ? totalNum / qtyNum : null;
+  function submit(e) { e.preventDefault(); if (valid) onConfirm(ingredient.id, qtyNum, totalNum); }
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(43,29,20,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
-      <div style={{ background: "var(--surface)", borderRadius: 14, padding: 20, width: 300 }}>
-        <p style={{ fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 17, margin: "0 0 12px" }}>เติมสต็อก: {ingredient.name}</p>
-        <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ปริมาณที่ซื้อ ({UNITS[ingredient.unit]})</label>
-        <input className="cfield" type="number" value={qty} onChange={(e) => setQty(Number(e.target.value))} style={{ marginBottom: 10 }} />
-        <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ราคาที่จ่ายทั้งหมด (บาท)</label>
-        <input className="cfield" type="number" value={total} onChange={(e) => setTotal(Number(e.target.value))} style={{ marginBottom: 14 }} />
-        <p style={{ fontSize: 11.5, color: "var(--espresso-2)" }}>ต้นทุนต่อหน่วยใหม่จะถูกคำนวณอัตโนมัติ = ราคารวม ÷ ปริมาณ</p>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button className="cbtn cbtn-accent" onClick={() => onConfirm(ingredient.id, qty, total)}>ยืนยัน</button>
-          <button className="cbtn" onClick={onClose}>ยกเลิก</button>
+    <InvModalShell icon="package-import" iconTone="primary" title="เติมสต็อก" subtitle={ingredient.name} onClose={onClose}>
+      <form onSubmit={submit}>
+        <div style={{ marginBottom: 14 }}>
+          <label style={invLabelStyle} htmlFor="rs-qty">ปริมาณที่ซื้อ ({UNITS[ingredient.unit]})</label>
+          <input id="rs-qty" ref={qtyRef} {...invFocusProps} style={invFieldStyle} type="number" min="0" value={qty} placeholder="0" onChange={(e) => setQty(e.target.value)} />
         </div>
-      </div>
-    </div>
+        <div style={{ marginBottom: 14 }}>
+          <label style={invLabelStyle} htmlFor="rs-total">ราคาที่จ่ายทั้งหมด (บาท)</label>
+          <input id="rs-total" {...invFocusProps} style={invFieldStyle} type="number" min="0" value={total} placeholder="ไม่บังคับ" onChange={(e) => setTotal(e.target.value)} />
+        </div>
+        <div style={{ background: newCost != null ? INV.primarySoft : "#F7F6F3", borderRadius: 10, padding: "10px 12px", marginBottom: 18, fontSize: 12.5, lineHeight: 1.5, color: newCost != null ? INV.primaryDark : INV.gray }}>
+          {valid ? (
+            <>
+              <div>สต็อกใหม่: <b>{fmtQty(ingredient.stockQty)} → {fmtQty(round4(ingredient.stockQty + qtyNum))} {UNITS[ingredient.unit]}</b></div>
+              {newCost != null
+                ? <div style={{ marginTop: 2 }}>ต้นทุน/หน่วยใหม่: <b>฿{money(newCost)}/{UNITS[ingredient.unit]}</b> (เดิม ฿{money(ingredient.costPerUnit)})</div>
+                : <div style={{ marginTop: 2 }}>ใส่ราคารวมเพื่ออัปเดตต้นทุน/หน่วย (เว้นว่างได้ ต้นทุนเดิมคงไว้)</div>}
+            </>
+          ) : "กรอกปริมาณที่ซื้อเพื่อดูผลลัพธ์"}
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button type="button" className="inv-btn-ghost" style={{ height: 44 }} onClick={onClose}>ยกเลิก</button>
+          <button type="submit" className="inv-btn-primary" style={{ flex: 1, justifyContent: "center", opacity: valid ? 1 : 0.55, cursor: valid ? "pointer" : "not-allowed" }} disabled={!valid}>เพิ่มสต็อก</button>
+        </div>
+      </form>
+    </InvModalShell>
   );
 }
 
 function StockAdjustModal({ ingredient, onClose, onConfirm }) {
-  const [counted, setCounted] = useState(ingredient ? ingredient.stockQty : 0);
+  const [counted, setCounted] = useState(ingredient ? String(ingredient.stockQty) : "0");
+  const inRef = useRef(null);
+  useEscape(onClose);
+  useEffect(() => { inRef.current?.select(); }, []);
   if (!ingredient) return null;
-  const delta = round4(counted - ingredient.stockQty);
+  const delta = round4((Number(counted) || 0) - ingredient.stockQty);
+  function submit(e) { e.preventDefault(); onConfirm(ingredient.id, Number(counted) || 0); }
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(43,29,20,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
-      <div style={{ background: "var(--surface)", borderRadius: 14, padding: 20, width: 320 }}>
-        <p style={{ fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 17, margin: "0 0 4px" }}>ปรับปรุงสต็อก: {ingredient.name}</p>
-        <p style={{ fontSize: 11.5, color: "var(--espresso-2)", margin: "0 0 14px" }}>
-          สำหรับตอนนับสต็อกจริงหน้างาน (Cycle Count) — กรอกจำนวนที่นับได้ ระบบจะปรับตัวเลขในระบบให้ตรงทันที ไม่กระทบต้นทุน/หน่วย
+    <InvModalShell icon="clipboard-check" iconTone="neutral" title="ปรับปรุงสต็อก (นับจริง)" subtitle={ingredient.name} onClose={onClose}>
+      <form onSubmit={submit}>
+        <p style={{ fontSize: 12, color: INV.gray, margin: "0 0 16px", lineHeight: 1.5 }}>
+          กรอกจำนวนที่นับได้จริงหน้างาน ระบบจะปรับตัวเลขในระบบให้ตรงทันที (ไม่กระทบต้นทุน/หน่วย)
         </p>
-        <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>สต็อกในระบบปัจจุบัน</label>
-        <p style={{ margin: "2px 0 10px", fontWeight: 600, fontSize: 14 }}>{ingredient.stockQty} {UNITS[ingredient.unit]}</p>
-        <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>จำนวนที่นับได้จริง ({UNITS[ingredient.unit]})</label>
-        <input className="cfield" type="number" value={counted} onChange={(e) => setCounted(Number(e.target.value))} style={{ marginBottom: 8 }} />
-        <p style={{
-          fontSize: 12.5, fontWeight: 700, margin: "0 0 14px",
-          color: delta === 0 ? "var(--espresso-2)" : delta > 0 ? "var(--sage-dark)" : "var(--danger)",
-        }}>
-          {delta === 0 ? "ไม่มีการเปลี่ยนแปลง" : `${delta > 0 ? "+" : ""}${delta} ${UNITS[ingredient.unit]} จากค่าปัจจุบัน`}
-        </p>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button className="cbtn cbtn-accent" onClick={() => onConfirm(ingredient.id, counted)}>ยืนยันปรับสต็อก</button>
-          <button className="cbtn" onClick={onClose}>ยกเลิก</button>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#F7F6F3", borderRadius: 10, padding: "10px 12px", marginBottom: 14 }}>
+          <span style={{ fontSize: 12.5, color: INV.gray }}>สต็อกในระบบปัจจุบัน</span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: INV.ink }}>{fmtQty(ingredient.stockQty)} {UNITS[ingredient.unit]}</span>
         </div>
-      </div>
-    </div>
+        <div style={{ marginBottom: 12 }}>
+          <label style={invLabelStyle} htmlFor="adj-count">จำนวนที่นับได้จริง ({UNITS[ingredient.unit]})</label>
+          <input id="adj-count" ref={inRef} {...invFocusProps} style={invFieldStyle} type="number" min="0" value={counted} onChange={(e) => setCounted(e.target.value)} />
+        </div>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 18, color: delta === 0 ? INV.gray : delta > 0 ? INV.success : INV.danger }}>
+          {delta === 0 ? "ไม่มีการเปลี่ยนแปลง" : `${delta > 0 ? "+" : ""}${fmtQty(delta)} ${UNITS[ingredient.unit]} จากค่าปัจจุบัน`}
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button type="button" className="inv-btn-ghost" style={{ height: 44 }} onClick={onClose}>ยกเลิก</button>
+          <button type="submit" className="inv-btn-primary" style={{ flex: 1, justifyContent: "center" }}>ยืนยันปรับสต็อก</button>
+        </div>
+      </form>
+    </InvModalShell>
   );
 }
 
@@ -3497,11 +3581,15 @@ function OptgToggle({ checked, onChange, label }) {
   return (
     <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none" }}>
       <span
+        role="switch" aria-checked={checked} tabIndex={0}
         onClick={() => onChange(!checked)}
+        onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); onChange(!checked); } }}
         style={{
           width: 36, height: 21, borderRadius: 999, background: checked ? OPTG.primary : "#D9D4C9",
-          position: "relative", transition: "background 200ms ease", flexShrink: 0,
+          position: "relative", transition: "background 200ms ease", flexShrink: 0, outline: "none",
         }}
+        onFocus={(e) => (e.currentTarget.style.boxShadow = `0 0 0 3px ${OPTG.primary}33`)}
+        onBlur={(e) => (e.currentTarget.style.boxShadow = "none")}
       >
         <span style={{
           position: "absolute", top: 2, left: checked ? 17 : 2, width: 17, height: 17, borderRadius: "50%",
