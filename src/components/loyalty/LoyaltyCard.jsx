@@ -87,6 +87,8 @@ export default function LoyaltyCard({
   setRedeemMode,
   redeemLineId,
   setRedeemLineId,
+  rewardVerified,
+  onRequestRewardVerification,
   onShowRewardTerms,
 }) {
   const digits = phone.replace(/\D/g, "");
@@ -229,6 +231,16 @@ export default function LoyaltyCard({
                   <span>{line.name}</span>
                 </label>
               ))}
+              {redeemLine && !rewardVerified && (
+                <button type="button" className="loyalty-button loyalty-button--reward" onClick={onRequestRewardVerification}>
+                  ยืนยัน OTP เพื่อใช้รางวัล
+                </button>
+              )}
+              {redeemLine && rewardVerified && (
+                <p className="loyalty-redeem__verified" role="status">
+                  <i className="ti ti-shield-check" aria-hidden="true" /> ยืนยันเบอร์แล้ว รางวัลจะถูกใช้เมื่อยืนยันสั่งซื้อ
+                </p>
+              )}
               <div className="loyalty-redeem__actions">
                 {redeemLine && (
                   <button type="button" className="loyalty-button loyalty-button--quiet" onClick={() => setRedeemLineId(null)}>

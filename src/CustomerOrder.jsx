@@ -1,12 +1,16 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { getDatabase, ref, onValue, get, push, set, runTransaction } from "firebase/database";
+import {
+  getAuth, signInAnonymously, onAuthStateChanged, PhoneAuthProvider, RecaptchaVerifier,
+  linkWithCredential, reauthenticateWithCredential, signInWithCredential,
+} from "firebase/auth";
+import { getDatabase, ref, onValue, get, push, set } from "firebase/database";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import QRCode from "qrcode";
 import generatePayload from "promptpay-qr";
 import { firebaseConfig } from "./firebase";
 import LoyaltyCard from "./components/loyalty/LoyaltyCard.jsx";
+import RewardOtpModal from "./components/loyalty/RewardOtpModal.jsx";
 
 // Isolated secondary app so an anonymous customer session never shares
 // Auth persistence with the owner dashboard's login on the same device/browser.
@@ -33,6 +37,32 @@ const PAY_AT_STORE_TEXT = {
 };
 function isCashLikeMethod(method) {
   return Object.prototype.hasOwnProperty.call(PAY_AT_STORE_TEXT, method);
+}
+
+function normalizeThaiPhone(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (/^66\d{9}$/.test(digits)) return `0${digits.slice(2)}`;
+  if (/^0\d{9}$/.test(digits)) return digits;
+  return "";
+}
+
+function toThaiE164(value) {
+  const normalized = normalizeThaiPhone(value);
+  return normalized ? `+66${normalized.slice(1)}` : "";
+}
+
+function newRedemptionAttemptId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID().replace(/-/g, "");
+  return `reward_${Date.now()}_${Math.random().toString(36).slice(2, 14)}`;
+}
+
+function rewardOtpErrorMessage(error) {
+  const code = String(error?.code || "").replace("auth/", "");
+  if (["invalid-phone-number", "missing-phone-number"].includes(code)) return "รูปแบบเบอร์โทรศัพท์ไม่ถูกต้อง";
+  if (["invalid-verification-code", "code-expired", "session-expired"].includes(code)) return "รหัส OTP ไม่ถูกต้องหรือหมดอายุ กรุณาลองใหม่";
+  if (["too-many-requests", "quota-exceeded"].includes(code)) return "ส่งรหัสหลายครั้งเกินไป กรุณารอสักครู่แล้วลองใหม่";
+  if (["captcha-check-failed", "missing-app-credential"].includes(code)) return "ตรวจสอบความปลอดภัยไม่สำเร็จ กรุณารีเฟรชแล้วลองใหม่";
+  return "ยืนยันเบอร์โทรศัพท์ไม่สำเร็จ กรุณาลองใหม่";
 }
 
 const COLORS = {
@@ -669,6 +699,15 @@ export default function CustomerOrder({ shopUid }) {
   const beanUnsubRef = useRef(null);
   const [redeemLineId, setRedeemLineId] = useState(null);
   const [redeemMode, setRedeemMode] = useState(false);
+  const [rewardOtpOpen, setRewardOtpOpen] = useState(false);
+  const [rewardOtpStatus, setRewardOtpStatus] = useState("idle");
+  const [rewardOtpCode, setRewardOtpCode] = useState("");
+  const [rewardOtpError, setRewardOtpError] = useState("");
+  const [rewardOtpResendAt, setRewardOtpResendAt] = useState(0);
+  const [rewardVerification, setRewardVerification] = useState(null);
+  const [redemptionAttemptId, setRedemptionAttemptId] = useState("");
+  const rewardVerificationIdRef = useRef("");
+  const rewardRecaptchaRef = useRef(null);
   const [showRewardTerms, setShowRewardTerms] = useState(false);
   const [cart, setCart] = useState([]);
   const [flyItems, setFlyItems] = useState([]);
@@ -812,6 +851,12 @@ export default function CustomerOrder({ shopUid }) {
     setQrDataUrl(null);
     setError("");
     setRedeemLineId(null);
+    setRedeemMode(false);
+    setRewardVerification(null);
+    setRedemptionAttemptId("");
+    setRewardOtpOpen(false);
+    setRewardOtpStatus("idle");
+    setRewardOtpCode("");
   }
 
   const menusById = useMemo(() => {
@@ -1074,15 +1119,31 @@ export default function CustomerOrder({ shopUid }) {
     }));
   }
 
+  const cartFingerprint = useMemo(
+    () => JSON.stringify(cart.map((line) => [line.lineId, line.qty, line.unitPrice])),
+    [cart],
+  );
+  const phoneDigits = normalizeThaiPhone(phone);
+  const rewardVerified = Boolean(
+    rewardVerification &&
+    rewardVerification.phone === phoneDigits &&
+    rewardVerification.lineId === redeemLineId &&
+    rewardVerification.cartFingerprint === cartFingerprint &&
+    rewardVerification.attemptId === redemptionAttemptId,
+  );
   const beanGoalMet = (beanRecord?.beans || 0) >= loyaltyBeanGoal;
   const redeemLine = redeemLineId ? cart.find((l) => l.lineId === redeemLineId) : null;
-  const redeemDiscount = beanGoalMet && redeemLine ? redeemLine.unitPrice : 0;
+  const redeemDiscount = beanGoalMet && redeemLine && rewardVerified ? redeemLine.unitPrice : 0;
   const total = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0) - redeemDiscount;
   const cartCount = cart.reduce((s, l) => s + l.qty, 0);
 
   // ถ้าเมล็ดไม่พอ/ลบรายการที่เลือกแลกออกจากตะกร้าไปแล้ว ต้องเคลียร์การแลกทิ้งกันตัวเลขค้างผิด
   useEffect(() => {
-    if (redeemLineId && (!beanGoalMet || !cart.some((l) => l.lineId === redeemLineId))) setRedeemLineId(null);
+    if (redeemLineId && (!beanGoalMet || !cart.some((l) => l.lineId === redeemLineId))) {
+      setRedeemLineId(null);
+      setRewardVerification(null);
+      setRedemptionAttemptId("");
+    }
     if (!beanGoalMet) setRedeemMode(false);
   }, [redeemLineId, beanGoalMet, cart]);
 
@@ -1096,6 +1157,111 @@ export default function CustomerOrder({ shopUid }) {
     prevCartCountRef.current = cartCount;
   }, [cartCount]);
 
+  useEffect(() => () => {
+    rewardRecaptchaRef.current?.clear();
+    rewardRecaptchaRef.current = null;
+  }, []);
+
+  function clearRewardRecaptcha() {
+    rewardRecaptchaRef.current?.clear();
+    rewardRecaptchaRef.current = null;
+  }
+
+  function closeRewardOtp() {
+    clearRewardRecaptcha();
+    setRewardOtpOpen(false);
+    setRewardOtpStatus("idle");
+    setRewardOtpCode("");
+    setRewardOtpError("");
+    rewardVerificationIdRef.current = "";
+  }
+
+  function selectRedeemLine(lineId) {
+    setRedeemLineId(lineId);
+    setRewardVerification(null);
+    setRedemptionAttemptId("");
+  }
+
+  function startRewardOtp() {
+    if (!redeemLine) {
+      setError("กรุณาเลือกเครื่องดื่มที่ต้องการแลกก่อน");
+      return;
+    }
+    if (!toThaiE164(phone)) {
+      setError("กรุณากรอกเบอร์โทรศัพท์ไทยให้ถูกต้องก่อนใช้รางวัล");
+      return;
+    }
+    setError("");
+    setRewardVerification(null);
+    setRedemptionAttemptId(newRedemptionAttemptId());
+    setRewardOtpStatus("idle");
+    setRewardOtpCode("");
+    setRewardOtpError("");
+    setRewardOtpOpen(true);
+  }
+
+  async function sendRewardOtp() {
+    const e164Phone = toThaiE164(phone);
+    if (!e164Phone) {
+      setRewardOtpError("รูปแบบเบอร์โทรศัพท์ไม่ถูกต้อง");
+      return;
+    }
+    setRewardOtpStatus("requesting");
+    setRewardOtpError("");
+    setRewardOtpCode("");
+    try {
+      clearRewardRecaptcha();
+      const verifier = new RecaptchaVerifier(auth, "reward-otp-recaptcha", {
+        size: "invisible",
+      });
+      rewardRecaptchaRef.current = verifier;
+      const provider = new PhoneAuthProvider(auth);
+      rewardVerificationIdRef.current = await provider.verifyPhoneNumber(e164Phone, verifier);
+      setRewardOtpResendAt(Date.now() + 60000);
+      setRewardOtpStatus("code-sent");
+    } catch (otpError) {
+      clearRewardRecaptcha();
+      setRewardOtpStatus("error");
+      setRewardOtpError(rewardOtpErrorMessage(otpError));
+    }
+  }
+
+  async function verifyRewardOtp() {
+    if (rewardOtpCode.length !== 6 || !rewardVerificationIdRef.current) return;
+    setRewardOtpStatus("verifying");
+    setRewardOtpError("");
+    try {
+      const credential = PhoneAuthProvider.credential(rewardVerificationIdRef.current, rewardOtpCode);
+      const currentUser = auth.currentUser;
+      let credentialResult;
+      if (!currentUser) {
+        credentialResult = await signInWithCredential(auth, credential);
+      } else if (currentUser.isAnonymous) {
+        try {
+          credentialResult = await linkWithCredential(currentUser, credential);
+        } catch (linkError) {
+          if (linkError.code !== "auth/credential-already-in-use") throw linkError;
+          credentialResult = await signInWithCredential(auth, credential);
+        }
+      } else if (normalizeThaiPhone(currentUser.phoneNumber) === phoneDigits) {
+        credentialResult = await reauthenticateWithCredential(currentUser, credential);
+      } else {
+        credentialResult = await signInWithCredential(auth, credential);
+      }
+      await credentialResult.user.getIdToken(true);
+      setRewardVerification({
+        phone: phoneDigits,
+        lineId: redeemLineId,
+        cartFingerprint,
+        attemptId: redemptionAttemptId,
+      });
+      closeRewardOtp();
+    } catch (otpError) {
+      setRewardOtpStatus("code-sent");
+      setRewardOtpError(rewardOtpErrorMessage(otpError));
+    }
+  }
+
   async function checkout() {
     setError("");
     if (cart.length === 0) { setError("กรุณาเลือกเมนูอย่างน้อย 1 รายการ"); return; }
@@ -1103,6 +1269,10 @@ export default function CustomerOrder({ shopUid }) {
     if (!phone.trim()) { setError("กรุณาใส่เบอร์โทร"); return; }
     if (pickupDate < addDays(1) || pickupDate > addDays(7)) { setError("วันที่รับต้องล่วงหน้าอย่างน้อย 1 วัน และไม่เกิน 7 วัน"); return; }
     if (paymentMethod === "promptpay" && !promptpayId) { setError("ร้านนี้ยังไม่เปิดรับชำระผ่าน QR (ยังไม่ได้ตั้งค่า PromptPay)"); return; }
+    if (redeemLine && !rewardVerified) {
+      startRewardOtp();
+      return;
+    }
     setSubmitting(true);
     try {
       // เช็ค session สดๆ ก่อนเขียนจริงเสมอ เผื่อ auth หลุดไปกลางคันโดยที่ authUid ใน state ยังค้างค่าเก่า
@@ -1113,52 +1283,59 @@ export default function CustomerOrder({ shopUid }) {
         uidToUse = cred.user.uid;
         setAuthUid(uidToUse);
       }
-      const phoneDigits = phone.trim().replace(/\D/g, "");
-      let redeemedThisOrder = false;
-      // หักเมล็ดก่อนเขียนออเดอร์เสมอ เช็คยอดสดๆ ผ่าน transaction กันแลกซ้ำ/แลกทันเวลาชนกัน (เช่นเปิด 2 แท็บ)
-      // return undefined = ยกเลิก transaction (Firebase ถือว่า committed:false ไม่เขียนอะไรเลย)
-      if (redeemLine && phoneDigits) {
-        const result = await runTransaction(ref(db, `customers/${shopUid}/${phoneDigits}`), (cur) => {
-          if (!cur || (cur.beans || 0) < loyaltyBeanGoal) return undefined;
-          return { ...cur, beans: cur.beans - loyaltyBeanGoal, redeemedCount: (cur.redeemedCount || 0) + 1, updatedAt: new Date().toISOString() };
-        });
-        redeemedThisOrder = result.committed;
-      }
-      if (redeemLine && !redeemedThisOrder) {
-        setRedeemLineId(null);
-        setError("เมล็ดสะสมไม่พอสำหรับแลกฟรีแล้ว (อาจถูกแลกไปจากที่อื่น) กรุณากดยืนยันสั่งซื้ออีกครั้ง");
-        setSubmitting(false);
-        return;
-      }
-      const newRef = push(ref(db, `orders/${shopUid}`));
-      const orderData = {
+      const baseOrder = {
         customerUid: uidToUse,
         customerName: name.trim(),
         customerPhone: phone.trim(),
         note: note.trim(),
         paymentMethod,
         pickupDate,
-        items: cart.map(({ lineId, ...rest }) => (redeemedThisOrder && lineId === redeemLineId ? { ...rest, freeUnit: true } : rest)),
-        total,
-        ...(redeemedThisOrder ? { redeemedBeans: true, beansUsed: loyaltyBeanGoal } : {}),
-        status: "pending",
-        createdAt: new Date().toISOString(),
       };
-      await set(newRef, orderData);
-      saveMyOrderId(shopUid, newRef.key);
+      let orderId;
+      let orderData;
+
+      if (redeemLine && rewardVerified) {
+        const createRewardOrder = httpsCallable(functions, "checkoutWithReward");
+        const response = await createRewardOrder({
+          shopUid,
+          redemptionAttemptId,
+          selectedLineId: redeemLineId,
+          order: { ...baseOrder, items: cart },
+        });
+        orderId = response.data.orderId;
+        orderData = response.data.order;
+      } else {
+        const newRef = push(ref(db, `orders/${shopUid}`));
+        orderId = newRef.key;
+        orderData = {
+          ...baseOrder,
+          items: cart.map(({ lineId, ...rest }) => rest),
+          total,
+          status: "pending",
+          createdAt: new Date().toISOString(),
+        };
+        await set(newRef, orderData);
+      }
+
+      saveMyOrderId(shopUid, orderId);
       if (paymentMethod === "promptpay") {
-        const payload = generatePayload(promptpayId, { amount: total });
+        const payload = generatePayload(promptpayId, { amount: orderData.total });
         const url = await QRCode.toDataURL(payload, { width: 260, margin: 1 });
         setQrDataUrl(url);
       } else {
         setQrDataUrl(null);
       }
-      setOrder({ id: newRef.key, ...orderData });
+      setOrder({ id: orderId, ...orderData });
       setStep("pay");
     } catch (e) {
-      const isAuthIssue = e.code === "PERMISSION_DENIED" || /permission_denied/i.test(e.message || "");
+      const isAuthIssue = e.code === "PERMISSION_DENIED" || e.code === "functions/unauthenticated" ||
+        e.code === "functions/permission-denied" || /permission_denied/i.test(e.message || "");
+      if (e.code === "functions/failed-precondition") {
+        setRewardVerification(null);
+        setRedeemLineId(null);
+      }
       setError(isAuthIssue
-        ? "ระบบยืนยันตัวตนมีปัญหาชั่วคราว กรุณารีเฟรชหน้าเว็บแล้วลองสั่งซื้อใหม่อีกครั้ง"
+        ? "การยืนยันเบอร์สำหรับใช้รางวัลหมดอายุ กรุณายืนยัน OTP อีกครั้ง"
         : "สั่งซื้อไม่สำเร็จ: " + e.message);
     } finally {
       setSubmitting(false);
@@ -1408,7 +1585,17 @@ export default function CustomerOrder({ shopUid }) {
           <input style={field} value={name} onChange={(e) => setName(e.target.value)} placeholder="ชื่อของคุณ" />
 
           <label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>เบอร์โทรศัพท์</label>
-          <input style={field} type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="08xxxxxxxx" />
+          <input
+            style={field}
+            type="tel"
+            value={phone}
+            onChange={(e) => {
+              setPhone(e.target.value);
+              setRewardVerification(null);
+              setRedemptionAttemptId("");
+            }}
+            placeholder="08xxxxxxxx"
+          />
 
           <LoyaltyCard
             phone={phone}
@@ -1421,10 +1608,24 @@ export default function CustomerOrder({ shopUid }) {
             redeemMode={redeemMode}
             setRedeemMode={setRedeemMode}
             redeemLineId={redeemLineId}
-            setRedeemLineId={setRedeemLineId}
+            setRedeemLineId={selectRedeemLine}
+            rewardVerified={rewardVerified}
+            onRequestRewardVerification={startRewardOtp}
             onShowRewardTerms={() => setShowRewardTerms(true)}
           />
           {showRewardTerms && <RewardTermsSheet goal={loyaltyBeanGoal} onClose={() => setShowRewardTerms(false)} />}
+          <RewardOtpModal
+            open={rewardOtpOpen}
+            phone={phone}
+            status={rewardOtpStatus}
+            error={rewardOtpError}
+            code={rewardOtpCode}
+            resendAvailableAt={rewardOtpResendAt}
+            onCodeChange={setRewardOtpCode}
+            onSend={sendRewardOtp}
+            onVerify={verifyRewardOtp}
+            onClose={closeRewardOtp}
+          />
 
           <label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>วิธีชำระเงิน</label>
           <div style={{ display: "flex", gap: 8, marginTop: 4 }}>

@@ -30,7 +30,12 @@
         ".read": "auth != null && auth.uid === $uid",
         "$orderId": {
           ".read": "auth != null && (auth.uid === $uid || data.child('customerUid').val() === auth.uid)",
-          ".write": "auth != null && (auth.uid === $uid || (!data.exists() && root.child('shops/' + $uid + '/settings/acceptingOrders').val() !== false && newData.child('customerUid').val() === auth.uid && newData.child('customerName').isString() && newData.child('customerName').val().length > 0 && newData.child('customerPhone').isString() && newData.child('paymentMethod').isString() && newData.child('createdAt').isString() && newData.child('items').hasChildren() && newData.child('total').isNumber() && newData.child('total').val() >= 0 && newData.child('status').val() === 'pending' && !newData.hasChild('paymentVerified') && !newData.hasChild('paymentVerifiedBy') && !newData.hasChild('paymentVerifiedAt') && !newData.hasChild('slipRef') && !newData.hasChild('saleRecorded') && !newData.hasChild('source')))"
+          ".write": "auth != null && (auth.uid === $uid || (!data.exists() && root.child('shops/' + $uid + '/settings/acceptingOrders').val() !== false && newData.child('customerUid').val() === auth.uid && newData.child('customerName').isString() && newData.child('customerName').val().length > 0 && newData.child('customerPhone').isString() && newData.child('paymentMethod').isString() && newData.child('createdAt').isString() && newData.child('items').hasChildren() && newData.child('total').isNumber() && newData.child('total').val() >= 0 && newData.child('status').val() === 'pending' && !newData.hasChild('paymentVerified') && !newData.hasChild('paymentVerifiedBy') && !newData.hasChild('paymentVerifiedAt') && !newData.hasChild('slipRef') && !newData.hasChild('saleRecorded') && !newData.hasChild('source') && !newData.hasChild('redeemedBeans') && !newData.hasChild('beansUsed') && !newData.hasChild('redemptionAttemptId')))",
+          "items": {
+            "$item": {
+              "freeUnit": { ".validate": "auth.uid === $uid" }
+            }
+          }
         }
       }
     },
@@ -39,8 +44,7 @@
         ".read": "auth != null && auth.uid === $uid",
         ".write": "auth != null && auth.uid === $uid",
         "$phone": {
-          ".read": "auth != null",
-          ".write": "auth != null && data.exists() && root.child('shops/' + $uid + '/settings/loyaltyBeanGoal').exists() && newData.child('beans').val() === data.child('beans').val() - root.child('shops/' + $uid + '/settings/loyaltyBeanGoal').val() && newData.child('beans').val() >= 0 && newData.child('redeemedCount').val() === (data.child('redeemedCount').exists() ? data.child('redeemedCount').val() : 0) + 1 && newData.child('phone').val() === data.child('phone').val() && newData.child('name').val() === data.child('name').val() && newData.child('lifetimeBeans').val() === data.child('lifetimeBeans').val() && newData.child('createdAt').val() === data.child('createdAt').val()"
+          ".read": "auth != null"
         }
       }
     },
