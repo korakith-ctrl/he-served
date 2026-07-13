@@ -170,7 +170,9 @@ function normalizeData(raw) {
       ...m, ingredients: (m.ingredients || []).filter(Boolean), optionGroupIds: (m.optionGroupIds || []).filter(Boolean),
       available: m.available ?? true, category: m.category || "อื่นๆ", imageUrl: m.imageUrl || "",
     })),
-    sales: (raw.sales || []).filter(Boolean),
+    // sales ย้ายไปอยู่โหนดแยก sales/{uid} แล้ว (ดู useEffect ที่ subscribe ใน ShopApp) — เหลือ field นี้ไว้เป็น [] เฉยๆ
+    // เพื่อไม่ต้องแก้ shape ของ data ทั้งระบบ ของจริงมาจาก dataForDisplay.sales ที่ override ทับอีกที
+    sales: [],
     purchases: (raw.purchases || []).filter(Boolean),
     settings: {
       overheadPerCup: raw.settings?.overheadPerCup ?? 3.1,
@@ -492,6 +494,7 @@ function ShopApp({ uid, user }) {
   );
   const [orders, setOrders] = useState([]);
   const [customers, setCustomers] = useState([]);
+  const [salesRecords, setSalesRecords] = useState([]);
   // เช็คแค่ตอน mount ครั้งเดียวไม่พอ — ถ้าหน้าจอเปลี่ยนขนาดทีหลัง (resize, หมุนแท็บเล็ต) โดยไม่ reload หน้า
   // sidebarCollapsed จะค้างค่าตอน mount ตลอด ทำให้ sidebar เต็มบีบเนื้อหาแคบเกินจนอ่านไม่ออกบนจอมือถือจริง
   useEffect(() => {
@@ -530,6 +533,17 @@ function ShopApp({ uid, user }) {
     const unsub = onValue(ref(db, `customers/${uid}`), (snap) => {
       const val = snap.val() || {};
       setCustomers(Object.values(val));
+    });
+    return () => unsub();
+  }, [uid]);
+
+  // เก็บยอดขายแยกโหนดจาก shops/{uid} ด้วยเหตุผลเดียวกับ customers — เดิม sales อยู่ในก้อนใหญ่ที่ set() ทับทั้งก้อนทุก
+  // 400ms ถ้าเปิดแดชบอร์ดพร้อมกัน 2 แท็บ/อุปกรณ์แล้วยืนยันออเดอร์ใกล้ๆ กัน ฝั่งที่เขียนทีหลังจะเอา data เก่าที่ยังไม่เห็น
+  // ยอดขายของอีกฝั่งไปเขียนทับ ทำให้ยอดขายหายเงียบๆ (เจอเคสจริงในโปรดักชัน 13 ก.ค. 2569 — ยอดขายหาย 2 รายการ)
+  useEffect(() => {
+    const unsub = onValue(ref(db, `sales/${uid}`), (snap) => {
+      const val = snap.val() || {};
+      setSalesRecords(Object.values(val));
     });
     return () => unsub();
   }, [uid]);
@@ -606,8 +620,8 @@ function ShopApp({ uid, user }) {
   const cancelledOrderIds = useMemo(() => new Set(orders.filter((o) => o.status === "cancelled").map((o) => o.id)), [orders]);
   const dataForDisplay = useMemo(() => {
     if (!data) return data;
-    return { ...data, sales: data.sales.filter((s) => !s.orderId || !cancelledOrderIds.has(s.orderId)) };
-  }, [data, cancelledOrderIds]);
+    return { ...data, sales: salesRecords.filter((s) => !s.orderId || !cancelledOrderIds.has(s.orderId)) };
+  }, [data, salesRecords, cancelledOrderIds]);
 
   if (!data) {
     return (
@@ -648,16 +662,19 @@ function ShopApp({ uid, user }) {
         // วัตถุดิบ "ไม่จำกัดสต็อก" (เช่น น้ำประปากรอง/น้ำแข็ง) ไม่ตัดสต็อก — ต้นทุนในสูตรยังคิดตามปกติ
         if (ing && !ing.unlimited) ing.stockQty = round4(ing.stockQty - line.qty * qty);
       }
-      next.sales.push({
-        id: genId("sale"), timestamp: new Date().toISOString(), menuId, menuName: menu.name,
-        channel, qty, unitPrice, grossRevenue, gpAmount, gpPercent, promoDiscount, netRevenue,
-        totalCost, profit: netRevenue - totalCost,
-        platformName: platform ? platform.name : null,
-        milkNote: opts.milkLabel || null,
-        note: opts.note || null,
-        orderId: opts.orderId || null,
-      });
     });
+    // ยอดขายเขียนตรงไปโหนด sales/{uid} แยกจาก updateData ข้างบน (ซึ่งยังแก้ next.ingredients ในก้อนใหญ่ตามเดิม) —
+    // กัน full-object set() ของ shops/{uid} ทับยอดขายที่เพิ่งเพิ่มหายไปเวลาเปิดแดชบอร์ดพร้อมกันหลายแท็บ (ดู useEffect ที่ subscribe sales/{uid} ด้านบนสำหรับรายละเอียด)
+    const saleId = genId("sale");
+    set(ref(db, `sales/${uid}/${saleId}`), {
+      id: saleId, timestamp: new Date().toISOString(), menuId, menuName: menu.name,
+      channel, qty, unitPrice, grossRevenue, gpAmount, gpPercent, promoDiscount, netRevenue,
+      totalCost, profit: netRevenue - totalCost,
+      platformName: platform ? platform.name : null,
+      milkNote: opts.milkLabel || null,
+      note: opts.note || null,
+      orderId: opts.orderId || null,
+    }).catch((err) => showToast("บันทึกยอดขายไม่สำเร็จ: " + err.message));
     showToast(`บันทึกการขาย ${menu.name} x${qty} (${channel === "delivery" ? (platform ? platform.name : "เดลิเวอรี่") : "หน้าร้าน"}) แล้ว`);
   }
 
@@ -698,8 +715,14 @@ function ShopApp({ uid, user }) {
             if (ing && !ing.unlimited) ing.stockQty = round4(ing.stockQty + line.qty * item.qty);
           }
         }
-        next.sales = next.sales.filter((s) => s.orderId !== order.id);
       });
+      // ลบยอดขายที่ผูกกับออเดอร์นี้ออกจากโหนด sales/{uid} แยกต่างหาก (ดูเหตุผลเดียวกับตอนบันทึกใน recordSale)
+      const toRemove = salesRecords.filter((s) => s.orderId === order.id);
+      if (toRemove.length > 0) {
+        const patch = {};
+        for (const s of toRemove) patch[s.id] = null;
+        update(ref(db, `sales/${uid}`), patch).catch((err) => showToast("ลบยอดขายไม่สำเร็จ: " + err.message));
+      }
     }
     update(ref(db, `orders/${uid}/${order.id}`), { status: "cancelled", saleRecorded: false })
       .catch((err) => showToast("ยกเลิกไม่สำเร็จ: " + err.message));

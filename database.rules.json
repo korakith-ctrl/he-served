@@ -43,6 +43,12 @@
           ".write": "auth != null && data.exists() && root.child('shops/' + $uid + '/settings/loyaltyBeanGoal').exists() && newData.child('beans').val() === data.child('beans').val() - root.child('shops/' + $uid + '/settings/loyaltyBeanGoal').val() && newData.child('beans').val() >= 0 && newData.child('redeemedCount').val() === (data.child('redeemedCount').exists() ? data.child('redeemedCount').val() : 0) + 1 && newData.child('phone').val() === data.child('phone').val() && newData.child('name').val() === data.child('name').val() && newData.child('lifetimeBeans').val() === data.child('lifetimeBeans').val() && newData.child('createdAt').val() === data.child('createdAt').val()"
         }
       }
+    },
+    "sales": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
     }
   }
 }
