@@ -2257,6 +2257,131 @@ function OrderItemLines({ items, note, compact, onEditItem }) {
   );
 }
 
+function escapePrintHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function buildOrderStickerData(order) {
+  const stickers = [];
+  const totalCups = (order.items || []).reduce((sum, item) => sum + Math.max(1, Number(item.qty) || 1), 0);
+  let cupNumber = 0;
+  for (const item of order.items || []) {
+    const qty = Math.max(1, Number(item.qty) || 1);
+    const options = (item.options || []).map((option) => option.label).filter(Boolean).join(" · ");
+    for (let unit = 0; unit < qty; unit += 1) {
+      cupNumber += 1;
+      stickers.push({
+        menuName: item.name || "เครื่องดื่ม",
+        options,
+        note: order.note || "",
+        customer: order.customerName || order.customerPhone || "ลูกค้า",
+        phone: order.customerName && order.customerPhone ? order.customerPhone : "",
+        orderCode: String(order.id || "").slice(-6).toUpperCase(),
+        pickupDate: formatPickupDateTH(order.pickupDate),
+        cupNumber,
+        totalCups,
+        freeUnit: item.freeUnit === true,
+      });
+    }
+  }
+  return stickers;
+}
+
+function openOrderStickerPrint(order, shopName) {
+  const stickers = buildOrderStickerData(order);
+  if (stickers.length === 0) throw new Error("ออเดอร์นี้ไม่มีรายการสำหรับพิมพ์");
+
+  const startInput = window.prompt("เริ่มพิมพ์ที่ดวงลำดับใดบนแผ่น A9? (1-30)", "1");
+  if (startInput === null) return false;
+  const startPosition = Number.parseInt(startInput, 10);
+  if (!Number.isInteger(startPosition) || startPosition < 1 || startPosition > 30) {
+    throw new Error("ตำแหน่งเริ่มต้นต้องเป็นตัวเลข 1-30");
+  }
+
+  const pageCount = Math.ceil((startPosition - 1 + stickers.length) / 30);
+  const pages = Array.from({ length: pageCount }, (_, pageIndex) => {
+    const slots = Array.from({ length: 30 }, (_, slotIndex) => {
+      const stickerIndex = pageIndex * 30 + slotIndex - (startPosition - 1);
+      const sticker = stickers[stickerIndex];
+      if (!sticker) return '<div class="slot-wrap"><div class="label label--blank"></div></div>';
+      const details = [sticker.options, sticker.freeUnit ? "แลกรางวัลฟรี" : ""].filter(Boolean).join(" · ");
+      return `
+        <div class="slot-wrap">
+          <article class="label">
+            <div class="label__top">
+              <strong>${escapePrintHtml(sticker.menuName)}</strong>
+              <span>${sticker.cupNumber}/${sticker.totalCups}</span>
+            </div>
+            <div class="label__details">${escapePrintHtml(details || "สูตรปกติ")}</div>
+            ${sticker.note ? `<div class="label__note">โน้ต: ${escapePrintHtml(sticker.note)}</div>` : '<div class="label__note label__note--empty">&nbsp;</div>'}
+            <div class="label__bottom">
+              <span>${escapePrintHtml(sticker.customer)}${sticker.phone ? ` · ${escapePrintHtml(sticker.phone)}` : ""}</span>
+              <b>#${escapePrintHtml(sticker.orderCode)}</b>
+            </div>
+          </article>
+        </div>`;
+    }).join("");
+    return `<section class="sheet">${slots}</section>`;
+  }).join("");
+
+  const printWindow = window.open("", "_blank", "width=980,height=760");
+  if (!printWindow) throw new Error("เบราว์เซอร์บล็อกหน้าต่างพิมพ์ กรุณาอนุญาต Pop-up แล้วลองใหม่");
+  printWindow.opener = null;
+  printWindow.document.write(`<!doctype html>
+    <html lang="th">
+      <head>
+        <meta charset="utf-8" />
+        <title>สติ๊กเกอร์ออเดอร์ #${escapePrintHtml(String(order.id || "").slice(-6).toUpperCase())}</title>
+        <style>
+          @page { size: Letter portrait; margin: 25.4mm 31.75mm; }
+          * { box-sizing: border-box; }
+          html, body { margin: 0; padding: 0; color: #000; background: #fff; font-family: Tahoma, Arial, sans-serif; }
+          .sheet {
+            display: grid;
+            grid-template-columns: repeat(3, 50.8mm);
+            grid-template-rows: repeat(10, 22.86mm);
+            width: 152.4mm;
+            height: 228.6mm;
+            break-after: page;
+            page-break-after: always;
+          }
+          .sheet:last-child { break-after: auto; page-break-after: auto; }
+          .slot-wrap { width: 50.8mm; height: 22.86mm; overflow: hidden; }
+          .label {
+            width: 50mm;
+            height: 19mm;
+            overflow: hidden;
+            padding: 1.1mm 1.25mm .8mm;
+            font-size: 6.4pt;
+            line-height: 1.08;
+          }
+          .label__top { display: flex; align-items: baseline; justify-content: space-between; gap: 1mm; }
+          .label__top strong { min-width: 0; overflow: hidden; font-size: 8.2pt; line-height: 1.05; text-overflow: ellipsis; white-space: nowrap; }
+          .label__top span { flex-shrink: 0; font-weight: 700; }
+          .label__details, .label__note { margin-top: .65mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .label__note { font-weight: 700; }
+          .label__bottom { display: flex; justify-content: space-between; gap: 1mm; margin-top: .65mm; border-top: .2mm solid #000; padding-top: .55mm; font-size: 5.7pt; }
+          .label__bottom span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .label__bottom b { flex-shrink: 0; }
+          @media screen {
+            body::before { content: "${escapePrintHtml(shopName || "ร้านกาแฟ")} · A9 50 × 19 มม. · ตั้งค่าการพิมพ์เป็น Letter / Actual size 100%"; display: block; position: fixed; z-index: 2; top: 8px; left: 50%; transform: translateX(-50%); padding: 8px 12px; border-radius: 8px; color: #fff; background: #173b63; font-size: 12px; white-space: nowrap; }
+            body { padding: 24px; background: #e7e7e7; }
+            .sheet { margin: 24px auto; background: #fff; box-shadow: 0 4px 24px rgba(0,0,0,.16); }
+            .label:not(.label--blank) { outline: 1px dashed #aaa; }
+          }
+        </style>
+      </head>
+      <body>${pages}<script>window.setTimeout(() => window.print(), 250);<\/script></body>
+    </html>`);
+  printWindow.document.close();
+  return true;
+}
+
 const KANBAN_NEXT_LABEL = { pending: "ยืนยันรับเงินแล้ว", preparing: "พร้อมเสิร์ฟ", ready: "เสร็จ / ลูกค้ารับแล้ว" };
 
 function OrdersPanel({ uid, orders, recordSale, cancelOrder, showToast, data, ingredientsById }) {
@@ -2351,6 +2476,14 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, showToast, data, in
     if (order.status === "pending") confirmPaid(order);
     else if (order.status === "preparing") setStatus(order, "ready");
     else if (order.status === "ready") setStatus(order, "done");
+  }
+
+  function printOrderStickers(order) {
+    try {
+      openOrderStickerPrint(order, data.settings.shopName);
+    } catch (error) {
+      showToast(error.message || "เปิดหน้าพิมพ์สติ๊กเกอร์ไม่สำเร็จ");
+    }
   }
 
   function moveTo(order, colId) {
@@ -2483,19 +2616,31 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, showToast, data, in
                       items={o.items} note={o.note} compact={compact}
                       onEditItem={col.id === "pending" ? (idx) => setEditingItem({ order: o, itemIdx: idx }) : undefined}
                     />
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontWeight: 700, fontSize: compact ? 13 : 16, fontFamily: "var(--f-body)", borderTop: "1px dashed var(--line)", paddingTop: compact ? 4 : 7, marginBottom: col.id !== "done" ? (compact ? 6 : 9) : 0 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontWeight: 700, fontSize: compact ? 13 : 16, fontFamily: "var(--f-body)", borderTop: "1px dashed var(--line)", paddingTop: compact ? 4 : 7, marginBottom: compact ? 6 : 9 }}>
                       <span style={{ fontSize: compact ? 10.5 : 12, fontWeight: 600, color: "var(--espresso-3)" }}>รวม</span><span>฿{money(o.total)}</span>
                     </div>
-                    {col.id !== "done" && (
-                      <div style={{ display: "flex", gap: compact ? 4 : 6 }}>
+                    <div style={{ display: "flex", gap: compact ? 4 : 6 }}>
+                      <button
+                        type="button"
+                        className="cbtn"
+                        style={{ padding: compact ? "6px" : "8px 10px", flexShrink: 0 }}
+                        onClick={() => printOrderStickers(o)}
+                        title="พิมพ์สติ๊กเกอร์ A9 สำหรับออเดอร์นี้"
+                        aria-label="พิมพ์สติ๊กเกอร์ออเดอร์"
+                      >
+                        <Icon name="printer" size={13} />{!compact && <span style={{ marginLeft: 4 }}>สติ๊กเกอร์</span>}
+                      </button>
+                      {col.id !== "done" && (
+                        <>
                         <button className="cbtn cbtn-accent" style={{ flex: 1, fontSize: compact ? 10.5 : 12.5, padding: compact ? "6px 4px" : "8px 10px" }} onClick={() => advance(o)}>{compact ? "→ ถัดไป" : KANBAN_NEXT_LABEL[col.id]}</button>
                         <button
                           className="cbtn cbtn-danger" style={{ padding: compact ? "6px 6px" : "8px 9px" }}
                           onClick={() => cancelOrder(o)}
                           title={o.saleRecorded ? "ยกเลิกออเดอร์ (คืนสต็อก/ตัดยอดขายที่บันทึกไปแล้วออกให้)" : "ยกเลิกออเดอร์"}
                         ><Icon name="x" size={13} /></button>
-                      </div>
-                    )}
+                        </>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
