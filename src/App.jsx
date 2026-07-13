@@ -470,15 +470,15 @@ function TextField({ value, onChange, ...rest }) {
 }
 
 const TABS = [
-  { id: "dashboard", label: "ภาพรวม", icon: "layout-dashboard" },
-  { id: "sell", label: "ขายเครื่องดื่ม", icon: "cash-register" },
-  { id: "orders", label: "ออเดอร์ลูกค้า", icon: "receipt" },
-  { id: "menus", label: "เมนู & สูตร", icon: "cup" },
-  { id: "promotions", label: "โปรโมชั่น", icon: "discount" },
-  { id: "options", label: "ตัวเลือกเสริม", icon: "list-details" },
-  { id: "ingredients", label: "วัตถุดิบ & สต็อก", icon: "box-multiple" },
-  { id: "reports", label: "รายงาน", icon: "chart-line" },
-  { id: "settings", label: "ตั้งค่า", icon: "settings" },
+  { id: "dashboard", label: "Dashboard", icon: "layout-dashboard" },
+  { id: "sell", label: "Sell", icon: "cash-register" },
+  { id: "orders", label: "Orders", icon: "receipt" },
+  { id: "menus", label: "Menu & Recipes", icon: "cup" },
+  { id: "promotions", label: "Promotions", icon: "discount" },
+  { id: "options", label: "Add-on Options", icon: "list-details" },
+  { id: "ingredients", label: "Inventory & Stock", icon: "box-multiple" },
+  { id: "reports", label: "Reports", icon: "chart-line" },
+  { id: "settings", label: "Settings", icon: "settings" },
 ];
 
 function ShopApp({ uid, user }) {
