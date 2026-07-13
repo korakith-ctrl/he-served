@@ -887,16 +887,6 @@ function ShopApp({ uid, user }) {
   );
 }
 
-function MetricCard({ label, value, sub, accent }) {
-  return (
-    <div style={glass({ borderRadius: 16, padding: "16px 18px" })}>
-      <p style={{ margin: 0, fontSize: 12, color: "var(--espresso-2)" }}>{label}</p>
-      <p style={{ margin: "4px 0 0", fontFamily: "var(--f-body)", fontSize: 26, fontWeight: 700, color: accent || "var(--espresso-5)" }}>{value}</p>
-      {sub && <p style={{ margin: "2px 0 0", fontSize: 11.5, color: "var(--espresso-2)" }}>{sub}</p>}
-    </div>
-  );
-}
-
 function ChannelPill({ channel }) {
   const style = channel === "delivery"
     ? { background: "var(--gold-light)", color: "var(--gold-dark)" }
@@ -3431,24 +3421,213 @@ function StockAdjustModal({ ingredient, onClose, onConfirm }) {
   );
 }
 
+// การเทียบยอดกับ "ช่วงก่อนหน้าที่เท่ากัน" — วันนี้เทียบเมื่อวาน, 7 วันล่าสุดเทียบ 7 วันก่อนหน้านั้น, เดือนนี้เทียบเดือนก่อน
+// "ทั้งหมด" ไม่มีช่วงก่อนหน้าให้เทียบ จึงคืน null แล้วการ์ด KPI จะไม่แสดงลูกศร
+function prevPeriodSales(allSales, range, now) {
+  if (range === "all") return null;
+  if (range === "today") {
+    const y = new Date(now); y.setDate(y.getDate() - 1);
+    return allSales.filter((s) => todayStr(new Date(s.timestamp)) === todayStr(y));
+  }
+  if (range === "week") {
+    return allSales.filter((s) => { const diff = (now - new Date(s.timestamp)) / 86400000; return diff > 7 && diff <= 14; });
+  }
+  if (range === "month") {
+    const pm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return allSales.filter((s) => { const d = new Date(s.timestamp); return d.getMonth() === pm.getMonth() && d.getFullYear() === pm.getFullYear(); });
+  }
+  return null;
+}
+
+function pctDelta(cur, prev) {
+  if (prev == null) return null;
+  if (prev === 0) return cur > 0 ? Infinity : 0;
+  return ((cur - prev) / Math.abs(prev)) * 100;
+}
+
+function RepDeltaTag({ delta }) {
+  if (delta == null) return null;
+  const flat = Math.abs(delta) < 0.5;
+  const up = delta > 0;
+  const color = flat ? DASH.gray : up ? DASH.success : DASH.danger;
+  const bg = flat ? DASH.neutralSoft : up ? DASH.successSoft : DASH.dangerSoft;
+  const label = delta === Infinity ? "ใหม่" : `${flat ? "" : up ? "+" : ""}${delta.toFixed(0)}%`;
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 3, background: bg, color, fontSize: 11.5, fontWeight: 700, borderRadius: 999, padding: "2px 8px" }}>
+      {!flat && <Icon name={up ? "arrow-up-right" : "arrow-down-right"} size={11} />}
+      {label}
+    </span>
+  );
+}
+
+function RepKpiCard({ icon, label, value, sub, delta, tone, big }) {
+  const tones = {
+    primary: { fg: DASH.primaryDark, iconBg: "#fff", iconFg: DASH.primary, bg: DASH.primarySoft, border: "rgba(37,99,235,.18)" },
+    success: { fg: DASH.success, iconBg: DASH.successSoft, iconFg: DASH.success, bg: "#fff", border: DASH.border },
+    danger: { fg: DASH.danger, iconBg: DASH.dangerSoft, iconFg: DASH.danger, bg: "#fff", border: DASH.border },
+    neutral: { fg: DASH.neutral, iconBg: DASH.neutralSoft, iconFg: DASH.neutral, bg: "#fff", border: DASH.border },
+  };
+  const t = tones[tone] || tones.neutral;
+  return (
+    <div style={{ background: t.bg, border: `1px solid ${t.border}`, borderRadius: 16, padding: "18px 20px", boxShadow: "0 10px 30px rgba(0,0,0,.05)", display: "flex", flexDirection: "column", gap: 10, minHeight: 116 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+          <div style={{ width: 30, height: 30, borderRadius: 9, background: t.iconBg, color: t.iconFg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon name={icon} size={15} /></div>
+          <span style={{ fontSize: 13, fontWeight: 600, color: DASH.gray }}>{label}</span>
+        </div>
+        <RepDeltaTag delta={delta} />
+      </div>
+      <div>
+        <div style={{ fontSize: big ? 32 : 24, fontWeight: 700, color: t.fg, lineHeight: 1.15, fontFamily: "var(--f-body)" }}>{value}</div>
+        {sub && <div style={{ fontSize: 12, color: DASH.gray, marginTop: 3 }}>{sub}</div>}
+      </div>
+    </div>
+  );
+}
+
+const REP_CHANNEL_META = {
+  store: { icon: "building-store", color: DASH.primary, bg: DASH.primarySoft },
+  delivery: { icon: "truck-delivery", color: "#B45309", bg: DASH.warningSoft },
+  online: { icon: "device-mobile", color: DASH.success, bg: DASH.successSoft },
+};
+
+function RepChannelCard({ channel, v, totalRevenue }) {
+  const meta = REP_CHANNEL_META[channel];
+  const share = totalRevenue > 0 ? Math.round((v.revenue / totalRevenue) * 100) : 0;
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${DASH.border}`, borderRadius: 16, padding: 18, boxShadow: "0 8px 24px rgba(0,0,0,.04)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 10 }}>
+        <div style={{ width: 28, height: 28, borderRadius: 8, background: meta.bg, color: meta.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon name={meta.icon} size={14} /></div>
+        <span style={{ fontSize: 13, fontWeight: 700, color: "#1F2937" }}>{CHANNELS[channel]}</span>
+        <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: DASH.gray }}>{share}%</span>
+      </div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: "#111827", fontFamily: "var(--f-body)" }}>฿{money(v.revenue)}</div>
+      <div style={{ fontSize: 12, color: DASH.gray, marginTop: 3 }}>กำไร ฿{money(v.profit)} · {v.cups} แก้ว</div>
+      <div style={{ height: 5, borderRadius: 999, background: DASH.neutralSoft, marginTop: 10, overflow: "hidden" }}>
+        <div style={{ height: "100%", width: share + "%", background: meta.color, borderRadius: 999 }} />
+      </div>
+    </div>
+  );
+}
+
+// เรียงตามยอดขาย/กำไรเพื่อแยก "พระเอก" (ขายดี+กำไรดี) กับ "ตัวถ่วง" (ขายดีแต่กำไรบาง)
+function RepMenuTable({ rows }) {
+  const [sortBy, setSortBy] = useState("revenue");
+  const sorted = useMemo(() => [...rows].sort((a, b) => b[sortBy] - a[sortBy]), [rows, sortBy]);
+  if (rows.length === 0) return <EmptyNote text="ยังไม่มีข้อมูลการขายในช่วงนี้" />;
+  const cols = [["revenue", "รายได้"], ["profit", "กำไร"], ["qty", "จำนวน"]];
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+        {cols.map(([k, label]) => (
+          <button key={k} onClick={() => setSortBy(k)} style={{
+            border: "none", borderRadius: 8, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer",
+            background: sortBy === k ? DASH.primarySoft : "transparent", color: sortBy === k ? DASH.primaryDark : DASH.gray,
+          }}>เรียง: {label}</button>
+        ))}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        {sorted.slice(0, 8).map((r, i) => (
+          <div key={r.name} style={{ display: "grid", gridTemplateColumns: "20px 1fr auto", gap: 10, alignItems: "center", padding: "8px 4px", borderBottom: i < sorted.length - 1 ? `1px solid ${DASH.neutralSoft}` : "none" }}>
+            <span style={{ fontSize: 11.5, fontWeight: 700, color: DASH.gray }}>{i + 1}</span>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: "#1F2937", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</div>
+              <div style={{ fontSize: 11, color: DASH.gray, marginTop: 1 }}>{r.qty} แก้ว · margin {r.margin.toFixed(0)}%</div>
+            </div>
+            <div style={{ textAlign: "right", flexShrink: 0 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 700, color: "#1F2937" }}>฿{money(r.revenue)}</div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: r.profit >= 0 ? DASH.success : DASH.danger }}>กำไร ฿{money(r.profit)}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ยอดขายรวมทุกวันในช่วงที่เลือก แจกแจงตาม "ชั่วโมงของวัน" (0-23) เพื่อดูช่วงเวลาขายดี ไว้จัดกะ/เตรียมของล่วงหน้า
+function RepHourlyChart({ sales }) {
+  const hourly = useMemo(() => {
+    const buckets = Array.from({ length: 24 }, (_, h) => ({ hour: h, revenue: 0 }));
+    for (const s of sales) buckets[new Date(s.timestamp).getHours()].revenue += s.netRevenue;
+    return buckets;
+  }, [sales]);
+  const active = hourly.filter((h) => h.revenue > 0);
+  if (active.length === 0) return <EmptyNote text="ยังไม่มีข้อมูลการขายในช่วงนี้" />;
+  const max = Math.max(1, ...hourly.map((h) => h.revenue));
+  const peak = hourly.reduce((a, b) => (b.revenue > a.revenue ? b : a));
+  const start = Math.max(0, Math.min(...active.map((h) => h.hour)) - 1);
+  const end = Math.min(23, Math.max(...active.map((h) => h.hour)) + 1);
+  const visible = hourly.slice(start, end + 1);
+  return (
+    <div>
+      <p style={{ fontSize: 12, color: DASH.gray, margin: "-4px 0 12px" }}>
+        ช่วงขายดีที่สุด: <b style={{ color: "#1F2937" }}>{peak.hour}:00–{peak.hour + 1}:00</b> (฿{money(peak.revenue)})
+      </p>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 100 }}>
+        {visible.map((h) => (
+          <div key={h.hour} title={`${h.hour}:00 · ฿${money(h.revenue)}`} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minWidth: 0 }}>
+            <div style={{
+              width: "100%", height: Math.max(3, (h.revenue / max) * 68), borderRadius: 4,
+              background: h.hour === peak.hour ? DASH.primary : "#C7D6FB", transition: "height 300ms ease",
+            }} />
+            <span style={{ fontSize: 9, color: DASH.gray }}>{h.hour}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RepTrendChart({ days, byDay }) {
+  const max = Math.max(1, ...days.map((d) => byDay[d].revenue));
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: Math.max(2, Math.min(10, 300 / days.length)), height: 110, padding: "0 2px" }}>
+      {days.map((d) => (
+        <div key={d} title={`${d} · ฿${money(byDay[d].revenue)}`} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, minWidth: 0 }}>
+          <div style={{ width: "100%", maxWidth: 30, height: Math.max(3, (byDay[d].revenue / max) * 62), borderRadius: 5, background: "#C7D6FB", transition: "height 300ms ease" }} />
+          {days.length <= 14 && <span style={{ fontSize: 9.5, color: DASH.gray, whiteSpace: "nowrap" }}>{d.slice(5)}</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ReportsPanel({ data }) {
   const [range, setRange] = useState("today");
+  const [search, setSearch] = useState("");
+  const [channelFilter, setChannelFilter] = useState("all");
+  const [historyLimit, setHistoryLimit] = useState(50);
+  const now = useMemo(() => new Date(), []);
+
+  useEffect(() => { setHistoryLimit(50); }, [range, search, channelFilter]);
 
   const filtered = useMemo(() => {
-    const now = new Date();
     return data.sales.filter((s) => {
       const d = new Date(s.timestamp);
       if (range === "today") return todayStr(d) === todayStr(now);
-      if (range === "week") { const diff = (now - d) / 86400000; return diff <= 7; }
+      if (range === "week") { const diff = (now - d) / 86400000; return diff >= 0 && diff <= 7; }
       if (range === "month") return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
       return true;
     });
-  }, [data.sales, range]);
+  }, [data.sales, range, now]);
+
+  const prevSales = useMemo(() => prevPeriodSales(data.sales, range, now), [data.sales, range, now]);
 
   const revenue = filtered.reduce((a, s) => a + s.netRevenue, 0);
   const cost = filtered.reduce((a, s) => a + s.totalCost, 0);
   const profit = revenue - cost;
+  const cups = filtered.reduce((a, s) => a + s.qty, 0);
   const gpTotal = filtered.reduce((a, s) => a + s.gpAmount, 0);
+  const discountTotal = filtered.reduce((a, s) => a + (s.promoDiscount || 0), 0);
+  const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+
+  const prevStats = useMemo(() => {
+    if (!prevSales) return null;
+    const pRevenue = prevSales.reduce((a, s) => a + s.netRevenue, 0);
+    const pCost = prevSales.reduce((a, s) => a + s.totalCost, 0);
+    return { revenue: pRevenue, cost: pCost, profit: pRevenue - pCost, cups: prevSales.reduce((a, s) => a + s.qty, 0) };
+  }, [prevSales]);
 
   const byChannel = { store: { revenue: 0, profit: 0, cups: 0 }, delivery: { revenue: 0, profit: 0, cups: 0 }, online: { revenue: 0, profit: 0, cups: 0 } };
   const byPlatform = {};
@@ -3464,6 +3643,16 @@ function ReportsPanel({ data }) {
     }
   }
 
+  const menuRows = useMemo(() => {
+    const stats = {};
+    for (const s of filtered) {
+      if (!stats[s.menuName]) stats[s.menuName] = { name: s.menuName, qty: 0, revenue: 0, cost: 0, profit: 0 };
+      const m = stats[s.menuName];
+      m.qty += s.qty; m.revenue += s.netRevenue; m.cost += s.totalCost; m.profit += s.profit;
+    }
+    return Object.values(stats).map((m) => ({ ...m, margin: m.revenue > 0 ? (m.profit / m.revenue) * 100 : 0 }));
+  }, [filtered]);
+
   const byDay = {};
   for (const s of filtered) {
     const d = s.timestamp.slice(0, 10);
@@ -3472,52 +3661,95 @@ function ReportsPanel({ data }) {
     byDay[d].cost += s.totalCost;
   }
   const days = Object.keys(byDay).sort();
-  const maxVal = Math.max(1, ...days.map((d) => byDay[d].revenue));
+
+  const historyRows = useMemo(() => {
+    let out = filtered.slice().reverse();
+    if (channelFilter !== "all") out = out.filter((s) => s.channel === channelFilter);
+    if (search.trim()) { const q = search.trim().toLowerCase(); out = out.filter((s) => s.menuName.toLowerCase().includes(q)); }
+    return out;
+  }, [filtered, channelFilter, search]);
+
+  const PERIODS = [["today", "วันนี้"], ["week", "7 วันล่าสุด"], ["month", "เดือนนี้"], ["all", "ทั้งหมด"]];
 
   return (
-    <div>
-      <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
-        {[["today", "วันนี้"], ["week", "7 วันล่าสุด"], ["month", "เดือนนี้"], ["all", "ทั้งหมด"]].map(([k, label]) => (
-          <button key={k} className="cbtn" style={{ background: range === k ? "var(--sage-light)" : undefined, borderColor: range === k ? "var(--sage)" : undefined }} onClick={() => setRange(k)}>{label}</button>
-        ))}
+    <div className="rep-wrap">
+      <style>{`
+        .rep-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 20px; }
+        .rep-period-tabs { display: inline-flex; background: #F0EFEC; border-radius: 12px; padding: 3px; gap: 2px; }
+        .rep-period-tab { border: none; cursor: pointer; padding: 8px 14px; min-height: 38px; border-radius: 9px; font-size: 13px; font-weight: 600; background: transparent; color: #6B7280; transition: all 160ms ease; }
+        .rep-period-tab.active { background: #fff; color: ${DASH.primaryDark}; box-shadow: 0 2px 6px rgba(0,0,0,.08); }
+        .rep-kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 20px; }
+        @media (max-width: 900px) { .rep-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 480px) { .rep-kpi-grid { grid-template-columns: minmax(0, 1fr); } }
+        .rep-channel-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 20px; }
+        @media (max-width: 720px) { .rep-channel-grid { grid-template-columns: minmax(0, 1fr); } }
+        .rep-card { background: #fff; border: 1px solid ${DASH.border}; border-radius: 16px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,.05); margin-bottom: 20px; }
+        .rep-two-col { display: grid; grid-template-columns: 1.1fr 1fr; gap: 20px; align-items: start; }
+        @media (max-width: 900px) { .rep-two-col { grid-template-columns: minmax(0, 1fr); } }
+        .rep-search { flex: 1; min-width: 180px; position: relative; display: flex; align-items: center; }
+        .rep-search input { width: 100%; height: 40px; border: 1px solid ${DASH.border}; border-radius: 10px; background: #fff; padding: 0 14px 0 36px; font-size: 13.5px; box-sizing: border-box; outline: none; }
+        .rep-search input:focus { border-color: ${DASH.primary}; box-shadow: 0 0 0 3px ${DASH.primarySoft}; }
+        .rep-select { height: 40px; border: 1px solid ${DASH.border}; border-radius: 10px; background: #fff; padding: 0 30px 0 12px; font-size: 13px; font-weight: 600; color: #1F2937; cursor: pointer; outline: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; }
+        .rep-table { width: 100%; border-collapse: collapse; }
+        .rep-table th { text-align: left; font-size: 11px; font-weight: 700; color: ${DASH.gray}; padding: 8px 12px; border-bottom: 1px solid ${DASH.neutralSoft}; text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; }
+        .rep-table td { padding: 10px 12px; border-bottom: 1px solid #F5F3EF; font-size: 13px; color: #1F2937; vertical-align: middle; }
+        .rep-table tbody tr:last-child td { border-bottom: none; }
+        .rep-table tbody tr:hover { background: #FAFAF8; }
+        .rep-load-more { display: block; margin: 12px auto 0; height: 38px; padding: 0 20px; border: 1px solid ${DASH.border}; border-radius: 10px; background: #fff; color: #1F2937; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+        .rep-load-more:hover { background: #FAFAF8; }
+        @media (max-width: 720px) {
+          .rep-table.rep-table-cards thead { display: none; }
+          .rep-table.rep-table-cards, .rep-table.rep-table-cards tbody, .rep-table.rep-table-cards tr, .rep-table.rep-table-cards td { display: block; width: 100%; box-sizing: border-box; }
+          .rep-table.rep-table-cards tr { padding: 8px 4px 12px; border-bottom: 1px solid ${DASH.neutralSoft}; }
+          .rep-table.rep-table-cards tbody tr:last-child { border-bottom: none; }
+          .rep-table.rep-table-cards td { border: none; padding: 4px 8px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+          .rep-table.rep-table-cards td::before { content: attr(data-label); font-size: 11px; color: ${DASH.gray}; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; flex-shrink: 0; }
+          .rep-table.rep-table-cards td.rep-td-menu { flex-direction: column; align-items: flex-start; gap: 2px; }
+          .rep-table.rep-table-cards td.rep-td-menu::before { content: none; }
+        }
+      `}</style>
+
+      <div className="rep-toolbar">
+        <div className="rep-period-tabs">
+          {PERIODS.map(([k, label]) => (
+            <button key={k} className={"rep-period-tab" + (range === k ? " active" : "")} onClick={() => setRange(k)}>{label}</button>
+          ))}
+        </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 16 }}>
-        <MetricCard label="รายได้สุทธิ" value={"฿" + money(revenue)} sub={"หัก GP แล้ว ฿" + money(gpTotal)} />
-        <MetricCard label="ต้นทุนรวม" value={"฿" + money(cost)} />
-        <MetricCard label="กำไรสุทธิ" value={"฿" + money(profit)} accent={profit >= 0 ? "var(--sage-dark)" : "var(--danger)"} />
-        <MetricCard label="จำนวนแก้วที่ขาย" value={filtered.reduce((a, s) => a + s.qty, 0)} />
+      <div className="rep-kpi-grid">
+        <RepKpiCard icon="cash" label="รายได้สุทธิ" value={"฿" + money(revenue)} sub={`หัก GP ฿${money(gpTotal)} · ส่วนลด ฿${money(discountTotal)}`} delta={prevStats ? pctDelta(revenue, prevStats.revenue) : null} tone="primary" big />
+        <RepKpiCard icon="receipt-2" label="ต้นทุนรวม" value={"฿" + money(cost)} delta={prevStats ? pctDelta(cost, prevStats.cost) : null} tone="neutral" />
+        <RepKpiCard icon="trending-up" label="กำไรสุทธิ" value={"฿" + money(profit)} sub={`margin ${margin.toFixed(1)}%`} delta={prevStats ? pctDelta(profit, prevStats.profit) : null} tone={profit >= 0 ? "success" : "danger"} />
+        <RepKpiCard icon="cup" label="จำนวนแก้วที่ขาย" value={cups} delta={prevStats ? pctDelta(cups, prevStats.cups) : null} tone="neutral" />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 20 }}>
-        <div style={glass({ background: "rgba(251,235,221,0.55)", borderRadius: 14, padding: 14 })}>
-          <ChannelPill channel="store" />
-          <p style={{ margin: "8px 0 0", fontSize: 20, fontWeight: 700, fontFamily: "var(--f-body)" }}>฿{money(byChannel.store.revenue)}</p>
-          <p style={{ margin: 0, fontSize: 12, color: "var(--espresso-3)" }}>กำไร ฿{money(byChannel.store.profit)} · {byChannel.store.cups} แก้ว</p>
+      <div className="rep-channel-grid">
+        {["store", "delivery", "online"].map((ch) => <RepChannelCard key={ch} channel={ch} v={byChannel[ch]} totalRevenue={revenue} />)}
+      </div>
+
+      <div className="rep-two-col">
+        <div className="rep-card">
+          <DashSectionHeader icon="clock" text="ช่วงเวลาขายดี" hint="รวมทุกวันในช่วงที่เลือก แจกแจงตามชั่วโมง — ใช้จัดกะ/เตรียมของล่วงหน้า" />
+          <RepHourlyChart sales={filtered} />
         </div>
-        <div style={glass({ background: "rgba(251,235,221,0.4)", borderRadius: 14, padding: 14 })}>
-          <ChannelPill channel="delivery" />
-          <p style={{ margin: "8px 0 0", fontSize: 20, fontWeight: 700, fontFamily: "var(--f-body)" }}>฿{money(byChannel.delivery.revenue)}</p>
-          <p style={{ margin: 0, fontSize: 12, color: "var(--espresso-3)" }}>กำไร ฿{money(byChannel.delivery.profit)} · {byChannel.delivery.cups} แก้ว</p>
-        </div>
-        <div style={glass({ background: "rgba(235,239,234,0.5)", borderRadius: 14, padding: 14 })}>
-          <ChannelPill channel="online" />
-          <p style={{ margin: "8px 0 0", fontSize: 20, fontWeight: 700, fontFamily: "var(--f-body)" }}>฿{money(byChannel.online.revenue)}</p>
-          <p style={{ margin: 0, fontSize: 12, color: "var(--espresso-3)" }}>กำไร ฿{money(byChannel.online.profit)} · {byChannel.online.cups} แก้ว</p>
+        <div className="rep-card">
+          <DashSectionHeader icon="trophy" text="เมนูขายดี & ทำกำไร" />
+          <RepMenuTable rows={menuRows} />
         </div>
       </div>
 
       {Object.keys(byPlatform).length > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          <SectionTitle icon="truck-delivery" text="แยกตามแพลตฟอร์มเดลิเวอรี่" />
+        <div className="rep-card">
+          <DashSectionHeader icon="truck-delivery" text="แยกตามแพลตฟอร์มเดลิเวอรี่" />
           <div className="table-scroll">
-            <table className="cdata">
+            <table className="rep-table">
               <thead><tr><th>แพลตฟอร์ม</th><th>แก้ว</th><th>รายได้สุทธิ</th><th>กำไร</th></tr></thead>
               <tbody>
                 {Object.entries(byPlatform).map(([name, v]) => (
                   <tr key={name}>
                     <td>{name}</td><td>{v.cups}</td><td style={{ whiteSpace: "nowrap" }}>฿{money(v.revenue)}</td>
-                    <td style={{ whiteSpace: "nowrap", color: v.profit >= 0 ? "var(--sage-dark)" : "var(--danger)" }}>฿{money(v.profit)}</td>
+                    <td style={{ whiteSpace: "nowrap", color: v.profit >= 0 ? DASH.success : DASH.danger, fontWeight: 600 }}>฿{money(v.profit)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -3526,44 +3758,56 @@ function ReportsPanel({ data }) {
         </div>
       )}
 
-      {days.length > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          <SectionTitle icon="chart-bar" text="รายได้สุทธิต่อวัน" />
-          <div style={{ display: "flex", alignItems: "end", gap: 6, height: 120, borderBottom: "1px solid var(--line)", padding: "0 4px" }}>
-            {days.map((d) => (
-              <div key={d} title={d + ": ฿" + money(byDay[d].revenue)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-                <div style={{ width: "100%", maxWidth: 26, background: "var(--sage)", borderRadius: "4px 4px 0 0", height: (byDay[d].revenue / maxVal) * 100 }}></div>
-                <span style={{ fontSize: 9.5, color: "var(--espresso-2)", writingMode: "vertical-rl" }}>{d.slice(5)}</span>
-              </div>
-            ))}
-          </div>
+      {range !== "today" && days.length > 0 && (
+        <div className="rep-card">
+          <DashSectionHeader icon="chart-bar" text="รายได้สุทธิต่อวัน" />
+          <RepTrendChart days={days} byDay={byDay} />
         </div>
       )}
 
-      <SectionTitle icon="list" text="ประวัติการขาย" />
-      {filtered.length === 0 ? <EmptyNote text="ไม่มีข้อมูลการขายในช่วงนี้" /> : (
-        <div className="table-scroll">
-          <table className="cdata">
-            <thead><tr><th>เวลา</th><th>เมนู</th><th>ช่องทาง</th><th>จำนวน</th><th>รายได้สุทธิ</th><th>ต้นทุน</th><th>กำไร</th></tr></thead>
-            <tbody>
-              {filtered.slice().reverse().slice(0, 50).map((s) => (
-                <tr key={s.id}>
-                  <td style={{ whiteSpace: "nowrap" }}>{new Date(s.timestamp).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</td>
-                  <td>
-                    {s.menuName}{s.milkNote ? ` (${s.milkNote})` : ""}
-                    {s.note && <div style={{ fontSize: 11, color: "#92400E" }}><Icon name="message-2" size={11} style={{ marginRight: 3 }} />{s.note}</div>}
-                  </td>
-                  <td style={{ whiteSpace: "nowrap" }}><ChannelPill channel={s.channel} />{s.platformName ? <span style={{ fontSize: 11, color: "var(--espresso-2)" }}> {s.platformName}</span> : null}</td>
-                  <td>{s.qty}</td>
-                  <td style={{ whiteSpace: "nowrap" }}>฿{money(s.netRevenue)}</td>
-                  <td style={{ whiteSpace: "nowrap" }}>฿{money(s.totalCost)}</td>
-                  <td style={{ whiteSpace: "nowrap", color: s.profit >= 0 ? "var(--sage-dark)" : "var(--danger)" }}>฿{money(s.profit)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <div className="rep-card">
+        <DashSectionHeader icon="list" text="ประวัติการขาย" />
+        <div className="rep-toolbar" style={{ marginBottom: 14 }}>
+          <div className="rep-search">
+            <Icon name="search" size={14} style={{ position: "absolute", left: 12, color: DASH.gray }} />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหาเมนู..." aria-label="ค้นหาเมนูในประวัติการขาย" />
+          </div>
+          <select className="rep-select" value={channelFilter} onChange={(e) => setChannelFilter(e.target.value)} aria-label="กรองตามช่องทาง">
+            <option value="all">ทุกช่องทาง</option>
+            <option value="store">หน้าร้าน</option>
+            <option value="delivery">เดลิเวอรี่</option>
+            <option value="online">สั่งออนไลน์</option>
+          </select>
         </div>
-      )}
+        {historyRows.length === 0 ? <EmptyNote text="ไม่พบรายการที่ตรงกับเงื่อนไข" /> : (
+          <>
+            <div className="table-scroll">
+              <table className="rep-table rep-table-cards">
+                <thead><tr><th>เวลา</th><th>เมนู</th><th>ช่องทาง</th><th>จำนวน</th><th>รายได้สุทธิ</th><th>ต้นทุน</th><th>กำไร</th></tr></thead>
+                <tbody>
+                  {historyRows.slice(0, historyLimit).map((s) => (
+                    <tr key={s.id}>
+                      <td data-label="เวลา" style={{ whiteSpace: "nowrap" }}>{new Date(s.timestamp).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</td>
+                      <td className="rep-td-menu" data-label="เมนู">
+                        <span style={{ fontWeight: 600 }}>{s.menuName}{s.milkNote ? ` (${s.milkNote})` : ""}</span>
+                        {s.note && <span style={{ fontSize: 11, color: "#92400E", display: "flex", alignItems: "center", gap: 3 }}><Icon name="message-2" size={11} />{s.note}</span>}
+                      </td>
+                      <td data-label="ช่องทาง" style={{ whiteSpace: "nowrap" }}><ChannelPill channel={s.channel} />{s.platformName ? <span style={{ fontSize: 11, color: DASH.gray }}> {s.platformName}</span> : null}</td>
+                      <td data-label="จำนวน">{s.qty}</td>
+                      <td data-label="รายได้สุทธิ" style={{ whiteSpace: "nowrap" }}>฿{money(s.netRevenue)}</td>
+                      <td data-label="ต้นทุน" style={{ whiteSpace: "nowrap" }}>฿{money(s.totalCost)}</td>
+                      <td data-label="กำไร" style={{ whiteSpace: "nowrap", color: s.profit >= 0 ? DASH.success : DASH.danger, fontWeight: 600 }}>฿{money(s.profit)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {historyRows.length > historyLimit && (
+              <button className="rep-load-more" onClick={() => setHistoryLimit((n) => n + 50)}>โหลดเพิ่ม ({historyRows.length - historyLimit} รายการที่เหลือ)</button>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
