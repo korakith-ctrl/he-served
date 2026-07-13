@@ -868,7 +868,7 @@ function ShopApp({ uid, user }) {
           {tab === "dashboard" && <Dashboard data={dataForDisplay} setTab={setTab} />}
           {tab === "sell" && <SellPanel data={dataForDisplay} ingredientsById={ingredientsById} recordSale={recordSale} createInstoreOrder={createInstoreOrder} />}
           {tab === "orders" && <OrdersPanel uid={uid} orders={orders} recordSale={recordSale} cancelOrder={cancelOrder} showToast={showToast} data={data} ingredientsById={ingredientsById} />}
-          {tab === "menus" && <MenusPanel data={data} ingredientsById={ingredientsById} updateData={updateData} showToast={showToast} />}
+          {tab === "menus" && <MenusPanel data={dataForDisplay} ingredientsById={ingredientsById} updateData={updateData} showToast={showToast} />}
           {tab === "promotions" && <PromotionsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "reports" && <ReportsPanel data={dataForDisplay} />}
@@ -1984,26 +1984,331 @@ function EditOrderItemModal({ order, itemIdx, data, onClose, onSave }) {
   );
 }
 
+// ระบบสี "มาร์จิ้น" ของหน้าเมนู & สูตร — เขียว/เหลือง/แดงเป็นสัญลักษณ์สากล (>=60% ดี, 40-60% พอใช้, <40% บาง)
+// แยกจากส้ม/กรมท่าของแบรนด์หน้านี้ที่ใช้เฉพาะปุ่มหลัก/สถานะเลือก ไม่ปนกับความหมาย "ดี/แย่" ของตัวเลข
+const MNU_MARGIN = {
+  good: { color: "#15803D", bg: "#EAF7EE" },
+  ok: { color: "#B45309", bg: "#FFF4E5" },
+  bad: { color: "#B91C1C", bg: "#FDEBEB" },
+};
+function marginTier(pct) {
+  if (pct >= 60) return "good";
+  if (pct >= 40) return "ok";
+  return "bad";
+}
+function menuCostAndMargin(menu, ingredientsById, overheadPerCup) {
+  const { ingredientCost, breakdown } = calcRecipeCost(menu, ingredientsById, {});
+  const totalCost = ingredientCost + overheadPerCup;
+  const margin = menu.priceStore > 0 ? ((menu.priceStore - totalCost) / menu.priceStore) * 100 : 0;
+  return { totalCost, margin, breakdown };
+}
+// เมนู "ใกล้หมด/หมด" อิงจากสูตรฐาน (ไม่รวมตัวเลือกเสริมที่ลูกค้าอาจเลือกภายหลัง) — ข้ามวัตถุดิบผสม/ไม่จำกัดสต็อกเพราะไม่มีสต็อกของตัวเอง
+function menuStockFlag(menu, ingredientsById) {
+  const lines = resolveLines(menu, {}, ingredientsById);
+  let flag = null;
+  for (const line of lines) {
+    const ing = ingredientsById[line.ingredientId];
+    if (!ing || ing.unlimited) continue;
+    if (ing.stockQty <= 0) return "out";
+    if (ing.stockQty <= ing.lowStockThreshold) flag = flag || "low";
+  }
+  return flag;
+}
+function timeAgoTh(iso) {
+  if (!iso) return null;
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return "เมื่อสักครู่";
+  if (mins < 60) return `${mins} นาทีที่แล้ว`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} ชั่วโมงที่แล้ว`;
+  return `${Math.round(hrs / 24)} วันที่แล้ว`;
+}
+
+function MnuAvailBadge({ available }) {
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700, borderRadius: 999,
+      padding: "3px 9px", background: available ? "#EAF7EE" : "#FDEBEB", color: available ? "#15803D" : "#B91C1C",
+    }}>
+      <Icon name={available ? "circle-check" : "circle-x"} size={11} /> {available ? "เปิดขาย" : "ปิดขาย"}
+    </span>
+  );
+}
+
+function MnuMarginTag({ pct }) {
+  const t = MNU_MARGIN[marginTier(pct)];
+  return (
+    <span style={{ fontSize: 11.5, fontWeight: 700, color: t.color, background: t.bg, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap", flexShrink: 0 }}>
+      {pct.toFixed(0)}%
+    </span>
+  );
+}
+
+function MnuStatCard({ icon, label, value, tone }) {
+  const tones = {
+    primary: { bg: POS.primarySoft, fg: POS.primaryDark, icFg: POS.primary },
+    navy: { bg: "#EEF2F8", fg: POS.navy, icFg: POS.navy },
+    danger: { bg: "#FDEBEB", fg: "#B91C1C", icFg: "#DC2626" },
+    neutral: { bg: "#F3F2EF", fg: "#374151", icFg: "#6B7280" },
+  };
+  const t = tones[tone] || tones.neutral;
+  return (
+    <div style={{ background: t.bg, borderRadius: 16, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12, minHeight: 76 }}>
+      <div style={{ width: 34, height: 34, borderRadius: 10, background: "#fff", color: t.icFg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 2px 6px rgba(0,0,0,.06)" }}>
+        <Icon name={icon} size={17} />
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 21, fontWeight: 700, color: t.fg, lineHeight: 1.1, fontFamily: "var(--f-body)" }}>{value}</div>
+        <div style={{ fontSize: 11.5, color: t.fg, opacity: .8, marginTop: 2, whiteSpace: "nowrap" }}>{label}</div>
+      </div>
+    </div>
+  );
+}
+
+function MenuCardImage({ src, available }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <div style={{ position: "relative", width: "100%", aspectRatio: "4 / 3", borderRadius: "20px 20px 0 0", overflow: "hidden", background: `linear-gradient(135deg, ${POS.primarySoft}, ${POS.warm})`, flexShrink: 0 }}>
+      {src && !failed ? (
+        <img src={src} alt="" onError={() => setFailed(true)} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+      ) : (
+        <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <Icon name="cup" size={34} style={{ color: POS.primary, opacity: .5 }} />
+        </div>
+      )}
+      <div style={{ position: "absolute", top: 10, right: 10 }}><MnuAvailBadge available={available} /></div>
+    </div>
+  );
+}
+
+// เมนูการ์ดแบบ Shopify-style: รูปเต็มความกว้างด้านบน สถานะซ้อนมุม, ชื่อ/ราคา/มาร์จิ้นตรงกลาง, action ด้านล่างไม่เกิน 3 ปุ่ม (ที่เหลืออยู่ในเมนู ⋮)
+function MenuCard({ menu, totalCost, margin, stockFlag, selected, selectMode, onToggleSelect, onOpenOverview, onOpenRecipe, moreItems }) {
+  return (
+    <div className="mnu-card" style={{ opacity: menu.available ? 1 : .72 }}>
+      <div className="mnu-card-media" style={{ position: "relative" }}>
+        <MenuCardImage src={menu.imageUrl} available={menu.available} />
+        <button
+          type="button"
+          className={"mnu-select-chk" + (selected ? " checked" : "") + (selectMode ? " force-show" : "")}
+          onClick={(e) => { e.stopPropagation(); onToggleSelect(); }}
+          aria-label={selected ? "ยกเลิกเลือกเมนูนี้" : "เลือกเมนูนี้"}
+          aria-pressed={selected}
+        >
+          {selected && <Icon name="check" size={13} />}
+        </button>
+        {stockFlag && (
+          <span className="mnu-stock-flag" style={{ background: stockFlag === "out" ? "#FDEBEB" : "#FFF4E5", color: stockFlag === "out" ? "#B91C1C" : "#B45309" }}>
+            <Icon name="alert-triangle" size={11} /> {stockFlag === "out" ? "วัตถุดิบหมด" : "วัตถุดิบใกล้หมด"}
+          </span>
+        )}
+      </div>
+      <div style={{ padding: "14px 16px 16px", display: "flex", flexDirection: "column", flex: 1 }}>
+        <div style={{ fontSize: 12, color: "#9C9690", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{menu.category}</div>
+        <div style={{ fontSize: 16.5, fontWeight: 700, color: POS.navy, lineHeight: 1.25, marginBottom: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{menu.name}</div>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4, gap: 8 }}>
+          <span style={{ fontSize: 17, fontWeight: 700, color: "#1F2937" }}>฿{money(menu.priceStore)}</span>
+          <MnuMarginTag pct={margin} />
+        </div>
+        <div style={{ fontSize: 11.5, color: "#9C9690" }}>ต้นทุน ฿{money(totalCost)}/แก้ว · เดลิเวอรี่ ฿{money(menu.priceDelivery)}</div>
+
+        <div className="mnu-card-actions">
+          <button className="mnu-act-btn" onClick={onOpenOverview}><Icon name="edit" size={13} /> แก้ไข</button>
+          <button className="mnu-act-btn" onClick={onOpenRecipe}><Icon name="list-details" size={13} /> สูตร</button>
+          <InvActionsMenu items={moreItems} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// dropdown ค้นหาวัตถุดิบแบบ position:fixed (ไม่โดน overflow ของ panel ตัดขอบ — เจอบั๊กแบบนี้มาก่อนแล้วในหน้าตัวเลือกเสริม/วัตถุดิบ)
+function MnuIngredientPicker({ options, value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 220 });
+  const btnRef = useRef(null);
+  const current = options.find((o) => o.value === value);
+
+  function toggle() {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      setPos({ top: r.bottom + 6, left: r.left, width: Math.max(220, r.width) });
+    }
+    setQuery("");
+    setOpen((o) => !o);
+  }
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("scroll", close, true); window.removeEventListener("keydown", onKey); };
+  }, [open]);
+
+  const filtered = query.trim() ? options.filter((o) => o.label.toLowerCase().includes(query.trim().toLowerCase())) : options;
+
+  return (
+    <>
+      <button type="button" ref={btnRef} onClick={toggle} className="mnu-combo-btn">
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{current ? current.label : "เลือกวัตถุดิบ"}</span>
+        <Icon name="chevron-down" size={13} style={{ flexShrink: 0, color: "#9CA3AF" }} />
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 90 }} />
+          <div style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width, zIndex: 91, background: "#fff", borderRadius: 12, boxShadow: "0 16px 40px rgba(0,0,0,.18)", border: `1px solid ${POS.border}`, overflow: "hidden" }}>
+            <div style={{ padding: 8, borderBottom: `1px solid ${POS.border}` }}>
+              <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ค้นหาวัตถุดิบ..." style={{ width: "100%", height: 34, border: `1px solid ${POS.border}`, borderRadius: 8, padding: "0 10px", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+            </div>
+            <div style={{ maxHeight: 220, overflowY: "auto", padding: 4 }}>
+              {filtered.length === 0 ? (
+                <div style={{ padding: "12px 10px", fontSize: 12.5, color: "#9CA3AF" }}>ไม่พบวัตถุดิบ</div>
+              ) : filtered.map((o) => (
+                <button
+                  key={o.value} type="button" onClick={() => { onChange(o.value); setOpen(false); }}
+                  style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: o.value === value ? POS.primarySoft : "none", color: o.value === value ? POS.primaryDark : "#1F2937", padding: "8px 10px", borderRadius: 8, fontSize: 13, fontWeight: o.value === value ? 700 : 500, cursor: "pointer" }}
+                  onMouseEnter={(e) => { if (o.value !== value) e.currentTarget.style.background = "#F5F5F3"; }}
+                  onMouseLeave={(e) => { if (o.value !== value) e.currentTarget.style.background = "none"; }}
+                >{o.label}</button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+function MnuCategoryReorderPopover({ categories, onMove }) {
+  const [open, setOpen] = useState(false);
+  useEscape(() => setOpen(false));
+  if (categories.length < 2) return null;
+  return (
+    <div style={{ position: "relative" }}>
+      <button type="button" className="inv-icon-btn" onClick={() => setOpen((o) => !o)} title="จัดเรียงหมวดหมู่ที่แสดงหน้าลูกค้า" aria-label="จัดเรียงหมวดหมู่"><Icon name="arrows-sort" size={15} /></button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 60 }} />
+          <div style={{ position: "absolute", top: 42, right: 0, zIndex: 61, background: "#fff", border: `1px solid ${POS.border}`, borderRadius: 14, boxShadow: "0 16px 40px rgba(0,0,0,.16)", padding: 10, width: 240 }}>
+            <p style={{ fontSize: 11, fontWeight: 700, color: "#9C9690", textTransform: "uppercase", letterSpacing: ".03em", margin: "0 0 8px" }}>ลำดับหมวดหมู่หน้าลูกค้า</p>
+            {categories.map((cat, idx) => (
+              <div key={cat} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 2px" }}>
+                <span style={{ flex: 1, fontSize: 12.5, color: "#1F2937", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cat}</span>
+                <button type="button" className="inv-icon-btn" style={{ width: 26, height: 26 }} disabled={idx === 0} onClick={() => onMove(cat, "up")} title="ย้ายขึ้น"><Icon name="chevron-up" size={12} /></button>
+                <button type="button" className="inv-icon-btn" style={{ width: 26, height: 26 }} disabled={idx === categories.length - 1} onClick={() => onMove(cat, "down")} title="ย้ายลง"><Icon name="chevron-down" size={12} /></button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function MenuBulkBar({ count, categories, onSetAvailable, onDuplicate, onMoveCategory, onDelete, onClear }) {
+  const [moveOpen, setMoveOpen] = useState(false);
+  useEscape(() => setMoveOpen(false));
+  return (
+    <div className="mnu-bulk-bar">
+      <span style={{ fontSize: 13, fontWeight: 700, color: POS.navy }}>{count} รายการที่เลือก</span>
+      <div style={{ flex: 1 }} />
+      <button className="mnu-bulk-btn" onClick={() => onSetAvailable(true)}><Icon name="eye" size={13} /> เปิดขาย</button>
+      <button className="mnu-bulk-btn" onClick={() => onSetAvailable(false)}><Icon name="eye-off" size={13} /> ปิดขาย</button>
+      <button className="mnu-bulk-btn" onClick={onDuplicate}><Icon name="copy" size={13} /> ทำสำเนา</button>
+      <div style={{ position: "relative" }}>
+        <button className="mnu-bulk-btn" onClick={() => setMoveOpen((o) => !o)}><Icon name="folder" size={13} /> ย้ายหมวดหมู่</button>
+        {moveOpen && (
+          <>
+            <div onClick={() => setMoveOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 60 }} />
+            <div style={{ position: "absolute", bottom: 44, right: 0, zIndex: 61, background: "#fff", border: `1px solid ${POS.border}`, borderRadius: 12, boxShadow: "0 16px 40px rgba(0,0,0,.16)", padding: 6, minWidth: 180, maxHeight: 240, overflowY: "auto" }}>
+              {categories.length === 0 ? (
+                <div style={{ padding: "8px 10px", fontSize: 12, color: "#9CA3AF" }}>ยังไม่มีหมวดหมู่</div>
+              ) : categories.map((c) => (
+                <button key={c} className="mnu-menu-item" onClick={() => { onMoveCategory(c); setMoveOpen(false); }}>{c}</button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+      <button className="mnu-bulk-btn danger" onClick={onDelete}><Icon name="trash" size={13} /> ลบ</button>
+      <button className="inv-icon-btn" onClick={onClear} aria-label="ยกเลิกการเลือก"><Icon name="x" size={15} /></button>
+    </div>
+  );
+}
+
+function MenuSidebarWidgets({ topSelling, topMax, lowStockIngredients, recentlyEdited }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div className="mnu-side-card">
+        <div className="mnu-side-title"><Icon name="trophy" size={14} /> เมนูขายดี (สะสม)</div>
+        {topSelling.length === 0 ? <EmptyNote text="ยังไม่มีข้อมูลการขาย" /> : topSelling.map(([name, qty], i) => (
+          <div key={name} className="mnu-side-rank-row">
+            <span className="mnu-side-rank-num">{i + 1}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, fontWeight: 600, color: "#1F2937", marginBottom: 4, gap: 6 }}>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
+                <span style={{ color: "#9C9690", fontWeight: 500, flexShrink: 0 }}>{qty} แก้ว</span>
+              </div>
+              <div style={{ height: 5, borderRadius: 999, background: "#F3F2EF", overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${topMax > 0 ? Math.max(8, (qty / topMax) * 100) : 0}%`, background: POS.primary, borderRadius: 999 }} />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mnu-side-card">
+        <div className="mnu-side-title"><Icon name="alert-triangle" size={14} /> วัตถุดิบใกล้หมด</div>
+        {lowStockIngredients.length === 0 ? <EmptyNote text="สต็อกทุกรายการยังเพียงพอ" /> : lowStockIngredients.map((ing) => (
+          <div key={ing.id} className="mnu-side-stock-row">
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{ing.name}</span>
+            <span style={{ fontWeight: 700, color: ing.stockQty <= 0 ? "#B91C1C" : "#B45309", flexShrink: 0 }}>{ing.stockQty <= 0 ? "หมด" : `เหลือ ${fmtQty(ing.stockQty)}`}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="mnu-side-card">
+        <div className="mnu-side-title"><Icon name="clock" size={14} /> แก้ไขล่าสุด</div>
+        {recentlyEdited.length === 0 ? <EmptyNote text="ยังไม่มีประวัติการแก้ไข" /> : recentlyEdited.map((m) => (
+          <div key={m.id} className="mnu-side-stock-row">
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{m.name}</span>
+            <span style={{ color: "#9C9690", flexShrink: 0 }}>{timeAgoTh(m.updatedAt)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function MenusPanel({ data, ingredientsById, updateData, showToast }) {
-  const [editing, setEditing] = useState(null);
-  const [viewingDetail, setViewingDetail] = useState(null);
+  const [query, setQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("name");
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [inspector, setInspector] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
 
   function newMenu() {
     const defaultPackaging = (data.settings.defaultPackagingLines || []).map((l) => ({ ...l }));
-    setEditing({ id: null, name: "", priceStore: 0, priceDelivery: 0, ingredients: defaultPackaging, optionGroupIds: [], available: true, category: "กาแฟ", imageUrl: "" });
+    setInspector({ mode: "add", tab: "overview", menu: { id: null, name: "", priceStore: 0, priceDelivery: 0, ingredients: defaultPackaging, optionGroupIds: [], available: true, category: categoryFilter !== "all" ? categoryFilter : "กาแฟ", imageUrl: "" } });
   }
 
   function saveMenu(menu) {
+    const now = new Date().toISOString();
     menu = { ...menu, category: menu.category.trim() || "อื่นๆ" };
     updateData((next) => {
       if (menu.id) {
         const idx = next.menus.findIndex((m) => m.id === menu.id);
-        next.menus[idx] = menu;
+        next.menus[idx] = { ...menu, updatedAt: now, createdAt: next.menus[idx].createdAt || now };
       } else {
-        next.menus.push({ ...menu, id: genId("menu") });
+        next.menus.push({ ...menu, id: genId("menu"), createdAt: now, updatedAt: now });
       }
     });
-    setEditing(null);
+    setInspector(null);
     showToast("บันทึกเมนูแล้ว");
   }
 
@@ -2016,7 +2321,15 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
 
   function deleteMenu(id) {
     updateData((next) => { next.menus = next.menus.filter((m) => m.id !== id); });
+    setConfirmDelete(null);
+    setInspector(null);
     showToast("ลบเมนูแล้ว");
+  }
+
+  function duplicateMenu(menu) {
+    const now = new Date().toISOString();
+    updateData((next) => { next.menus.push({ ...menu, id: genId("menu"), name: menu.name + " (สำเนา)", createdAt: now, updatedAt: now }); });
+    showToast("ทำสำเนาเมนูแล้ว");
   }
 
   function moveMenu(id, direction) {
@@ -2033,7 +2346,7 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
     });
   }
 
-  function moveCategory(cat, direction, categories) {
+  function moveCategory(cat, direction) {
     const order = categories.slice();
     const idx = order.indexOf(cat);
     const swapIdx = direction === "up" ? idx - 1 : idx + 1;
@@ -2042,167 +2355,363 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
     updateData((next) => { next.settings.categoryOrder = order; });
   }
 
+  function toggleSelect(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+  function clearSelection() { setSelectedIds(new Set()); setSelectMode(false); }
+
+  function bulkSetAvailable(value) {
+    updateData((next) => { for (const m of next.menus) if (selectedIds.has(m.id)) m.available = value; });
+    showToast(value ? "เปิดขายเมนูที่เลือกแล้ว" : "ปิดขายเมนูที่เลือกแล้ว");
+  }
+  function bulkDuplicate() {
+    const now = new Date().toISOString();
+    updateData((next) => {
+      const toDupe = next.menus.filter((m) => selectedIds.has(m.id));
+      for (const m of toDupe) next.menus.push({ ...m, id: genId("menu"), name: m.name + " (สำเนา)", createdAt: now, updatedAt: now });
+    });
+    showToast("ทำสำเนาเมนูที่เลือกแล้ว");
+    clearSelection();
+  }
+  function bulkMoveCategoryTo(cat) {
+    updateData((next) => { for (const m of next.menus) if (selectedIds.has(m.id)) m.category = cat; });
+    showToast(`ย้ายไปหมวด "${cat}" แล้ว`);
+    clearSelection();
+  }
+  function bulkDelete() {
+    updateData((next) => { next.menus = next.menus.filter((m) => !selectedIds.has(m.id)); });
+    showToast("ลบเมนูที่เลือกแล้ว");
+    setConfirmBulkDelete(false);
+    clearSelection();
+  }
+
   const rawCategories = [...new Set(data.menus.map((m) => m.category).filter(Boolean))];
   const orderPref = data.settings.categoryOrder || [];
   const categories = [...orderPref.filter((c) => rawCategories.includes(c)), ...rawCategories.filter((c) => !orderPref.includes(c))];
 
-  if (editing) {
-    return <MenuEditor menu={editing} ingredients={data.ingredients} optionGroups={data.optionGroups} categories={categories} onSave={saveMenu} onCancel={() => setEditing(null)} />;
+  const menuStatsById = useMemo(() => {
+    const m = {};
+    for (const menu of data.menus) {
+      const { totalCost, margin } = menuCostAndMargin(menu, ingredientsById, data.settings.overheadPerCup);
+      m[menu.id] = { totalCost, margin, stockFlag: menuStockFlag(menu, ingredientsById) };
+    }
+    return m;
+  }, [data.menus, ingredientsById, data.settings.overheadPerCup]);
+
+  function passesFilters(menu) {
+    if (query.trim()) {
+      const q = query.trim().toLowerCase();
+      const ingredientNames = menu.ingredients.map((l) => ingredientsById[l.ingredientId]?.name || "").join(" ");
+      const hay = `${menu.name} ${menu.category} ${ingredientNames}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    if (statusFilter === "available" && !menu.available) return false;
+    if (statusFilter === "hidden" && menu.available) return false;
+    if (statusFilter === "lowstock" && !menuStatsById[menu.id]?.stockFlag) return false;
+    return true;
+  }
+  function sortMenus(list) {
+    return [...list].sort((a, b) => {
+      if (sortBy === "price") return b.priceStore - a.priceStore;
+      if (sortBy === "margin") return (menuStatsById[b.id]?.margin || 0) - (menuStatsById[a.id]?.margin || 0);
+      if (sortBy === "category") return a.category.localeCompare(b.category, "th") || a.name.localeCompare(b.name, "th");
+      return a.name.localeCompare(b.name, "th");
+    });
   }
 
+  const totalMenus = data.menus.length;
+  const activeMenus = data.menus.filter((m) => m.available).length;
+  const hiddenMenus = totalMenus - activeMenus;
+  const lowStockMenus = data.menus.filter((m) => menuStatsById[m.id]?.stockFlag).length;
+
+  const topSelling = useMemo(() => {
+    const counts = {};
+    for (const s of data.sales) counts[s.menuName] = (counts[s.menuName] || 0) + s.qty;
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  }, [data.sales]);
+  const topMax = topSelling.length ? topSelling[0][1] : 0;
+
+  const recentlyEdited = useMemo(() => {
+    return [...data.menus].filter((m) => m.updatedAt).sort((a, b) => (b.updatedAt < a.updatedAt ? -1 : 1)).slice(0, 5);
+  }, [data.menus]);
+
+  const lowStockIngredients = useMemo(() => {
+    return data.ingredients
+      .filter((i) => !i.unlimited && !(i.components && i.components.length) && i.stockQty <= i.lowStockThreshold)
+      .sort((a, b) => (a.stockQty / (a.lowStockThreshold || 1)) - (b.stockQty / (b.lowStockThreshold || 1)))
+      .slice(0, 5);
+  }, [data.ingredients]);
+
+  function moreItemsFor(menu, menusInCat, idx) {
+    return [
+      ...(menusInCat && idx > 0 ? [{ icon: "chevron-up", label: "เลื่อนขึ้น", onClick: () => moveMenu(menu.id, "up") }] : []),
+      ...(menusInCat && idx < menusInCat.length - 1 ? [{ icon: "chevron-down", label: "เลื่อนลง", onClick: () => moveMenu(menu.id, "down") }] : []),
+      { icon: menu.available ? "eye-off" : "eye", label: menu.available ? "ปิดขายชั่วคราว" : "เปิดขาย", onClick: () => toggleAvailable(menu) },
+      { icon: "copy", label: "ทำสำเนา", onClick: () => duplicateMenu(menu) },
+      { icon: "trash", label: "ลบเมนู", danger: true, onClick: () => setConfirmDelete(menu) },
+    ];
+  }
+
+  const categoryTabOptions = [
+    { value: "all", label: `ทั้งหมด (${totalMenus})` },
+    ...categories.map((c) => ({ value: c, label: `${c} (${data.menus.filter((m) => m.category === c).length})` })),
+  ];
+  const groupedView = categoryFilter === "all";
+  const catsToRender = groupedView ? categories : [categoryFilter];
+
+  const noFiltersActive = !query.trim() && statusFilter === "all";
+
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <SectionTitle icon="cup" text="เมนูทั้งหมด" />
-        <button className="cbtn cbtn-accent" onClick={newMenu}><Icon name="plus" size={14} /> เพิ่มเมนู</button>
+    <div className="mnu-wrap">
+      <style>{`
+        .mnu-stats-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+        @media (max-width: 720px) { .mnu-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        .mnu-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+        .mnu-search { flex: 1; min-width: 200px; position: relative; display: flex; align-items: center; }
+        .mnu-search input { width: 100%; height: 44px; border: 1px solid ${POS.border}; border-radius: 12px; background: #fff; padding: 0 14px 0 38px; font-size: 14px; color: #1F2937; box-sizing: border-box; outline: none; transition: border 160ms, box-shadow 160ms; }
+        .mnu-search input:focus { border-color: ${POS.primary}; box-shadow: 0 0 0 3px ${POS.primarySoft}; }
+        .mnu-select { height: 44px; border: 1px solid ${POS.border}; border-radius: 12px; background: #fff; padding: 0 32px 0 14px; font-size: 13.5px; font-weight: 600; color: #1F2937; cursor: pointer; outline: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; }
+        .mnu-select:focus { border-color: ${POS.primary}; box-shadow: 0 0 0 3px ${POS.primarySoft}; }
+        .mnu-btn-primary { display: inline-flex; align-items: center; gap: 7px; height: 44px; padding: 0 18px; border: none; border-radius: 12px; background: ${POS.primary}; color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 6px 18px rgba(216,92,8,.28); transition: background 160ms; }
+        .mnu-btn-primary:hover { background: ${POS.primaryDark}; }
+        .mnu-btn-primary:disabled { opacity: .55; cursor: not-allowed; }
+        .mnu-btn-ghost-sel { height: 44px; padding: 0 16px; border: 1px solid ${POS.border}; border-radius: 12px; background: #fff; color: #1F2937; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+        .mnu-btn-ghost-sel.active { background: ${POS.primarySoft}; border-color: ${POS.primary}; color: ${POS.primaryDark}; }
+        .mnu-cat-nav { margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+        .mnu-cat-scroll { flex: 1; min-width: 0; overflow-x: auto; }
+        .mnu-bulk-bar { position: sticky; top: 0; z-index: 15; display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid ${POS.border}; border-radius: 16px; padding: 10px 14px; margin-bottom: 16px; box-shadow: 0 8px 24px rgba(0,0,0,.08); flex-wrap: wrap; }
+        .mnu-bulk-btn { display: inline-flex; align-items: center; gap: 5px; height: 38px; padding: 0 12px; border: 1px solid ${POS.border}; border-radius: 9px; background: #fff; color: ${POS.navy}; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+        .mnu-bulk-btn:hover { background: ${POS.chipBg}; }
+        .mnu-bulk-btn.danger { color: #DC2626; border-color: #F3D5D2; }
+        .mnu-bulk-btn.danger:hover { background: #FDEBEB; }
+        .mnu-menu-item { display: block; width: 100%; text-align: left; border: none; background: none; padding: 8px 10px; border-radius: 8px; font-size: 12.5px; font-weight: 600; color: #1F2937; cursor: pointer; min-height: 36px; }
+        .mnu-menu-item:hover { background: #F5F5F3; }
+        .mnu-shell { display: grid; grid-template-columns: 1fr 300px; gap: 24px; align-items: start; }
+        @media (max-width: 1180px) { .mnu-shell { grid-template-columns: minmax(0, 1fr); } }
+        .mnu-cat-section { margin-bottom: 26px; }
+        .mnu-cat-heading { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: ${POS.navy}; margin: 0 0 12px; }
+        .mnu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 18px; }
+        .mnu-card { background: #fff; border-radius: 20px; box-shadow: 0 8px 24px rgba(0,0,0,.06); overflow: hidden; display: flex; flex-direction: column; }
+        .mnu-card-media { transition: transform 200ms ease; }
+        .mnu-card:hover { box-shadow: 0 16px 36px rgba(0,0,0,.12); transition: box-shadow 200ms ease; }
+        .mnu-card:hover .mnu-card-media { transform: translateY(-3px); }
+        .mnu-select-chk { position: absolute; top: 10px; left: 10px; width: 26px; height: 26px; border-radius: 8px; border: 1.5px solid rgba(255,255,255,.9); background: rgba(255,255,255,.7); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; cursor: pointer; color: #fff; opacity: 0; transition: opacity 160ms ease, background 160ms ease, border-color 160ms ease; }
+        .mnu-card:hover .mnu-select-chk, .mnu-select-chk.force-show { opacity: 1; }
+        .mnu-select-chk.checked { opacity: 1; background: ${POS.primary}; border-color: ${POS.primary}; }
+        .mnu-stock-flag { position: absolute; bottom: 10px; left: 10px; display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700; padding: 3px 8px; border-radius: 999px; }
+        .mnu-card-actions { display: flex; gap: 6px; margin-top: 12px; }
+        .mnu-act-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 38px; border: 1px solid ${POS.border}; border-radius: 10px; background: #fff; color: ${POS.navy}; font-size: 12px; font-weight: 700; cursor: pointer; transition: background 140ms ease, border-color 140ms ease; }
+        .mnu-act-btn:hover { background: ${POS.chipBg}; }
+        .mnu-side-card { background: #fff; border-radius: 20px; box-shadow: 0 8px 24px rgba(0,0,0,.06); padding: 16px; }
+        .mnu-side-title { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: ${POS.navy}; margin-bottom: 12px; }
+        .mnu-side-rank-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+        .mnu-side-rank-num { width: 16px; font-size: 11.5px; font-weight: 700; color: #9C9690; flex-shrink: 0; }
+        .mnu-side-stock-row { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; color: #1F2937; padding: 6px 0; border-bottom: 1px solid #F5F3EF; }
+        .mnu-side-stock-row:last-child { border-bottom: none; }
+        .mnu-combo-btn { display: flex; align-items: center; justify-content: space-between; gap: 6px; width: 100%; height: 40px; border: 1px solid ${POS.border}; border-radius: 10px; background: #fff; padding: 0 10px; font-size: 13px; font-weight: 500; color: #1F2937; cursor: pointer; box-sizing: border-box; }
+        .mnu-combo-btn:hover { border-color: ${POS.primary}; }
+        .mnu-inspector-overlay { position: fixed; inset: 0; background: rgba(22,20,17,.4); z-index: 70; display: flex; justify-content: flex-end; animation: mnuFade 160ms ease; }
+        .mnu-inspector { width: min(560px, 100%); height: 100%; background: #fff; box-shadow: -8px 0 40px rgba(0,0,0,.18); display: flex; flex-direction: column; animation: mnuSlide 240ms cubic-bezier(.2,.8,.2,1); }
+        .mnu-insp-head { padding: 18px 22px; border-bottom: 1px solid ${POS.border}; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-shrink: 0; }
+        .mnu-insp-tabs { display: flex; gap: 4px; padding: 10px 18px 0; border-bottom: 1px solid ${POS.border}; flex-shrink: 0; overflow-x: auto; }
+        .mnu-insp-tab { display: inline-flex; align-items: center; gap: 6px; border: none; background: none; padding: 10px 12px; font-size: 12.5px; font-weight: 700; color: #9C9690; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; min-height: 40px; }
+        .mnu-insp-tab.active { color: ${POS.primary}; border-bottom-color: ${POS.primary}; }
+        .mnu-insp-body { padding: 20px 22px; overflow-y: auto; flex: 1; }
+        .mnu-insp-footer { padding: 16px 22px; border-top: 1px solid ${POS.border}; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+        .mnu-btn-danger-ghost { display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 14px; border: 1px solid #F3D5D2; border-radius: 10px; background: #fff; color: #DC2626; font-size: 13px; font-weight: 700; cursor: pointer; }
+        .mnu-btn-danger-ghost:hover { background: #FDEBEB; }
+        @keyframes mnuFade { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes mnuSlide { from { transform: translateX(100%); } to { transform: translateX(0); } }
+        @media (max-width: 760px) {
+          .mnu-inspector-overlay { align-items: stretch; }
+          .mnu-inspector { width: 100%; height: 100dvh; }
+        }
+        .mnu-field:focus { border-color: ${POS.primary} !important; box-shadow: 0 0 0 3px ${POS.primarySoft}; }
+        .mnu-recipe-table { display: flex; flex-direction: column; gap: 6px; }
+        .mnu-recipe-row { display: grid; grid-template-columns: 2fr 84px 56px 84px 36px; gap: 8px; align-items: center; }
+        .mnu-recipe-head span { font-size: 10.5px; font-weight: 700; color: #9C9690; text-transform: uppercase; letter-spacing: .03em; }
+        .mnu-qty-field { height: 40px; border: 1px solid ${POS.border}; border-radius: 10px; padding: 0 8px; font-size: 13px; box-sizing: border-box; outline: none; }
+        .mnu-qty-field:focus { border-color: ${POS.primary}; box-shadow: 0 0 0 3px ${POS.primarySoft}; }
+        .mnu-unit-cell { font-size: 12px; color: #9C9690; }
+        .mnu-cost-cell { font-size: 12.5px; font-weight: 600; color: #1F2937; text-align: right; }
+        @media (max-width: 480px) {
+          .mnu-recipe-row { grid-template-columns: 1fr; gap: 4px; padding: 8px 0; border-bottom: 1px solid #F5F3EF; }
+          .mnu-recipe-head { display: none; }
+        }
+        .mnu-price-card { background: #fff; border: 1px solid ${POS.border}; border-radius: 16px; padding: 16px; }
+        .mnu-price-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 700; color: ${POS.navy}; margin-bottom: 12px; }
+        .mnu-price-card-head span:first-child { display: flex; align-items: center; gap: 6px; }
+        .mnu-price-breakdown { display: flex; justify-content: space-between; font-size: 11.5px; color: #9C9690; margin-top: 8px; }
+        .mnu-platform-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: #FBFAF8; border-radius: 12px; padding: 10px 12px; }
+        .mnu-option-row { display: flex; align-items: center; gap: 10px; padding: 10px 4px; border-bottom: 1px solid #F5F3EF; }
+        .mnu-option-row:last-child { border-bottom: none; }
+        .mnu-required-chip { font-size: 10px; font-weight: 700; color: #B45309; background: #FFF4E5; border-radius: 999px; padding: 2px 8px; }
+        .inv-icon-btn { width: 36px; height: 36px; border: 1px solid ${POS.border}; border-radius: 9px; background: #fff; color: #6B7280; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .inv-icon-btn:hover { background: #F5F5F3; color: #1F2937; }
+        .inv-icon-btn:disabled { opacity: .4; cursor: not-allowed; }
+        .inv-btn-ghost { height: 40px; padding: 0 16px; border: 1px solid ${POS.border}; border-radius: 10px; background: #fff; color: #1F2937; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+        .inv-btn-danger { height: 40px; padding: 0 16px; border: none; border-radius: 10px; background: #DC2626; color: #fff; font-size: 13.5px; font-weight: 700; cursor: pointer; }
+      `}</style>
+
+      <div className="mnu-stats-grid">
+        <MnuStatCard icon="cup" label="เมนูทั้งหมด" value={totalMenus} tone="navy" />
+        <MnuStatCard icon="circle-check" label="เปิดขาย" value={activeMenus} tone="primary" />
+        <MnuStatCard icon="eye-off" label="ปิดขาย" value={hiddenMenus} tone="neutral" />
+        <MnuStatCard icon="alert-triangle" label="วัตถุดิบใกล้หมด/หมด" value={lowStockMenus} tone={lowStockMenus ? "danger" : "neutral"} />
       </div>
 
-      {categories.length > 1 && (
-        <div style={glass({ borderRadius: 12, padding: 12, marginBottom: 18 })}>
-          <p style={{ fontSize: 11.5, fontWeight: 600, color: "var(--espresso-3)", margin: "0 0 8px", textTransform: "uppercase", letterSpacing: ".03em" }}>ลำดับหมวดหมู่ที่แสดงหน้าลูกค้า</p>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {categories.map((cat, idx) => (
-              <div key={cat} style={{ display: "flex", alignItems: "center", gap: 2, background: "var(--cream-2)", borderRadius: 9, padding: "4px 4px 4px 10px" }}>
-                <span style={{ fontSize: 12.5 }}>{cat}</span>
-                <button className="cbtn" style={{ padding: "3px 6px" }} disabled={idx === 0} onClick={() => moveCategory(cat, "up", categories)} title="ย้ายขึ้น"><Icon name="chevron-up" size={12} /></button>
-                <button className="cbtn" style={{ padding: "3px 6px" }} disabled={idx === categories.length - 1} onClick={() => moveCategory(cat, "down", categories)} title="ย้ายลง"><Icon name="chevron-down" size={12} /></button>
-              </div>
-            ))}
+      <div className="mnu-toolbar">
+        <div className="mnu-search">
+          <Icon name="search" size={15} style={{ position: "absolute", left: 13, color: "#9C9690" }} />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ค้นหาเมนู, หมวดหมู่, วัตถุดิบ..." aria-label="ค้นหาเมนู" />
+        </div>
+        <select className="mnu-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="กรองตามสถานะ">
+          <option value="all">ทุกสถานะ</option>
+          <option value="available">เปิดขาย</option>
+          <option value="hidden">ปิดขาย</option>
+          <option value="lowstock">วัตถุดิบใกล้หมด/หมด</option>
+        </select>
+        <select className="mnu-select" value={sortBy} onChange={(e) => setSortBy(e.target.value)} aria-label="เรียงลำดับ">
+          <option value="name">เรียง: ชื่อ</option>
+          <option value="price">เรียง: ราคาสูง→ต่ำ</option>
+          <option value="margin">เรียง: มาร์จิ้นสูง→ต่ำ</option>
+          <option value="category">เรียง: หมวดหมู่</option>
+        </select>
+        <button className={"mnu-btn-ghost-sel" + (selectMode ? " active" : "")} onClick={() => { setSelectMode((v) => !v); if (selectMode) clearSelection(); }}>
+          <Icon name="checks" size={14} /> เลือกหลายรายการ
+        </button>
+        <button className="mnu-btn-primary" onClick={newMenu}><Icon name="plus" size={16} /> เพิ่มเมนู</button>
+      </div>
+
+      {categories.length > 0 && (
+        <div className="mnu-cat-nav">
+          <div className="mnu-cat-scroll">
+            <Segmented options={categoryTabOptions} value={categoryFilter} onChange={setCategoryFilter} dense />
           </div>
+          <MnuCategoryReorderPopover categories={categories} onMove={moveCategory} />
         </div>
       )}
 
-      {categories.map((cat) => {
-        const menusInCat = data.menus.filter((m) => m.category === cat);
-        return (
-          <div key={cat} style={{ marginBottom: 22 }}>
-            <p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--espresso-3)", margin: "0 0 8px" }}>{cat}</p>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
-              {menusInCat.map((menu, idx) => (
-                <div key={menu.id} style={glass({ borderRadius: 12, padding: 14, opacity: menu.available ? 1 : 0.6 })}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 8 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                      {menu.imageUrl ? (
-                        <img src={menu.imageUrl} alt="" width={44} height={44} style={{ borderRadius: 10, objectFit: "cover", flexShrink: 0 }} />
-                      ) : (
-                        <div style={{ width: 44, height: 44, borderRadius: 10, background: "var(--cream-2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                          <Icon name="cup" size={18} style={{ color: "var(--espresso-2)" }} />
-                        </div>
-                      )}
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 15.5, color: "var(--espresso-5)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{menu.name}</div>
-                        <div style={{ fontSize: 10.5, color: "var(--espresso-2)", textTransform: "uppercase", letterSpacing: ".03em" }}>{menu.category}</div>
-                      </div>
-                    </div>
-                    <button
-                      className="cbtn" style={{
-                        padding: "3px 9px", fontSize: 10.5, flexShrink: 0, fontWeight: 700, border: "none",
-                        background: menu.available ? "rgba(22,163,74,0.16)" : "rgba(220,38,38,0.16)",
-                        color: menu.available ? "#15803D" : "#B91C1C",
-                      }}
-                      onClick={() => toggleAvailable(menu)} title={menu.available ? "ปิดขายชั่วคราว" : "เปิดขาย"}
-                    >
-                      {menu.available ? "เปิดขาย" : "หมด"}
-                    </button>
-                  </div>
+      {selectedIds.size > 0 && (
+        <MenuBulkBar
+          count={selectedIds.size}
+          categories={categories}
+          onSetAvailable={bulkSetAvailable}
+          onDuplicate={bulkDuplicate}
+          onMoveCategory={bulkMoveCategoryTo}
+          onDelete={() => setConfirmBulkDelete(true)}
+          onClear={clearSelection}
+        />
+      )}
 
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 10, paddingTop: 9, borderTop: "1px dashed var(--line)" }}>
-                    <span style={{ fontSize: 11, color: "var(--espresso-2)" }}>หน้าร้าน / เดลิเวอรี่</span>
-                    <span style={{ fontWeight: 700, fontFamily: "var(--f-body)", fontSize: 15, color: "var(--espresso-5)" }}>
-                      ฿{money(menu.priceStore)} <span style={{ fontSize: 11.5, color: "var(--espresso-3)", fontWeight: 500 }}>/ ฿{money(menu.priceDelivery)}</span>
-                    </span>
-                  </div>
-
-                  <div style={{ display: "flex", gap: 4, marginTop: 10 }}>
-                    <button className="cbtn" style={{ flex: 1, padding: "6px 6px", fontSize: 11.5 }} onClick={() => setViewingDetail(menu)}>
-                      <Icon name="chart-bar" size={12} /> รายละเอียด/ต้นทุน
-                    </button>
-                    <button className="cbtn" style={{ padding: "6px 7px" }} disabled={idx === 0} onClick={() => moveMenu(menu.id, "up")} title="ย้ายขึ้น"><Icon name="chevron-up" size={12} /></button>
-                    <button className="cbtn" style={{ padding: "6px 7px" }} disabled={idx === menusInCat.length - 1} onClick={() => moveMenu(menu.id, "down")} title="ย้ายลง"><Icon name="chevron-down" size={12} /></button>
-                    <button className="cbtn cbtn-edit" style={{ padding: "6px 8px" }} onClick={() => setEditing(menu)} title="แก้ไขเมนู"><Icon name="edit" size={13} /></button>
-                    <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => deleteMenu(menu.id)} title="ลบเมนู"><Icon name="trash" size={13} /></button>
+      <div className="mnu-shell">
+        <div>
+          {data.menus.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "48px 20px", background: "#fff", borderRadius: 20, boxShadow: "0 8px 24px rgba(0,0,0,.06)" }}>
+              <Icon name="cup" size={30} style={{ color: "#9C9690" }} />
+              <p style={{ fontSize: 14, fontWeight: 600, color: "#1F2937", margin: "12px 0 2px" }}>ยังไม่มีเมนู</p>
+              <p style={{ fontSize: 12.5, color: "#9C9690", margin: "0 0 16px" }}>เริ่มสร้างเมนูแรกของร้าน</p>
+              <button className="mnu-btn-primary" style={{ margin: "0 auto" }} onClick={newMenu}><Icon name="plus" size={16} /> เพิ่มเมนู</button>
+            </div>
+          ) : (
+            catsToRender.map((cat) => {
+              const menusInCat = data.menus.filter((m) => m.category === cat);
+              const visible = sortMenus(menusInCat.filter(passesFilters));
+              if (visible.length === 0) return null;
+              return (
+                <div key={cat} className="mnu-cat-section">
+                  {groupedView && <p className="mnu-cat-heading">{cat} <span style={{ color: "#9C9690", fontWeight: 500 }}>({visible.length})</span></p>}
+                  <div className="mnu-grid">
+                    {visible.map((menu) => {
+                      const stat = menuStatsById[menu.id];
+                      const idx = menusInCat.findIndex((m) => m.id === menu.id);
+                      return (
+                        <MenuCard
+                          key={menu.id}
+                          menu={menu}
+                          totalCost={stat.totalCost}
+                          margin={stat.margin}
+                          stockFlag={stat.stockFlag}
+                          selected={selectedIds.has(menu.id)}
+                          selectMode={selectMode}
+                          onToggleSelect={() => toggleSelect(menu.id)}
+                          onOpenOverview={() => setInspector({ mode: "edit", tab: "overview", menu })}
+                          onOpenRecipe={() => setInspector({ mode: "edit", tab: "recipe", menu })}
+                          moreItems={moreItemsFor(menu, menusInCat, idx)}
+                        />
+                      );
+                    })}
                   </div>
                 </div>
-              ))}
+              );
+            })
+          )}
+          {data.menus.length > 0 && catsToRender.every((cat) => sortMenus(data.menus.filter((m) => m.category === cat).filter(passesFilters)).length === 0) && (
+            <div style={{ textAlign: "center", padding: "48px 20px", background: "#fff", borderRadius: 20, boxShadow: "0 8px 24px rgba(0,0,0,.06)" }}>
+              <Icon name="search-off" size={28} style={{ color: "#9C9690" }} />
+              <p style={{ fontSize: 14, fontWeight: 600, color: "#1F2937", margin: "12px 0 2px" }}>ไม่พบเมนูที่ตรงกับเงื่อนไข</p>
+              <p style={{ fontSize: 12.5, color: "#9C9690", margin: 0 }}>ลองปรับคำค้นหาหรือตัวกรอง</p>
             </div>
-          </div>
-        );
-      })}
+          )}
+        </div>
 
-      {viewingDetail && (
-        <MenuDetailDrawer
-          menu={viewingDetail} data={data} ingredientsById={ingredientsById}
-          onClose={() => setViewingDetail(null)}
-          onEdit={() => { setEditing(viewingDetail); setViewingDetail(null); }}
+        {noFiltersActive && (
+          <MenuSidebarWidgets topSelling={topSelling} topMax={topMax} lowStockIngredients={lowStockIngredients} recentlyEdited={recentlyEdited} />
+        )}
+      </div>
+
+      {inspector && (
+        <MenuInspector
+          key={inspector.mode + (inspector.menu.id || "new")}
+          mode={inspector.mode}
+          initial={inspector.menu}
+          initialTab={inspector.tab}
+          ingredients={data.ingredients}
+          ingredientsById={ingredientsById}
+          optionGroups={data.optionGroups}
+          categories={categories}
+          platforms={data.settings.platforms}
+          overheadPerCup={data.settings.overheadPerCup}
+          onSave={saveMenu}
+          onClose={() => setInspector(null)}
+          onDelete={() => setConfirmDelete(inspector.menu)}
+        />
+      )}
+
+      {confirmDelete && (
+        <InvConfirmDialog
+          title="ลบเมนูนี้?"
+          message={`คุณกำลังจะลบเมนู "${confirmDelete.name}" ออกจากระบบถาวร ลูกค้าจะไม่เห็นเมนูนี้อีก`}
+          confirmLabel="ลบเมนู"
+          onConfirm={() => deleteMenu(confirmDelete.id)}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      )}
+      {confirmBulkDelete && (
+        <InvConfirmDialog
+          title={`ลบ ${selectedIds.size} เมนูที่เลือก?`}
+          message="เมนูที่เลือกทั้งหมดจะถูกลบออกจากระบบถาวร การกระทำนี้ย้อนกลับไม่ได้"
+          confirmLabel="ลบทั้งหมด"
+          onConfirm={bulkDelete}
+          onCancel={() => setConfirmBulkDelete(false)}
         />
       )}
     </div>
   );
 }
 
-function MenuDetailDrawer({ menu, data, ingredientsById, onClose, onEdit }) {
-  const { ingredientCost, breakdown } = calcRecipeCost(menu, ingredientsById, {});
-  const totalCost = ingredientCost + data.settings.overheadPerCup;
-  const marginStore = menu.priceStore > 0 ? ((menu.priceStore - totalCost) / menu.priceStore) * 100 : 0;
-  return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(43,29,20,0.4)", display: "flex", justifyContent: "flex-end", zIndex: 50 }} onClick={onClose}>
-      <div
-        style={{ background: "var(--surface)", padding: 22, width: 360, maxWidth: "90vw", height: "100vh", overflowY: "auto" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 4, gap: 8 }}>
-          <p style={{ fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 19, margin: 0 }}>{menu.name}</p>
-          <button className="cbtn" style={{ padding: "5px 9px", flexShrink: 0 }} onClick={onClose}><Icon name="x" size={14} /></button>
-        </div>
-        <p style={{ fontSize: 11, color: "var(--espresso-2)", textTransform: "uppercase", letterSpacing: ".03em", margin: "0 0 18px" }}>{menu.category}</p>
-
-        <SectionTitle icon="list-details" text="ส่วนผสม (BOM)" />
-        <div style={{ marginBottom: 14 }}>
-          {breakdown.map((b) => (
-            <div key={b.ingredientId} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "6px 0", borderBottom: "1px dashed var(--line-soft)" }}>
-              <span>{b.name} ×{b.qty}{UNITS[b.unit]}</span><span>฿{money(b.lineCost)}</span>
-            </div>
-          ))}
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "6px 0" }}>
-            <span>ต้นทุนแฝง/แก้ว</span><span>฿{money(data.settings.overheadPerCup)}</span>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 15, borderTop: "1px solid var(--line)", paddingTop: 10, marginBottom: 20 }}>
-          <span>ต้นทุนรวม/แก้ว</span><span>฿{money(totalCost)}</span>
-        </div>
-
-        <SectionTitle icon="chart-line" text="ราคาขาย & กำไร" />
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, marginBottom: 6 }}>
-          <span><ChannelPill channel="store" /> ฿{money(menu.priceStore)}</span>
-          <span style={{ color: marginStore >= 0 ? "var(--sage-dark)" : "var(--danger)", fontWeight: 700 }}>{money(marginStore)}%</span>
-        </div>
-        <div style={{ fontSize: 13, marginBottom: 10 }}>
-          <span><ChannelPill channel="delivery" /> ฿{money(menu.priceDelivery)}</span>
-        </div>
-        {data.settings.platforms.map((p) => {
-          const net = menu.priceDelivery * (1 - p.gpPercent / 100);
-          const margin = menu.priceDelivery > 0 ? ((net - totalCost) / menu.priceDelivery) * 100 : 0;
-          return (
-            <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: "var(--espresso-3)", padding: "4px 0" }}>
-              <span>{p.name} (GP {p.gpPercent}%)</span>
-              <span style={{ color: margin >= 0 ? "var(--sage-dark)" : "var(--danger)", fontWeight: 600 }}>{money(margin)}%</span>
-            </div>
-          );
-        })}
-
-        <button className="cbtn cbtn-edit" style={{ width: "100%", marginTop: 20 }} onClick={onEdit}><Icon name="edit" size={13} /> แก้ไขเมนูนี้</button>
-      </div>
-    </div>
-  );
-}
-
-function MenuEditor({ menu, ingredients, optionGroups, categories, onSave, onCancel }) {
+function MenuInspector({ mode, initial, initialTab, ingredients, ingredientsById, optionGroups, categories, platforms, overheadPerCup, onSave, onClose, onDelete }) {
   const [form, setForm] = useState({
-    ...menu, optionGroupIds: menu.optionGroupIds || [], available: menu.available ?? true,
-    category: menu.category || "", imageUrl: menu.imageUrl || "",
+    ...initial, optionGroupIds: initial.optionGroupIds || [], available: initial.available ?? true,
+    category: initial.category || "", imageUrl: initial.imageUrl || "",
   });
+  const [tab, setTab] = useState(initialTab || "overview");
   const [imageError, setImageError] = useState(false);
+  useEscape(onClose);
 
   function toggleOptionGroup(groupId) {
     setForm((f) => {
@@ -2210,98 +2719,206 @@ function MenuEditor({ menu, ingredients, optionGroups, categories, onSave, onCan
       return { ...f, optionGroupIds: has ? f.optionGroupIds.filter((id) => id !== groupId) : [...f.optionGroupIds, groupId] };
     });
   }
+  function addLine() { setForm((f) => ({ ...f, ingredients: [...f.ingredients, { ingredientId: ingredients[0]?.id, qty: 0 }] })); }
+  function updateLine(idx, patch) { setForm((f) => ({ ...f, ingredients: f.ingredients.map((l, i) => (i === idx ? { ...l, ...patch } : l)) })); }
+  function removeLine(idx) { setForm((f) => ({ ...f, ingredients: f.ingredients.filter((_, i) => i !== idx) })); }
 
-  function addLine() {
-    setForm((f) => ({ ...f, ingredients: [...f.ingredients, { ingredientId: ingredients[0]?.id, qty: 0 }] }));
-  }
-  function updateLine(idx, patch) {
-    setForm((f) => {
-      const ingredients2 = f.ingredients.map((l, i) => (i === idx ? { ...l, ...patch } : l));
-      return { ...f, ingredients: ingredients2 };
-    });
-  }
-  function removeLine(idx) {
-    setForm((f) => ({ ...f, ingredients: f.ingredients.filter((_, i) => i !== idx) }));
-  }
+  const canSave = form.name.trim() !== "";
+  const { totalCost, margin, breakdown } = menuCostAndMargin(form, ingredientsById, overheadPerCup);
+
+  const TABS = [
+    ["overview", "ภาพรวม", "info-circle"],
+    ["recipe", "สูตร", "list-details"],
+    ["pricing", "ราคา & กำไร", "chart-line"],
+    ["options", "ตัวเลือกเสริม", "adjustments"],
+  ];
 
   return (
-    <div style={{ maxWidth: 520 }}>
-      <SectionTitle icon="cup" text={menu.id ? "แก้ไขเมนู" : "เมนูใหม่"} />
-      <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ชื่อเมนู</label>
-      <input className="cfield" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ marginBottom: 10 }} />
-
-      <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
-        <div style={{ flex: 1 }}>
-          <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>หมวดหมู่ (โชว์เป็นแท็บในหน้าลูกค้า)</label>
-          <input className="cfield" list="menu-categories" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="เช่น กาแฟ, ชาผลไม้" />
-          <datalist id="menu-categories">
-            {categories.map((c) => <option key={c} value={c} />)}
-          </datalist>
+    <div className="mnu-inspector-overlay" onClick={onClose}>
+      <div className="mnu-inspector" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={mode === "add" ? "เพิ่มเมนูใหม่" : "แก้ไขเมนู"}>
+        <div className="mnu-insp-head">
+          <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+            <PosProductThumb src={form.imageUrl} size={44} />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: POS.navy, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{form.name || (mode === "add" ? "เมนูใหม่" : "แก้ไขเมนู")}</div>
+              <div style={{ fontSize: 11.5, color: "#9C9690", marginTop: 1 }}>
+                {mode === "add" ? "ยังไม่ได้บันทึก" : (form.updatedAt ? `อัปเดตล่าสุด ${timeAgoTh(form.updatedAt)}` : "ยังไม่เคยแก้ไข")}
+              </div>
+            </div>
+          </div>
+          <button className="inv-icon-btn" onClick={onClose} aria-label="ปิด"><Icon name="x" size={18} /></button>
         </div>
-        <div style={{ flex: 1 }}>
-          <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ลิงก์รูปเมนู (ถ้ามี)</label>
-          <input className="cfield" value={form.imageUrl} onChange={(e) => { setForm({ ...form, imageUrl: e.target.value }); setImageError(false); }} placeholder="https://..." />
-          <p style={{ fontSize: 10.5, color: "var(--espresso-2)", margin: "3px 0 0", lineHeight: 1.5 }}>
-            ต้องเป็นลิงก์รูปโดยตรง (ลงท้าย .jpg/.png ฯลฯ) เช่นจาก imgur.com — ลิงก์แชร์จาก Google Photos ใช้ไม่ได้
-          </p>
+
+        <div className="mnu-insp-tabs">
+          {TABS.map(([id, label, icon]) => (
+            <button key={id} className={"mnu-insp-tab" + (tab === id ? " active" : "")} onClick={() => setTab(id)}>
+              <Icon name={icon} size={14} /> {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="mnu-insp-body">
+          {tab === "overview" && <MenuOverviewTab form={form} setForm={setForm} categories={categories} imageError={imageError} setImageError={setImageError} totalCost={totalCost} margin={margin} />}
+          {tab === "recipe" && <MenuRecipeTab form={form} ingredients={ingredients} updateLine={updateLine} addLine={addLine} removeLine={removeLine} ingredientsById={ingredientsById} />}
+          {tab === "pricing" && <MenuPricingTab form={form} setForm={setForm} totalCost={totalCost} platforms={platforms} />}
+          {tab === "options" && <MenuOptionsTab form={form} optionGroups={optionGroups} toggleOptionGroup={toggleOptionGroup} />}
+        </div>
+
+        <div className="mnu-insp-footer">
+          {mode === "edit" && <button className="mnu-btn-danger-ghost" onClick={onDelete}><Icon name="trash" size={14} /> ลบเมนู</button>}
+          <div style={{ flex: 1 }} />
+          <button className="inv-btn-ghost" onClick={onClose}>ยกเลิก</button>
+          <button className="mnu-btn-primary" disabled={!canSave} onClick={() => onSave(form)}>{mode === "add" ? "บันทึกเมนู" : "บันทึกการแก้ไข"}</button>
         </div>
       </div>
-      {form.imageUrl && (
-        <div style={{ marginBottom: 14 }}>
-          <img
-            src={form.imageUrl} alt="ตัวอย่างรูป"
-            onLoad={() => setImageError(false)} onError={() => setImageError(true)}
-            style={{ width: 90, height: 90, objectFit: "cover", borderRadius: 10, border: "1px solid var(--line)" }}
-          />
-          {imageError && <p style={{ fontSize: 11, color: "var(--danger)", margin: "4px 0 0" }}>โหลดรูปไม่ขึ้น — ตรวจว่าเป็นลิงก์รูปโดยตรงหรือยัง</p>}
+    </div>
+  );
+}
+
+function MenuOverviewTab({ form, setForm, categories, imageError, setImageError, totalCost, margin }) {
+  const lbl = { display: "block", fontSize: 12, fontWeight: 600, color: "#9C9690", marginBottom: 6 };
+  const field = { width: "100%", height: 44, border: `1px solid ${POS.border}`, borderRadius: 10, background: "#fff", padding: "0 12px", fontSize: 14, color: "#1F2937", boxSizing: "border-box", outline: "none" };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div>
+        <label style={lbl}>ชื่อเมนู</label>
+        <input className="mnu-field" style={field} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="เช่น Latte, Thai Tea" />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <div>
+          <label style={lbl}>หมวดหมู่ (แสดงเป็นแท็บหน้าลูกค้า)</label>
+          <input className="mnu-field" style={field} list="menu-categories" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="เช่น กาแฟ, ชาผลไม้" />
+          <datalist id="menu-categories">{categories.map((c) => <option key={c} value={c} />)}</datalist>
         </div>
+        <div>
+          <label style={lbl}>สถานะ</label>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, height: 44 }}>
+            <OptgToggle checked={form.available} onChange={(v) => setForm({ ...form, available: v })} color={POS.primary} />
+            <span style={{ fontSize: 13, fontWeight: 600, color: form.available ? "#15803D" : "#B91C1C" }}>{form.available ? "เปิดขาย" : "ปิดขาย"}</span>
+          </div>
+        </div>
+      </div>
+      <div>
+        <label style={lbl}>ลิงก์รูปเมนู (ถ้ามี)</label>
+        <input className="mnu-field" style={field} value={form.imageUrl} onChange={(e) => { setForm({ ...form, imageUrl: e.target.value }); setImageError(false); }} placeholder="https://..." />
+        <p style={{ fontSize: 11, color: "#9C9690", margin: "6px 0 0", lineHeight: 1.5 }}>
+          ต้องเป็นลิงก์รูปโดยตรง (ลงท้าย .jpg/.png ฯลฯ) เช่นจาก imgur.com — ลิงก์แชร์จาก Google Photos ใช้ไม่ได้
+        </p>
+        {form.imageUrl && (
+          <div style={{ marginTop: 10 }}>
+            <img src={form.imageUrl} alt="ตัวอย่างรูป" onLoad={() => setImageError(false)} onError={() => setImageError(true)} style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 14, border: `1px solid ${POS.border}` }} />
+            {imageError && <p style={{ fontSize: 11, color: "#DC2626", margin: "6px 0 0" }}>โหลดรูปไม่ขึ้น — ตรวจว่าเป็นลิงก์รูปโดยตรงหรือยัง</p>}
+          </div>
+        )}
+      </div>
+
+      <div style={{ background: "#FBFAF8", border: `1px solid ${POS.border}`, borderRadius: 14, padding: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <div style={{ fontSize: 11.5, color: "#9C9690" }}>ต้นทุน/แก้ว (รวมต้นทุนแฝง)</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937" }}>฿{money(totalCost)}</div>
+        </div>
+        <MnuMarginTag pct={margin} />
+      </div>
+
+      {(form.createdAt || form.updatedAt) && (
+        <p style={{ fontSize: 11, color: "#9C9690", margin: 0 }}>
+          {form.createdAt && `สร้างเมื่อ ${timeAgoTh(form.createdAt)}`}{form.createdAt && form.updatedAt ? " · " : ""}{form.updatedAt && `แก้ไขล่าสุด ${timeAgoTh(form.updatedAt)}`}
+        </p>
       )}
+    </div>
+  );
+}
 
-      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, marginBottom: 14 }}>
-        <input type="checkbox" checked={form.available} onChange={(e) => setForm({ ...form, available: e.target.checked })} />
-        เปิดขายเมนูนี้ (ปิดไว้ถ้าวัตถุดิบหมด ลูกค้าจะสั่งไม่ได้ชั่วคราว)
-      </label>
-      <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
-        <div style={{ flex: 1 }}>
-          <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ราคาขายหน้าร้าน (บาท)</label>
-          <input className="cfield" type="number" value={form.priceStore} onChange={(e) => setForm({ ...form, priceStore: Number(e.target.value) })} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ราคาขายเดลิเวอรี่ (บาท)</label>
-          <input className="cfield" type="number" value={form.priceDelivery} onChange={(e) => setForm({ ...form, priceDelivery: Number(e.target.value) })} />
-        </div>
-      </div>
-
-      <p style={{ fontSize: 12, color: "var(--espresso-2)", marginBottom: 6 }}>
-        ส่วนผสม (วัตถุดิบที่ตั้ง "กลุ่มทางเลือก" ไว้ เช่น นม/เมล็ดกาแฟ จะรวมเป็นตัวเลือกเดียวในรายการนี้ — ระบบจะตัดสต็อกตามที่ลูกค้าเลือกจริงในตัวเลือกเสริม)
+function MenuRecipeTab({ form, ingredients, updateLine, addLine, removeLine, ingredientsById }) {
+  return (
+    <div>
+      <p style={{ fontSize: 12, color: "#9C9690", margin: "0 0 14px", lineHeight: 1.5 }}>
+        วัตถุดิบที่ตั้ง "กลุ่มทางเลือก" ไว้ (เช่น นม/เมล็ดกาแฟ) จะรวมเป็นตัวเลือกเดียวในรายการนี้ — ระบบจะตัดสต็อกตามที่ลูกค้าเลือกจริงในตัวเลือกเสริม
       </p>
-      {form.ingredients.map((line, idx) => (
-        <div key={idx} style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
-          <select className="cfield" value={line.ingredientId} onChange={(e) => updateLine(idx, { ingredientId: e.target.value })}>
-            {ingredientPickerOptions(ingredients, line.ingredientId).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-          <input className="cfield" style={{ width: 80 }} type="number" value={line.qty} onChange={(e) => updateLine(idx, { qty: Number(e.target.value) })} />
-          <button className="cbtn cbtn-danger" style={{ padding: "6px 8px" }} onClick={() => removeLine(idx)} title="ลบส่วนผสมนี้"><Icon name="x" size={13} /></button>
+      <div className="mnu-recipe-table">
+        <div className="mnu-recipe-row mnu-recipe-head">
+          <span>วัตถุดิบ</span><span>จำนวน</span><span>หน่วย</span><span style={{ textAlign: "right" }}>ต้นทุน</span><span></span>
         </div>
-      ))}
-      <button className="cbtn" onClick={addLine}><Icon name="plus" size={13} /> เพิ่มส่วนผสม</button>
-
-      <p style={{ fontSize: 12, color: "var(--espresso-2)", margin: "16px 0 6px" }}>ตัวเลือกเสริมที่ลูกค้าจะเห็นตอนสั่ง (ตั้งค่ากลุ่มตัวเลือกได้ในแท็บ "ตัวเลือกเสริม")</p>
-      {optionGroups.length === 0 ? (
-        <EmptyNote text="ยังไม่มีกลุ่มตัวเลือกให้เลือก" />
-      ) : (
-        optionGroups.map((g) => (
-          <label key={g.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, marginBottom: 4 }}>
-            <input type="checkbox" checked={form.optionGroupIds.includes(g.id)} onChange={() => toggleOptionGroup(g.id)} />
-            {g.name}{g.required ? " (บังคับเลือก)" : ""}
-          </label>
-        ))
-      )}
-
-      <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
-        <button className="cbtn cbtn-accent" onClick={() => onSave(form)}>บันทึกเมนู</button>
-        <button className="cbtn" onClick={onCancel}>ยกเลิก</button>
+        {form.ingredients.length === 0 ? (
+          <EmptyNote text="ยังไม่มีส่วนผสมในสูตรนี้" />
+        ) : form.ingredients.map((line, idx) => {
+          const ing = ingredientsById[line.ingredientId];
+          const options = ingredientPickerOptions(ingredients, line.ingredientId);
+          const lineCost = ing ? ing.costPerUnit * (Number(line.qty) || 0) : 0;
+          return (
+            <div className="mnu-recipe-row" key={idx}>
+              <MnuIngredientPicker options={options} value={line.ingredientId} onChange={(v) => updateLine(idx, { ingredientId: v })} />
+              <input className="mnu-qty-field" type="number" min="0" value={line.qty} onChange={(e) => updateLine(idx, { qty: Number(e.target.value) })} />
+              <span className="mnu-unit-cell">{ing ? UNITS[ing.unit] : "—"}</span>
+              <span className="mnu-cost-cell">฿{money(lineCost)}</span>
+              <button type="button" className="inv-icon-btn" style={{ width: 36, height: 36 }} onClick={() => removeLine(idx)} aria-label="ลบส่วนผสมนี้"><Icon name="x" size={14} /></button>
+            </div>
+          );
+        })}
       </div>
+      <button className="inv-btn-ghost" style={{ marginTop: 12 }} onClick={addLine}><Icon name="plus" size={14} /> เพิ่มส่วนผสม</button>
+    </div>
+  );
+}
+
+function MenuPricingTab({ form, setForm, totalCost, platforms }) {
+  const marginStore = form.priceStore > 0 ? ((form.priceStore - totalCost) / form.priceStore) * 100 : 0;
+  const marginDelivery = form.priceDelivery > 0 ? ((form.priceDelivery - totalCost) / form.priceDelivery) * 100 : 0;
+  const lbl = { display: "block", fontSize: 12, fontWeight: 600, color: "#9C9690", marginBottom: 6 };
+  const field = { width: "100%", height: 44, border: `1px solid ${POS.border}`, borderRadius: 10, background: "#fff", padding: "0 12px", fontSize: 14, color: "#1F2937", boxSizing: "border-box", outline: "none" };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div className="mnu-price-card">
+        <div className="mnu-price-card-head"><span><Icon name="building-store" size={14} /> หน้าร้าน (Walk-in)</span><MnuMarginTag pct={marginStore} /></div>
+        <label style={lbl}>ราคาขาย (บาท)</label>
+        <input className="mnu-field" style={field} type="number" min="0" value={form.priceStore} onChange={(e) => setForm({ ...form, priceStore: Number(e.target.value) })} />
+        <div className="mnu-price-breakdown"><span>ต้นทุน ฿{money(totalCost)}</span><span>กำไร ฿{money(form.priceStore - totalCost)}/แก้ว</span></div>
+      </div>
+
+      <div className="mnu-price-card">
+        <div className="mnu-price-card-head"><span><Icon name="truck-delivery" size={14} /> เดลิเวอรี่ (ราคาฐาน)</span><MnuMarginTag pct={marginDelivery} /></div>
+        <label style={lbl}>ราคาขาย (บาท)</label>
+        <input className="mnu-field" style={field} type="number" min="0" value={form.priceDelivery} onChange={(e) => setForm({ ...form, priceDelivery: Number(e.target.value) })} />
+        <div className="mnu-price-breakdown"><span>ต้นทุน ฿{money(totalCost)}</span><span>กำไร ฿{money(form.priceDelivery - totalCost)}/แก้ว</span></div>
+      </div>
+
+      {platforms.length > 0 && (
+        <div>
+          <p style={{ fontSize: 11.5, fontWeight: 700, color: "#9C9690", textTransform: "uppercase", letterSpacing: ".03em", margin: "4px 0 8px" }}>หลังหักค่า GP แพลตฟอร์ม (คำนวณจากราคาเดลิเวอรี่ฐาน)</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {platforms.map((p) => {
+              const net = form.priceDelivery * (1 - p.gpPercent / 100);
+              const netProfit = net - totalCost;
+              const pctMargin = form.priceDelivery > 0 ? (netProfit / form.priceDelivery) * 100 : 0;
+              return (
+                <div key={p.id} className="mnu-platform-row">
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1F2937" }}>{p.name}</div>
+                    <div style={{ fontSize: 11, color: "#9C9690" }}>GP {p.gpPercent}% · สุทธิ ฿{money(net)} · กำไร ฿{money(netProfit)}</div>
+                  </div>
+                  <MnuMarginTag pct={pctMargin} />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MenuOptionsTab({ form, optionGroups, toggleOptionGroup }) {
+  if (optionGroups.length === 0) return <EmptyNote text='ยังไม่มีกลุ่มตัวเลือกให้เลือก (ตั้งค่าได้ในแท็บ "ตัวเลือกเสริม")' />;
+  return (
+    <div>
+      <p style={{ fontSize: 12, color: "#9C9690", margin: "0 0 8px", lineHeight: 1.5 }}>ตัวเลือกเสริมที่ลูกค้าจะเห็นตอนสั่งเมนูนี้</p>
+      {optionGroups.map((g) => (
+        <label key={g.id} className="mnu-option-row">
+          <OptgToggle checked={form.optionGroupIds.includes(g.id)} onChange={() => toggleOptionGroup(g.id)} color={POS.primary} />
+          <span style={{ fontSize: 13.5, fontWeight: 600, color: "#1F2937", flex: 1 }}>{g.name}</span>
+          {g.required && <span className="mnu-required-chip">บังคับเลือก</span>}
+        </label>
+      ))}
     </div>
   );
 }
@@ -3821,7 +4438,8 @@ const OPTG = {
   border: "#ECE8E2", gray: "#6B7280", ink: "#1F2937", warm: "#FAF7F2",
 };
 
-function OptgToggle({ checked, onChange, label }) {
+function OptgToggle({ checked, onChange, label, color }) {
+  const c = color || OPTG.primary;
   return (
     <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none" }}>
       <span
@@ -3829,10 +4447,10 @@ function OptgToggle({ checked, onChange, label }) {
         onClick={() => onChange(!checked)}
         onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); onChange(!checked); } }}
         style={{
-          width: 36, height: 21, borderRadius: 999, background: checked ? OPTG.primary : "#D9D4C9",
+          width: 36, height: 21, borderRadius: 999, background: checked ? c : "#D9D4C9",
           position: "relative", transition: "background 200ms ease", flexShrink: 0, outline: "none",
         }}
-        onFocus={(e) => (e.currentTarget.style.boxShadow = `0 0 0 3px ${OPTG.primary}33`)}
+        onFocus={(e) => (e.currentTarget.style.boxShadow = `0 0 0 3px ${c}33`)}
         onBlur={(e) => (e.currentTarget.style.boxShadow = "none")}
       >
         <span style={{
