@@ -2151,7 +2151,7 @@ function formatPickupDateTH(dateStr) {
   return new Date(y, m - 1, d).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
 }
 
-function OrderMeta({ paymentMethod, pickupDate, paymentVerified, paymentVerifiedBy, compact }) {
+function OrderMeta({ paymentMethod, pickupDate, paymentVerified, paymentVerifiedBy, compact, onEditPickupDate }) {
   if (!paymentMethod && !pickupDate) return null;
   const isTestSlip = paymentVerifiedBy === "slipok-test-mode";
   return (
@@ -2162,9 +2162,24 @@ function OrderMeta({ paymentMethod, pickupDate, paymentVerified, paymentVerified
         </span>
       )}
       {pickupDate && (
-        <span className="chpill" style={{ background: "var(--cream-2)", color: "var(--espresso-3)", fontWeight: 600, ...(compact ? { padding: "1px 6px", fontSize: 9.5 } : {}) }}>
+        // ต้องเป็น <button> ไม่ใช่ <span> — การ์ดออเดอร์ทั้งใบลากได้ (onCardPointerDown เช็คแค่ e.target.closest("button")
+        // ถึงจะไม่เริ่มลาก) ถ้าเป็น span เฉยๆ กดแล้วจะโดนตีความเป็นการเริ่มลากการ์ดแทนที่จะเปิด modal แก้วันที่
+        <button
+          type="button"
+          className="chpill"
+          onClick={onEditPickupDate}
+          disabled={!onEditPickupDate}
+          title={onEditPickupDate ? "แก้ไขวันที่รับ" : undefined}
+          style={{
+            background: "var(--cream-2)", color: "var(--espresso-3)", fontWeight: 600, border: "none", fontFamily: "inherit",
+            display: "inline-flex", alignItems: "center", margin: 0,
+            ...(compact ? { padding: "1px 6px", fontSize: 9.5 } : {}),
+            ...(onEditPickupDate ? { cursor: "pointer" } : {}),
+          }}
+        >
           <Icon name="calendar" size={10} /> รับ {formatPickupDateTH(pickupDate)}
-        </span>
+          {onEditPickupDate && <Icon name="pencil" size={9} style={{ marginLeft: 2, opacity: 0.7 }} />}
+        </button>
       )}
       {paymentVerified && !isTestSlip && (
         <span className="chpill" style={{ background: "rgba(22,163,74,0.16)", color: "#15803D", fontWeight: 700, ...(compact ? { padding: "1px 6px", fontSize: 9.5 } : {}) }}>
@@ -2226,6 +2241,7 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, showToast, data, in
   const [dragPos, setDragPos] = useState(null);
   const [overCol, setOverCol] = useState(null);
   const [editingItem, setEditingItem] = useState(null);
+  const [editingPickupDate, setEditingPickupDate] = useState(null);
   const dragInfoRef = useRef(null);
   // จอแคบ (เช่น iPad) ให้ทั้ง 4 คอลัมน์อัดพอดีจอโดยไม่ต้องเลื่อนแนวนอน แทนที่จะปล่อยให้ล้นแล้วสกอลล์
   const [compact, setCompact] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 1080px)").matches);
@@ -2275,6 +2291,15 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, showToast, data, in
       .then(() => showToast("แก้ไขตัวเลือกออเดอร์แล้ว"))
       .catch((err) => showToast("แก้ไขไม่สำเร็จ: " + err.message));
     setEditingItem(null);
+  }
+
+  // แก้วันที่รับได้ทุกสถานะ (ไม่ผูกกับสต็อก/ต้นทุนเหมือนตัวเลือกเมนู) — กันเคสลูกค้าใส่วันรับผิดแล้วพนักงานไม่มีทางแก้เลย
+  // นอกจากลากการ์ดสลับสถานะไปมาซึ่งไม่ได้ช่วยอะไรและอาจกดโดนปุ่มยกเลิกที่อยู่ติดกันโดยไม่ตั้งใจ
+  function savePickupDate(order, newDate) {
+    update(ref(db, `orders/${uid}/${order.id}`), { pickupDate: newDate })
+      .then(() => showToast("แก้ไขวันที่รับแล้ว"))
+      .catch((err) => showToast("แก้ไขไม่สำเร็จ: " + err.message));
+    setEditingPickupDate(null);
   }
 
   function confirmPaid(order) {
@@ -2428,7 +2453,7 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, showToast, data, in
                         {new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}
                       </div>
                     )}
-                    <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} paymentVerified={o.paymentVerified} paymentVerifiedBy={o.paymentVerifiedBy} compact={compact} />
+                    <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} paymentVerified={o.paymentVerified} paymentVerifiedBy={o.paymentVerifiedBy} compact={compact} onEditPickupDate={() => setEditingPickupDate(o)} />
                     <OrderItemLines
                       items={o.items} note={o.note} compact={compact}
                       onEditItem={col.id === "pending" ? (idx) => setEditingItem({ order: o, itemIdx: idx }) : undefined}
@@ -2496,6 +2521,35 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, showToast, data, in
           onSave={(newOptions) => saveItemOptions(editingItem.order, editingItem.itemIdx, newOptions)}
         />
       )}
+
+      {editingPickupDate && (
+        <EditPickupDateModal
+          order={editingPickupDate}
+          onClose={() => setEditingPickupDate(null)}
+          onSave={(newDate) => savePickupDate(editingPickupDate, newDate)}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditPickupDateModal({ order, onClose, onSave }) {
+  const [date, setDate] = useState(order.pickupDate);
+  useEscape(onClose);
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60 }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: 16, padding: 22, width: 300 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ fontWeight: 700, fontSize: 15, color: "var(--espresso-5)", marginBottom: 4 }}>แก้ไขวันที่รับ</div>
+        <div style={{ fontSize: 12, color: "var(--espresso-2)", marginBottom: 12 }}>{order.customerName || order.customerPhone}</div>
+        <input
+          type="date" className="cfield" value={date} onChange={(e) => setDate(e.target.value)}
+          style={{ marginBottom: 14 }} autoFocus
+        />
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="cbtn" style={{ flex: 1, padding: "9px 0" }} onClick={onClose}>ยกเลิก</button>
+          <button className="cbtn cbtn-accent" style={{ flex: 1, padding: "9px 0" }} disabled={!date} onClick={() => date && onSave(date)}>บันทึก</button>
+        </div>
+      </div>
     </div>
   );
 }
