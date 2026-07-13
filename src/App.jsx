@@ -2292,11 +2292,12 @@ function buildOrderStickerData(order) {
   return stickers;
 }
 
-function openOrderStickerPrint(order, shopName) {
-  const stickers = buildOrderStickerData(order);
+function openOrderStickerPrint(orderOrOrders, shopName) {
+  const ordersToPrint = Array.isArray(orderOrOrders) ? orderOrOrders : [orderOrOrders];
+  const stickers = ordersToPrint.flatMap((order) => buildOrderStickerData(order));
   if (stickers.length === 0) throw new Error("ออเดอร์นี้ไม่มีรายการสำหรับพิมพ์");
 
-  const startInput = window.prompt("เริ่มพิมพ์ที่ดวงลำดับใดบนแผ่น A9? (1-30)", "1");
+  const startInput = window.prompt(`กำลังพิมพ์ ${ordersToPrint.length} ออเดอร์ รวม ${stickers.length} ดวง\nเริ่มพิมพ์ที่ดวงลำดับใดบนแผ่น A9? (1-30)`, "1");
   if (startInput === null) return false;
   const startPosition = Number.parseInt(startInput, 10);
   if (!Number.isInteger(startPosition) || startPosition < 1 || startPosition > 30) {
@@ -2329,6 +2330,8 @@ function openOrderStickerPrint(order, shopName) {
     return `<section class="sheet">${slots}</section>`;
   }).join("");
 
+  const firstOrderCode = String(ordersToPrint[0]?.id || "").slice(-6).toUpperCase();
+  const printTitle = ordersToPrint.length === 1 ? `#${firstOrderCode}` : `${ordersToPrint.length}-orders`;
   const printWindow = window.open("", "_blank", "width=980,height=760");
   if (!printWindow) throw new Error("เบราว์เซอร์บล็อกหน้าต่างพิมพ์ กรุณาอนุญาต Pop-up แล้วลองใหม่");
   printWindow.opener = null;
@@ -2336,7 +2339,7 @@ function openOrderStickerPrint(order, shopName) {
     <html lang="th">
       <head>
         <meta charset="utf-8" />
-        <title>สติ๊กเกอร์ออเดอร์ #${escapePrintHtml(String(order.id || "").slice(-6).toUpperCase())}</title>
+        <title>สติ๊กเกอร์ออเดอร์ ${escapePrintHtml(printTitle)}</title>
         <style>
           @page { size: Letter portrait; margin: 25.4mm 31.75mm; }
           * { box-sizing: border-box; }
@@ -2392,6 +2395,7 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, showToast, data, in
   const [overCol, setOverCol] = useState(null);
   const [editingItem, setEditingItem] = useState(null);
   const [editingPickupDate, setEditingPickupDate] = useState(null);
+  const [selectedOrderIds, setSelectedOrderIds] = useState(() => new Set());
   const dragInfoRef = useRef(null);
   // จอแคบ (เช่น iPad) ให้ทั้ง 4 คอลัมน์อัดพอดีจอโดยไม่ต้องเลื่อนแนวนอน แทนที่จะปล่อยให้ล้นแล้วสกอลล์
   const [compact, setCompact] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 1080px)").matches);
@@ -2419,6 +2423,14 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, showToast, data, in
       });
     }, 1400);
     return () => clearTimeout(t);
+  }, [orders]);
+
+  useEffect(() => {
+    const currentIds = new Set(orders.filter((order) => ["pending", "paid", "preparing", "ready", "done"].includes(order.status)).map((order) => order.id));
+    setSelectedOrderIds((selected) => {
+      const next = new Set([...selected].filter((id) => currentIds.has(id)));
+      return next.size === selected.size ? selected : next;
+    });
   }, [orders]);
 
   function setStatus(order, status) {
@@ -2481,6 +2493,28 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, showToast, data, in
   function printOrderStickers(order) {
     try {
       openOrderStickerPrint(order, data.settings.shopName);
+    } catch (error) {
+      showToast(error.message || "เปิดหน้าพิมพ์สติ๊กเกอร์ไม่สำเร็จ");
+    }
+  }
+
+  function toggleOrderSelection(orderId) {
+    setSelectedOrderIds((selected) => {
+      const next = new Set(selected);
+      if (next.has(orderId)) next.delete(orderId);
+      else next.add(orderId);
+      return next;
+    });
+  }
+
+  function printSelectedOrderStickers() {
+    const selectedOrders = orders.filter((order) => selectedOrderIds.has(order.id) && ["pending", "paid", "preparing", "ready", "done"].includes(order.status));
+    if (selectedOrders.length === 0) {
+      showToast("กรุณาเลือกออเดอร์ที่ต้องการพิมพ์");
+      return;
+    }
+    try {
+      openOrderStickerPrint(selectedOrders, data.settings.shopName);
     } catch (error) {
       showToast(error.message || "เปิดหน้าพิมพ์สติ๊กเกอร์ไม่สำเร็จ");
     }
@@ -2551,10 +2585,39 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, showToast, data, in
   }
 
   const draggedOrder = dragId ? orders.find((o) => o.id === dragId) : null;
+  const printableOrders = orders.filter((order) => ["pending", "paid", "preparing", "ready", "done"].includes(order.status));
+  const allPrintableSelected = printableOrders.length > 0 && printableOrders.every((order) => selectedOrderIds.has(order.id));
 
   return (
     <div>
       <SectionTitle icon="layout-kanban" text="บอร์ดออเดอร์ — ลากการ์ดข้ามคอลัมน์เพื่ออัปเดตสถานะ" />
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap",
+        margin: "0 0 12px", padding: "9px 12px", border: "1px solid var(--line)", borderRadius: 12, background: "rgba(255,255,255,.55)",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--espresso-3)", fontSize: 12.5 }}>
+          <button
+            type="button"
+            className="cbtn"
+            onClick={() => setSelectedOrderIds(allPrintableSelected ? new Set() : new Set(printableOrders.map((order) => order.id)))}
+            disabled={printableOrders.length === 0}
+            style={{ padding: "6px 9px" }}
+          >
+            <Icon name={allPrintableSelected ? "square-check" : "square"} size={14} />
+            <span style={{ marginLeft: 5 }}>{allPrintableSelected ? "ยกเลิกทั้งหมด" : "เลือกทั้งหมด"}</span>
+          </button>
+          <span>เลือกแล้ว <b>{selectedOrderIds.size}</b> ออเดอร์</span>
+        </div>
+        <button
+          type="button"
+          className="cbtn cbtn-accent"
+          disabled={selectedOrderIds.size === 0}
+          onClick={printSelectedOrderStickers}
+          style={{ padding: "7px 12px", opacity: selectedOrderIds.size === 0 ? .5 : 1 }}
+        >
+          <Icon name="printer" size={14} /> <span style={{ marginLeft: 5 }}>พิมพ์ที่เลือกพร้อมกัน</span>
+        </button>
+      </div>
       <div style={{
         display: "grid",
         gridTemplateColumns: compact ? "repeat(4, minmax(150px, 1fr))" : "repeat(4, minmax(260px, 1fr))",
@@ -2599,12 +2662,30 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, showToast, data, in
                       borderLeft: `${compact ? 3 : 5}px solid ${c.dot}`,
                       cursor: "grab", touchAction: "none",
                       opacity: dragId === o.id ? 0.35 : 1,
+                      outline: selectedOrderIds.has(o.id) ? "2px solid var(--sage-dark)" : "none",
+                      outlineOffset: selectedOrderIds.has(o.id) ? 1 : 0,
                       animation: justMovedIds.has(o.id) ? "paidFlash 1.4s ease" : undefined,
                     })}
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: compact ? 11 : 13, fontWeight: 700, color: "var(--espresso-4)", gap: 4 }}>
                       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.customerName ? `${o.customerName} · ${o.customerPhone}` : o.customerPhone}</span>
-                      {!compact && <Icon name="grip-vertical" size={14} style={{ color: "var(--espresso-2)", flexShrink: 0 }} />}
+                      <span style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }}>
+                        <button
+                          type="button"
+                          onClick={() => toggleOrderSelection(o.id)}
+                          title={selectedOrderIds.has(o.id) ? "ยกเลิกเลือกออเดอร์นี้" : "เลือกออเดอร์นี้เพื่อพิมพ์พร้อมกัน"}
+                          aria-label={selectedOrderIds.has(o.id) ? "ยกเลิกเลือกออเดอร์" : "เลือกออเดอร์"}
+                          aria-pressed={selectedOrderIds.has(o.id)}
+                          style={{
+                            display: "grid", width: compact ? 26 : 30, height: compact ? 26 : 30, padding: 0, placeItems: "center",
+                            border: selectedOrderIds.has(o.id) ? "1px solid var(--sage-dark)" : "1px solid var(--line)", borderRadius: 7,
+                            color: selectedOrderIds.has(o.id) ? "#fff" : "var(--espresso-2)", background: selectedOrderIds.has(o.id) ? "var(--sage-dark)" : "rgba(255,255,255,.65)",
+                          }}
+                        >
+                          <Icon name={selectedOrderIds.has(o.id) ? "check" : "plus"} size={12} />
+                        </button>
+                        {!compact && <Icon name="grip-vertical" size={14} style={{ color: "var(--espresso-2)" }} />}
+                      </span>
                     </div>
                     {!compact && (
                       <div style={{ fontSize: 11, color: "var(--espresso-2)", marginTop: 2 }}>
