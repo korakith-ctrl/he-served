@@ -2341,17 +2341,22 @@ function openOrderStickerPrint(orderOrOrders, shopName) {
         <meta charset="utf-8" />
         <title>สติ๊กเกอร์ออเดอร์ ${escapePrintHtml(printTitle)}</title>
         <style>
-          @page { size: Letter portrait; margin: 25.4mm 31.75mm; }
+          @page { size: Letter portrait; margin: 0; }
           * { box-sizing: border-box; }
-          html, body { margin: 0; padding: 0; color: #000; background: #fff; font-family: Tahoma, Arial, sans-serif; }
+          html, body { width: 215.9mm; margin: 0; padding: 0; color: #000; background: #fff; font-family: Tahoma, Arial, sans-serif; }
           .sheet {
             display: grid;
             grid-template-columns: repeat(3, 50.8mm);
             grid-template-rows: repeat(10, 22.86mm);
-            width: 152.4mm;
-            height: 228.6mm;
+            align-content: start;
+            width: 215.9mm;
+            height: 279mm;
+            padding: 25.4mm 31.75mm 25mm;
+            overflow: hidden;
             break-after: page;
             page-break-after: always;
+            break-inside: avoid;
+            page-break-inside: avoid;
           }
           .sheet:last-child { break-after: auto; page-break-after: auto; }
           .slot-wrap { width: 50.8mm; height: 22.86mm; overflow: hidden; }
@@ -2372,7 +2377,7 @@ function openOrderStickerPrint(orderOrOrders, shopName) {
           .label__bottom span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
           .label__bottom b { flex-shrink: 0; }
           @media screen {
-            body::before { content: "${escapePrintHtml(shopName || "ร้านกาแฟ")} · A9 50 × 19 มม. · ตั้งค่าการพิมพ์เป็น Letter / Actual size 100%"; display: block; position: fixed; z-index: 2; top: 8px; left: 50%; transform: translateX(-50%); padding: 8px 12px; border-radius: 8px; color: #fff; background: #173b63; font-size: 12px; white-space: nowrap; }
+            body::before { content: "${escapePrintHtml(shopName || "ร้านกาแฟ")} · A9 50 × 19 มม. · ตั้งค่า Letter / Margins: None / Scale: 100%"; display: block; position: fixed; z-index: 2; top: 8px; left: 50%; transform: translateX(-50%); padding: 8px 12px; border-radius: 8px; color: #fff; background: #173b63; font-size: 12px; white-space: nowrap; }
             body { padding: 24px; background: #e7e7e7; }
             .sheet { margin: 24px auto; background: #fff; box-shadow: 0 4px 24px rgba(0,0,0,.16); }
             .label:not(.label--blank) { outline: 1px dashed #aaa; }
