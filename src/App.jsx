@@ -2923,8 +2923,153 @@ function MenuOptionsTab({ form, optionGroups, toggleOptionGroup }) {
   );
 }
 
+const PROMO_TYPES = [
+  { id: "single", label: "ลดราคาเมนูเดียว" },
+  { id: "bundle", label: "จับคู่คอมโบ (ราคาคงที่)" },
+  { id: "qty", label: "ซื้อครบจำนวน ลดเพิ่ม" },
+  { id: "choice", label: "ให้ลูกค้าเลือกเอง" },
+];
+
+// ป้ายประเภทโปรโมชั่นที่ลูกค้า/แอดมินเห็น — สีต่างกันตามประเภทให้แยกด้วยสายตาได้เร็วในกริดที่มีหลายใบ
+const PROMO_TYPE_META = {
+  single: { label: "Discount", color: "#B45309", bg: "#FFF4E5" },
+  bundle: { label: "Combo", color: "#7C3AED", bg: "#F3EBFE" },
+  qty: { label: "Bundle", color: "#0F766E", bg: "#E6F5F3" },
+  choice: { label: "Mix & Match", color: "#1D4ED8", bg: "#E8EFFE" },
+};
+
+const PROMO_STATUS_META = {
+  live: { label: "Live", color: "#15803D", bg: "#EAF7EE", icon: "circle-check" },
+  upcoming: { label: "Scheduled", color: "#B45309", bg: "#FFF4E5", icon: "clock" },
+  expired: { label: "Expired", color: "#B91C1C", bg: "#FDEBEB", icon: "calendar-x" },
+  disabled: { label: "Disabled", color: "#6B7280", bg: "#F3F2EF", icon: "eye-off" },
+};
+
+function dtLocalValue(ms) {
+  if (!ms) return "";
+  const d = new Date(ms);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// สถานะรวม (คำนวณจาก active flag + ช่วงเวลา) ใช้ทั้งแท็บกรอง/badge/สรุปสถิติ ให้เป็นแหล่งความจริงเดียว
+function promoStatus(promo) {
+  if (promo.active === false) return "disabled";
+  return promoActiveWindow(promo);
+}
+
+function promoDaysRemaining(promo) {
+  if (!promo.endAt) return null;
+  const days = Math.ceil((promo.endAt - Date.now()) / 86400000);
+  return days;
+}
+
+function promoTypeLabel(promo) {
+  const type = promo.type || "single";
+  if (type === "bundle") return `เซ็ตคอมโบ ${promo.menuIds.length} รายการ`;
+  if (type === "qty") return `ซื้อครบ ${promo.minQty} ชิ้น`;
+  if (type === "choice") return `เลือก ${promo.chooseCount} จาก ${promo.menuIds.length} รายการ`;
+  return "โปรเมนูเดี่ยว";
+}
+
+// รวมชื่อเมนูให้อ่านง่ายในพื้นที่จำกัดของการ์ด — โชว์ไม่เกิน 2 ชื่อ ที่เหลือย่อเป็น "+N More"
+function promoMenuChipsLabel(menuIds, menusById) {
+  const names = menuIds.map((id) => menusById[id]?.name).filter(Boolean);
+  if (names.length === 0) return "";
+  if (names.length <= 2) return names.join(", ");
+  return `${names.slice(0, 2).join(", ")} +${names.length - 2} More`;
+}
+
+function PromoStatusBadge({ status }) {
+  const t = PROMO_STATUS_META[status];
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700, borderRadius: 999, padding: "3px 9px", background: t.bg, color: t.color, whiteSpace: "nowrap" }}>
+      <Icon name={t.icon} size={11} /> {t.label}
+    </span>
+  );
+}
+
+function PromoTypeBadge({ type }) {
+  const t = PROMO_TYPE_META[type] || PROMO_TYPE_META.single;
+  return (
+    <span style={{ fontSize: 11, fontWeight: 700, borderRadius: 999, padding: "3px 9px", background: t.bg, color: t.color, whiteSpace: "nowrap" }}>
+      {t.label}
+    </span>
+  );
+}
+
+function PromoStatCard({ icon, label, value, tone }) {
+  const tones = {
+    primary: { bg: POS.primarySoft, fg: POS.primaryDark, icFg: POS.primary },
+    navy: { bg: "#EEF2F8", fg: POS.navy, icFg: POS.navy },
+    warning: { bg: "#FFF4E5", fg: "#B45309", icFg: "#D97706" },
+    neutral: { bg: "#F3F2EF", fg: "#374151", icFg: "#6B7280" },
+  };
+  const t = tones[tone] || tones.neutral;
+  return (
+    <div style={{ background: t.bg, borderRadius: 16, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12, minHeight: 76 }}>
+      <div style={{ width: 34, height: 34, borderRadius: 10, background: "#fff", color: t.icFg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 2px 6px rgba(0,0,0,.06)" }}>
+        <Icon name={icon} size={17} />
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 21, fontWeight: 700, color: t.fg, lineHeight: 1.1, fontFamily: "var(--f-body)" }}>{value}</div>
+        <div style={{ fontSize: 11.5, color: t.fg, opacity: .8, marginTop: 2, whiteSpace: "nowrap" }}>{label}</div>
+      </div>
+    </div>
+  );
+}
+
+// การ์ดโปรโมชั่น — บนสุด: ชื่อ+ป้ายประเภท/สถานะ, กลาง: สรุปส่วนลด/เมนู/ช่วงเวลา, ล่าง: ราคาก่อน-หลังลด, ท้ายสุด: แก้ไข + เมนู ⋯
+function PromoCard({ promo, menusById, priceNode, status, daysRemaining, moreItems, onEdit }) {
+  const type = promo.type || "single";
+  const displayName = promo.name || (promo.menuIds.map((id) => menusById[id]?.name).filter(Boolean).join(" + ") || "โปรโมชั่น");
+  const menuLabel = promoMenuChipsLabel(promo.menuIds, menusById);
+  return (
+    <div className="promo-card" style={{ opacity: status === "expired" || status === "disabled" ? 0.68 : 1 }}>
+      <div style={{ padding: "16px 18px 14px" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <PromoTypeBadge type={type} />
+            <PromoStatusBadge status={status} />
+          </div>
+        </div>
+        <div style={{ fontSize: 16.5, fontWeight: 700, color: POS.navy, lineHeight: 1.3, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{displayName}</div>
+        <div style={{ fontSize: 12, color: "#9C9690", marginBottom: 10 }}>{promoTypeLabel(promo)}{menuLabel ? ` · ${menuLabel}` : ""}</div>
+
+        {(promo.startAt || promo.endAt) && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: status === "expired" ? "#B91C1C" : status === "upcoming" ? "#B45309" : "#6B7280", marginBottom: 10 }}>
+            <Icon name="calendar-event" size={13} />
+            <span>
+              {promo.startAt && promo.endAt ? `${formatPromoDateTime(promo.startAt)} - ${formatPromoDateTime(promo.endAt)}`
+                : promo.startAt ? `เริ่ม ${formatPromoDateTime(promo.startAt)}`
+                : `ถึง ${formatPromoDateTime(promo.endAt)}`}
+            </span>
+            {status === "live" && daysRemaining != null && daysRemaining >= 0 && (
+              <span style={{ fontWeight: 700, background: daysRemaining <= 2 ? "#FDEBEB" : "#FFF4E5", color: daysRemaining <= 2 ? "#B91C1C" : "#B45309", borderRadius: 999, padding: "1px 7px", flexShrink: 0 }}>
+                เหลือ {daysRemaining} วัน
+              </span>
+            )}
+          </div>
+        )}
+
+        <div className="promo-price-box">{priceNode}</div>
+      </div>
+
+      <div className="promo-card-actions">
+        <button className="mnu-act-btn" onClick={onEdit}><Icon name="edit" size={13} /> แก้ไข</button>
+        <InvActionsMenu items={moreItems} />
+      </div>
+    </div>
+  );
+}
+
 function PromotionsPanel({ data, updateData, showToast }) {
-  const [editing, setEditing] = useState(null);
+  const [query, setQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("order");
+  const [inspector, setInspector] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
 
   const menusById = useMemo(() => {
     const m = {};
@@ -2932,8 +3077,10 @@ function PromotionsPanel({ data, updateData, showToast }) {
     return m;
   }, [data.menus]);
 
+  const promotions = data.promotions || [];
+
   function newPromo() {
-    setEditing({ id: null, name: "", type: "single", menuIds: [], discountType: "percent", discountValue: 10, minQty: 2, chooseCount: 2, active: true, startAt: null, endAt: null });
+    setInspector({ mode: "add", tab: "overview", promo: { id: null, name: "", type: "single", menuIds: [], discountType: "percent", discountValue: 10, minQty: 2, chooseCount: 2, active: true, startAt: null, endAt: null } });
   }
 
   function savePromo(promo) {
@@ -2949,7 +3096,7 @@ function PromotionsPanel({ data, updateData, showToast }) {
         next.promotions.push({ ...promo, id: genId("promo") });
       }
     });
-    setEditing(null);
+    setInspector(null);
     showToast("บันทึกโปรโมชั่นแล้ว");
   }
 
@@ -2962,7 +3109,19 @@ function PromotionsPanel({ data, updateData, showToast }) {
 
   function deletePromo(id) {
     updateData((next) => { next.promotions = next.promotions.filter((p) => p.id !== id); });
+    setConfirmDelete(null);
+    setInspector(null);
     showToast("ลบโปรโมชั่นแล้ว");
+  }
+
+  function duplicatePromo(promo) {
+    updateData((next) => {
+      if (!next.promotions) next.promotions = [];
+      const idx = next.promotions.findIndex((p) => p.id === promo.id);
+      const copy = { ...promo, id: genId("promo"), name: (promo.name || "โปรโมชั่น") + " (สำเนา)", active: false };
+      next.promotions.splice(idx + 1, 0, copy);
+    });
+    showToast("ทำสำเนาโปรโมชั่นแล้ว");
   }
 
   // ลำดับในอาเรย์คือลำดับที่แสดงในหมวด "ดีลพิเศษ" หน้าลูกค้า สลับตำแหน่งกับตัวข้างเคียงแล้วบันทึกทันที
@@ -2976,134 +3135,260 @@ function PromotionsPanel({ data, updateData, showToast }) {
     });
   }
 
-  if (editing) {
-    return <PromoEditor promo={editing} menus={data.menus} onSave={savePromo} onCancel={() => setEditing(null)} />;
+  const totalCount = promotions.length;
+  const statusCounts = useMemo(() => {
+    const c = { live: 0, upcoming: 0, expired: 0, disabled: 0 };
+    for (const p of promotions) c[promoStatus(p)]++;
+    return c;
+  }, [promotions]);
+
+  const typeCounts = useMemo(() => {
+    const c = { single: 0, bundle: 0, qty: 0, choice: 0 };
+    for (const p of promotions) { const t = p.type || "single"; if (c[t] != null) c[t]++; }
+    return c;
+  }, [promotions]);
+
+  const typeTabOptions = [
+    { value: "all", label: `ทั้งหมด (${totalCount})` },
+    ...PROMO_TYPES.map((t) => ({ value: t.id, label: `${PROMO_TYPE_META[t.id].label} (${typeCounts[t.id]})` })),
+  ];
+
+  function passesFilters(promo) {
+    if (query.trim()) {
+      const q = query.trim().toLowerCase();
+      const menuNames = promo.menuIds.map((id) => menusById[id]?.name || "").join(" ");
+      const hay = `${promo.name || ""} ${menuNames} ${PROMO_TYPE_META[promo.type || "single"].label}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    if (typeFilter !== "all" && (promo.type || "single") !== typeFilter) return false;
+    if (statusFilter !== "all" && promoStatus(promo) !== statusFilter) return false;
+    return true;
   }
 
-  const promotions = data.promotions || [];
+  const visiblePromotions = useMemo(() => {
+    const withIdx = promotions.map((p, idx) => ({ p, idx }));
+    const filtered = withIdx.filter(({ p }) => passesFilters(p));
+    filtered.sort((a, b) => {
+      if (sortBy === "name") return (a.p.name || "").localeCompare(b.p.name || "", "th");
+      if (sortBy === "ending") {
+        const ae = a.p.endAt || Infinity, be = b.p.endAt || Infinity;
+        return ae - be;
+      }
+      return a.idx - b.idx;
+    });
+    return filtered.map(({ p, idx }) => ({ promo: p, idx }));
+  }, [promotions, query, typeFilter, statusFilter, sortBy, menusById]);
+
+  function moreItemsFor(promo, idx) {
+    return [
+      ...(idx > 0 && sortBy === "order" ? [{ icon: "chevron-up", label: "เลื่อนขึ้น", onClick: () => movePromo(promo.id, -1) }] : []),
+      ...(idx < promotions.length - 1 && sortBy === "order" ? [{ icon: "chevron-down", label: "เลื่อนลง", onClick: () => movePromo(promo.id, 1) }] : []),
+      { icon: promo.active === false ? "eye" : "eye-off", label: promo.active === false ? "เปิดใช้งาน" : "ปิดใช้งาน", onClick: () => toggleActive(promo) },
+      { icon: "copy", label: "ทำสำเนา", onClick: () => duplicatePromo(promo) },
+      { icon: "chart-bar", label: "สถิติการใช้งาน", onClick: () => setInspector({ mode: "edit", tab: "analytics", promo }) },
+      { icon: "trash", label: "ลบโปรโมชั่น", danger: true, onClick: () => setConfirmDelete(promo) },
+    ];
+  }
 
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <SectionTitle icon="discount" text="โปรโมชั่น" />
-        <button className="cbtn cbtn-accent" onClick={newPromo}><Icon name="plus" size={14} /> เพิ่มโปรโมชั่น</button>
+    <div className="promo-wrap">
+      <style>{`
+        .promo-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; flex-wrap: wrap; margin-bottom: 20px; }
+        .promo-header h2 { margin: 0; font-size: 22px; font-weight: 700; color: ${POS.navy}; }
+        .promo-header p { margin: 4px 0 0; font-size: 13px; color: #9C9690; max-width: 480px; line-height: 1.5; }
+        .promo-stats-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+        @media (max-width: 720px) { .promo-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        .promo-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+        .promo-search { flex: 1; min-width: 200px; position: relative; display: flex; align-items: center; }
+        .promo-search input { width: 100%; height: 44px; border: 1px solid ${POS.border}; border-radius: 12px; background: #fff; padding: 0 14px 0 38px; font-size: 14px; color: #1F2937; box-sizing: border-box; outline: none; transition: border 160ms, box-shadow 160ms; }
+        .promo-search input:focus { border-color: ${POS.primary}; box-shadow: 0 0 0 3px ${POS.primarySoft}; }
+        .promo-select { height: 44px; border: 1px solid ${POS.border}; border-radius: 12px; background: #fff; padding: 0 32px 0 14px; font-size: 13.5px; font-weight: 600; color: #1F2937; cursor: pointer; outline: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; }
+        .promo-select:focus { border-color: ${POS.primary}; box-shadow: 0 0 0 3px ${POS.primarySoft}; }
+        .promo-btn-primary { display: inline-flex; align-items: center; gap: 7px; height: 44px; padding: 0 18px; border: none; border-radius: 12px; background: ${POS.primary}; color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 6px 18px rgba(216,92,8,.28); transition: background 160ms; flex-shrink: 0; }
+        .promo-btn-primary:hover { background: ${POS.primaryDark}; }
+        .promo-cat-nav { margin-bottom: 18px; overflow-x: auto; }
+        .promo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 18px; }
+        @media (min-width: 1600px) { .promo-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+        @media (min-width: 1180px) and (max-width: 1599px) { .promo-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+        @media (min-width: 640px) and (max-width: 900px) { .promo-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 639px) { .promo-grid { grid-template-columns: minmax(0, 1fr); } }
+        .promo-card { background: #fff; border-radius: 20px; box-shadow: 0 8px 24px rgba(0,0,0,.06); overflow: hidden; display: flex; flex-direction: column; transition: box-shadow 200ms ease; }
+        .promo-card:hover { box-shadow: 0 16px 36px rgba(0,0,0,.12); }
+        .promo-price-box { background: #FBFAF8; border-radius: 12px; padding: 10px 12px; }
+        .promo-card-actions { display: flex; gap: 6px; padding: 0 18px 16px; margin-top: auto; }
+        .mnu-act-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 38px; border: 1px solid ${POS.border}; border-radius: 10px; background: #fff; color: ${POS.navy}; font-size: 12px; font-weight: 700; cursor: pointer; transition: background 140ms ease, border-color 140ms ease; }
+        .mnu-act-btn:hover { background: ${POS.chipBg}; }
+        .inv-icon-btn { width: 36px; height: 36px; border: 1px solid ${POS.border}; border-radius: 9px; background: #fff; color: #6B7280; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .inv-icon-btn:hover { background: #F5F5F3; color: #1F2937; }
+        .inv-btn-ghost { height: 40px; padding: 0 16px; border: 1px solid ${POS.border}; border-radius: 10px; background: #fff; color: #1F2937; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+        .inv-btn-danger { height: 40px; padding: 0 16px; border: none; border-radius: 10px; background: #DC2626; color: #fff; font-size: 13.5px; font-weight: 700; cursor: pointer; }
+        .promo-inspector-overlay { position: fixed; inset: 0; background: rgba(22,20,17,.4); z-index: 70; display: flex; justify-content: flex-end; animation: mnuFade 160ms ease; }
+        .promo-inspector { width: min(520px, 100%); height: 100%; background: #fff; box-shadow: -8px 0 40px rgba(0,0,0,.18); display: flex; flex-direction: column; animation: mnuSlide 240ms cubic-bezier(.2,.8,.2,1); }
+        .promo-insp-head { padding: 18px 22px; border-bottom: 1px solid ${POS.border}; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-shrink: 0; }
+        .promo-insp-tabs { display: flex; gap: 4px; padding: 10px 18px 0; border-bottom: 1px solid ${POS.border}; flex-shrink: 0; overflow-x: auto; }
+        .promo-insp-tab { display: inline-flex; align-items: center; gap: 6px; border: none; background: none; padding: 10px 12px; font-size: 12.5px; font-weight: 700; color: #9C9690; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; min-height: 40px; }
+        .promo-insp-tab.active { color: ${POS.primary}; border-bottom-color: ${POS.primary}; }
+        .promo-insp-body { padding: 20px 22px; overflow-y: auto; flex: 1; }
+        .promo-insp-footer { padding: 16px 22px; border-top: 1px solid ${POS.border}; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+        .promo-btn-danger-ghost { display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 14px; border: 1px solid #F3D5D2; border-radius: 10px; background: #fff; color: #DC2626; font-size: 13px; font-weight: 700; cursor: pointer; }
+        .promo-btn-danger-ghost:hover { background: #FDEBEB; }
+        @keyframes mnuFade { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes mnuSlide { from { transform: translateX(100%); } to { transform: translateX(0); } }
+        @media (max-width: 760px) {
+          .promo-inspector-overlay { align-items: stretch; }
+          .promo-inspector { width: 100%; height: 100dvh; }
+        }
+        .promo-field:focus { border-color: ${POS.primary} !important; box-shadow: 0 0 0 3px ${POS.primarySoft}; }
+        .promo-type-pill { border: 1px solid ${POS.border}; background: #fff; color: #1F2937; border-radius: 12px; padding: 12px 14px; font-size: 13px; font-weight: 600; cursor: pointer; text-align: left; transition: all 160ms ease; }
+        .promo-type-pill.active { border-color: ${POS.primary}; background: ${POS.primarySoft}; color: ${POS.primaryDark}; }
+        .promo-menu-list { max-height: 260px; overflow-y: auto; border: 1px solid ${POS.border}; border-radius: 12px; padding: 6px; }
+        .promo-menu-row { display: flex; align-items: center; gap: 10px; padding: 9px 8px; border-radius: 8px; font-size: 13.5px; min-height: 40px; }
+        .promo-menu-row:hover { background: #FAFAF8; }
+      `}</style>
+
+      <div className="promo-header">
+        <div>
+          <h2>Promotions</h2>
+          <p>Manage discounts, combo promotions, bundles and marketing campaigns.</p>
+        </div>
+        <button className="promo-btn-primary" onClick={newPromo}><Icon name="plus" size={16} /> Add Promotion</button>
       </div>
-      <p style={{ fontSize: 11.5, color: "var(--espresso-2)", margin: "-6px 0 14px" }}>
-        โปรโมชั่นที่เปิดใช้งานจะแสดงในหมวด "ดีลพิเศษ" อันดับแรกสุดของหน้าลูกค้า พร้อมราคาปกติขีดฆ่าและราคาโปรสีแดง ทำได้ทั้งลดเมนูเดียว จับคู่คอมโบราคาคงที่ ซื้อครบจำนวนลดเพิ่ม หรือให้ลูกค้าเลือกเองจากกลุ่มเมนู
-      </p>
-      {promotions.length === 0 ? <EmptyNote text='ยังไม่มีโปรโมชั่น กด "เพิ่มโปรโมชั่น" เพื่อเริ่ม' /> : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
-          {promotions.map((promo, idx) => {
+
+      <div className="promo-stats-grid" style={{ marginBottom: 20 }}>
+        <PromoStatCard icon="discount" label="Total" value={totalCount} tone="navy" />
+        <PromoStatCard icon="circle-check" label="Active" value={statusCounts.live} tone="primary" />
+        <PromoStatCard icon="clock" label="Scheduled" value={statusCounts.upcoming} tone="warning" />
+        <PromoStatCard icon="calendar-x" label="Expired" value={statusCounts.expired} tone="neutral" />
+      </div>
+
+      <div className="promo-toolbar">
+        <div className="promo-search">
+          <Icon name="search" size={15} style={{ position: "absolute", left: 13, color: "#9C9690" }} />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ค้นหาโปรโมชั่น, เมนู, ประเภท..." aria-label="ค้นหาโปรโมชั่น" />
+        </div>
+        <select className="promo-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="กรองตามสถานะ">
+          <option value="all">ทุกสถานะ</option>
+          <option value="live">Live</option>
+          <option value="upcoming">Scheduled</option>
+          <option value="expired">Expired</option>
+          <option value="disabled">Disabled</option>
+        </select>
+        <select className="promo-select" value={sortBy} onChange={(e) => setSortBy(e.target.value)} aria-label="เรียงลำดับ">
+          <option value="order">เรียง: ลำดับที่ตั้งไว้</option>
+          <option value="name">เรียง: ชื่อ</option>
+          <option value="ending">เรียง: ใกล้หมดเขตก่อน</option>
+        </select>
+      </div>
+
+      <div className="promo-cat-nav">
+        <Segmented options={typeTabOptions} value={typeFilter} onChange={setTypeFilter} dense />
+      </div>
+
+      {promotions.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "64px 20px", background: "#fff", borderRadius: 20, boxShadow: "0 8px 24px rgba(0,0,0,.06)" }}>
+          <div style={{ width: 64, height: 64, borderRadius: 18, background: POS.primarySoft, color: POS.primary, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+            <Icon name="discount" size={30} />
+          </div>
+          <p style={{ fontSize: 16, fontWeight: 700, color: "#1F2937", margin: "0 0 4px" }}>No promotions yet</p>
+          <p style={{ fontSize: 13, color: "#9C9690", margin: "0 0 20px" }}>Create your first campaign</p>
+          <button className="promo-btn-primary" style={{ margin: "0 auto" }} onClick={newPromo}><Icon name="plus" size={16} /> Create Promotion</button>
+        </div>
+      ) : visiblePromotions.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "48px 20px", background: "#fff", borderRadius: 20, boxShadow: "0 8px 24px rgba(0,0,0,.06)" }}>
+          <Icon name="search-off" size={28} style={{ color: "#9C9690" }} />
+          <p style={{ fontSize: 14, fontWeight: 600, color: "#1F2937", margin: "12px 0 2px" }}>ไม่พบโปรโมชั่นที่ตรงกับเงื่อนไข</p>
+          <p style={{ fontSize: 12.5, color: "#9C9690", margin: 0 }}>ลองปรับคำค้นหาหรือตัวกรอง</p>
+        </div>
+      ) : (
+        <div className="promo-grid">
+          {visiblePromotions.map(({ promo, idx }) => {
             const type = promo.type || "single";
-            const promoWin = promoActiveWindow(promo);
-            const typeLabel = type === "bundle" ? `เซ็ตคอมโบ ${promo.menuIds.length} รายการ`
-              : type === "qty" ? `ซื้อครบ ${promo.minQty} ชิ้น`
-              : type === "choice" ? `เลือก ${promo.chooseCount} จาก ${promo.menuIds.length} รายการ`
-              : "โปรเมนูเดี่ยว";
+            const status = promoStatus(promo);
+            const daysRemaining = promoDaysRemaining(promo);
             let priceNode = null;
             if (type === "bundle" || type === "single") {
               const { items, originalTotal, promoTotal } = computePromoPricing(promo, menusById);
+              const savings = Math.max(0, originalTotal - promoTotal);
               priceNode = (
-                <>
-                  <div style={{ borderTop: "1px dashed var(--line)", margin: "8px 0", paddingTop: 8, fontSize: 12 }}>
-                    {items.map((m) => (
-                      <div key={m.id} style={{ display: "flex", justifyContent: "space-between", color: "var(--espresso-3)" }}>
-                        <span>{m.name}</span><span>฿{money(m.priceStore)}</span>
-                      </div>
-                    ))}
+                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                    <span style={{ fontSize: 13, color: "#9C9690", textDecoration: "line-through" }}>฿{money(originalTotal)}</span>
+                    <span style={{ fontSize: 20, fontWeight: 700, color: POS.primary }}>฿{money(promoTotal)}</span>
                   </div>
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 4 }}>
-                    <span style={{ fontSize: 13, color: "var(--espresso-2)", textDecoration: "line-through" }}>฿{money(originalTotal)}</span>
-                    <span style={{ fontSize: 17, fontWeight: 700, color: "var(--danger)" }}>฿{money(promoTotal)}</span>
-                  </div>
-                </>
+                  {savings > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: "#15803D", background: "#EAF7EE", borderRadius: 999, padding: "2px 8px" }}>Save ฿{money(savings)}</span>}
+                </div>
               );
             } else if (type === "qty") {
               const menu = menusById[promo.menuIds[0]];
               const setPrice = qtyPromoSetPrice(promo, menu);
+              const original = menu ? menu.priceStore * promo.minQty : 0;
+              const savings = Math.max(0, original - setPrice);
               priceNode = menu ? (
-                <div style={{ marginTop: 6, fontSize: 12.5 }}>
-                  <div style={{ color: "var(--espresso-3)" }}>{menu.name} · ฿{money(menu.priceStore)}/ชิ้น</div>
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 2 }}>
-                    <span style={{ color: "var(--espresso-2)" }}>ปกติ ฿{money(menu.priceStore * promo.minQty)}</span>
-                    <span style={{ fontSize: 17, fontWeight: 700, color: "var(--danger)" }}>ชุดละ ฿{money(setPrice)}</span>
+                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                    <span style={{ fontSize: 13, color: "#9C9690", textDecoration: "line-through" }}>฿{money(original)}</span>
+                    <span style={{ fontSize: 20, fontWeight: 700, color: POS.primary }}>฿{money(setPrice)}</span>
                   </div>
+                  {savings > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: "#15803D", background: "#EAF7EE", borderRadius: 999, padding: "2px 8px" }}>Save ฿{money(savings)}</span>}
                 </div>
               ) : null;
             } else if (type === "choice") {
-              const pool = promo.menuIds.map((id) => menusById[id]).filter(Boolean);
               priceNode = (
-                <div style={{ marginTop: 6, fontSize: 12.5 }}>
-                  <div style={{ color: "var(--espresso-3)" }}>{pool.map((m) => m.name).join(", ")}</div>
-                  <div style={{ fontSize: 17, fontWeight: 700, color: "var(--danger)", marginTop: 4 }}>
-                    {promo.discountType === "percent" ? `ลด ${promo.discountValue}% จากรายการที่เลือก` : `ราคาชุดละ ฿${money(promo.discountValue)}`}
-                  </div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: POS.primary }}>
+                  {promo.discountType === "percent" ? `ลด ${promo.discountValue}% จากรายการที่เลือก` : `ราคาชุดละ ฿${money(promo.discountValue)}`}
                 </div>
               );
             }
             return (
-              <div key={promo.id} style={glass({ borderRadius: 12, padding: 14, opacity: promo.active === false || promoWin === "expired" ? 0.55 : 1 })}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontFamily: "var(--f-display)", fontWeight: 600, fontSize: 15, color: "var(--espresso-5)" }}>
-                      {promo.name || (promo.menuIds.map((id) => menusById[id]?.name).filter(Boolean).join(" + ") || "โปรโมชั่น")}
-                    </div>
-                    <div style={{ fontSize: 11, color: "var(--espresso-2)", marginTop: 2 }}>
-                      {typeLabel} · {type === "qty" || type === "single" || type === "bundle" ? (promo.discountType === "percent" ? `ลด ${promo.discountValue}%` : `ราคาพิเศษ ฿${money(promo.discountValue)}`) : ""}
-                    </div>
-                    {(promo.startAt || promo.endAt) && (
-                      <div style={{ fontSize: 10.5, marginTop: 3, color: promoWin === "expired" ? "var(--danger)" : promoWin === "upcoming" ? "var(--gold-dark)" : "var(--sage-dark)" }}>
-                        <Icon name="clock" size={11} style={{ marginRight: 3 }} />
-                        {promoWin === "upcoming" ? "เริ่ม " : promoWin === "expired" ? "หมดเขต " : ""}
-                        {promo.startAt && promo.endAt ? `${formatPromoDateTime(promo.startAt)} - ${formatPromoDateTime(promo.endAt)}`
-                          : promo.startAt ? `เริ่ม ${formatPromoDateTime(promo.startAt)}`
-                          : `ถึง ${formatPromoDateTime(promo.endAt)}`}
-                        {promoWin === "live" && (promo.startAt || promo.endAt) ? " (กำลังใช้งาน)" : ""}
-                      </div>
-                    )}
-                  </div>
-                  <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                    <button className="cbtn" disabled={idx === 0} onClick={() => movePromo(promo.id, -1)} title="เลื่อนขึ้น" style={{ padding: "4px 6px", opacity: idx === 0 ? 0.35 : 1, cursor: idx === 0 ? "not-allowed" : "pointer" }}><Icon name="chevron-up" size={13} /></button>
-                    <button className="cbtn" disabled={idx === promotions.length - 1} onClick={() => movePromo(promo.id, 1)} title="เลื่อนลง" style={{ padding: "4px 6px", opacity: idx === promotions.length - 1 ? 0.35 : 1, cursor: idx === promotions.length - 1 ? "not-allowed" : "pointer" }}><Icon name="chevron-down" size={13} /></button>
-                    <button className="cbtn" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => toggleActive(promo)}>{promo.active === false ? "เปิดใช้งาน" : "ปิดใช้งาน"}</button>
-                    <button className="cbtn cbtn-edit" style={{ padding: "4px 8px" }} onClick={() => setEditing(promo)} title="แก้ไขโปรโมชั่น"><Icon name="edit" size={13} /></button>
-                    <button className="cbtn cbtn-danger" style={{ padding: "4px 8px" }} onClick={() => deletePromo(promo.id)} title="ลบโปรโมชั่น"><Icon name="trash" size={13} /></button>
-                  </div>
-                </div>
-                {priceNode}
-              </div>
+              <PromoCard
+                key={promo.id}
+                promo={promo}
+                menusById={menusById}
+                priceNode={priceNode}
+                status={status}
+                daysRemaining={daysRemaining}
+                moreItems={moreItemsFor(promo, idx)}
+                onEdit={() => setInspector({ mode: "edit", tab: "overview", promo })}
+              />
             );
           })}
         </div>
+      )}
+
+      {inspector && (
+        <PromoInspector
+          key={inspector.mode + (inspector.promo.id || "new")}
+          mode={inspector.mode}
+          initial={inspector.promo}
+          initialTab={inspector.tab}
+          menus={data.menus}
+          menusById={menusById}
+          onSave={savePromo}
+          onClose={() => setInspector(null)}
+          onDelete={() => setConfirmDelete(inspector.promo)}
+        />
+      )}
+
+      {confirmDelete && (
+        <InvConfirmDialog
+          title="ลบโปรโมชั่นนี้?"
+          message={`คุณกำลังจะลบโปรโมชั่น "${confirmDelete.name || "โปรโมชั่นนี้"}" ออกจากระบบถาวร ลูกค้าจะไม่เห็นดีลนี้อีก`}
+          confirmLabel="ลบโปรโมชั่น"
+          onConfirm={() => deletePromo(confirmDelete.id)}
+          onCancel={() => setConfirmDelete(null)}
+        />
       )}
     </div>
   );
 }
 
-const PROMO_TYPES = [
-  { id: "single", label: "ลดราคาเมนูเดียว" },
-  { id: "bundle", label: "จับคู่คอมโบ (ราคาคงที่)" },
-  { id: "qty", label: "ซื้อครบจำนวน ลดเพิ่ม" },
-  { id: "choice", label: "ให้ลูกค้าเลือกเอง" },
-];
-
-function dtLocalValue(ms) {
-  if (!ms) return "";
-  const d = new Date(ms);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function PromoEditor({ promo, menus, onSave, onCancel }) {
+function PromoInspector({ mode, initial, initialTab, menus, menusById, onSave, onClose, onDelete }) {
   const [form, setForm] = useState({
     type: "single", minQty: 2, chooseCount: 2, startAt: null, endAt: null,
-    ...promo, menuIds: promo.menuIds || [],
+    ...initial, menuIds: initial.menuIds || [],
   });
-  const menusById = useMemo(() => {
-    const m = {};
-    for (const x of menus) m[x.id] = x;
-    return m;
-  }, [menus]);
+  const [tab, setTab] = useState(initialTab || "overview");
+  useEscape(onClose);
 
   function toggleMenu(id) {
     setForm((f) => {
@@ -3112,149 +3397,237 @@ function PromoEditor({ promo, menus, onSave, onCancel }) {
       return { ...f, menuIds: has ? f.menuIds.filter((x) => x !== id) : [...f.menuIds, id] };
     });
   }
-
   function setType(type) {
     setForm((f) => ({ ...f, type, menuIds: type === "single" || type === "qty" ? f.menuIds.slice(0, 1) : f.menuIds }));
   }
 
-  const { items, originalTotal, promoTotal } = computePromoPricing(form, menusById);
+  const canSave = form.menuIds.length > 0;
+  const { originalTotal, promoTotal } = computePromoPricing(form, menusById);
   const qtyMenu = form.type === "qty" ? menusById[form.menuIds[0]] : null;
   const qtySetPrice = qtyMenu ? qtyPromoSetPrice(form, qtyMenu) : 0;
 
+  const TABS = [
+    ["overview", "Overview", "info-circle"],
+    ["menus", "Menus", "cup"],
+    ["pricing", "Pricing", "chart-line"],
+    ["schedule", "Schedule", "calendar-event"],
+    ["analytics", "Analytics", "chart-bar"],
+    ["settings", "Settings", "adjustments"],
+  ];
+
   return (
-    <div style={{ maxWidth: 480 }}>
-      <SectionTitle icon="discount" text={promo.id ? "แก้ไขโปรโมชั่น" : "โปรโมชั่นใหม่"} />
+    <div className="promo-inspector-overlay" onClick={onClose}>
+      <div className="promo-inspector" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={mode === "add" ? "เพิ่มโปรโมชั่นใหม่" : "แก้ไขโปรโมชั่น"}>
+        <div className="promo-insp-head">
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: POS.navy, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {form.name || (mode === "add" ? "โปรโมชั่นใหม่" : "แก้ไขโปรโมชั่น")}
+            </div>
+            <div style={{ fontSize: 11.5, color: "#9C9690", marginTop: 1 }}>{PROMO_TYPE_META[form.type || "single"].label}</div>
+          </div>
+          <button className="inv-icon-btn" onClick={onClose} aria-label="ปิด"><Icon name="x" size={18} /></button>
+        </div>
 
-      <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ประเภทโปรโมชั่น</label>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
-        {PROMO_TYPES.map((t) => (
-          <button
-            key={t.id}
-            className="cbtn"
-            style={{
-              fontSize: 12, padding: "7px 10px",
-              background: form.type === t.id ? "var(--sage-light)" : undefined,
-              borderColor: form.type === t.id ? "var(--sage)" : undefined,
-              color: form.type === t.id ? "var(--sage-dark)" : undefined,
-              fontWeight: form.type === t.id ? 600 : 500,
-            }}
-            onClick={() => setType(t.id)}
-          >
-            {t.label}
+        <div className="promo-insp-tabs">
+          {TABS.map(([id, label, icon]) => (
+            <button key={id} className={"promo-insp-tab" + (tab === id ? " active" : "")} onClick={() => setTab(id)}>
+              <Icon name={icon} size={14} /> {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="promo-insp-body">
+          {tab === "overview" && <PromoOverviewTab form={form} setForm={setForm} setType={setType} />}
+          {tab === "menus" && <PromoMenusTab form={form} menus={menus} toggleMenu={toggleMenu} />}
+          {tab === "pricing" && <PromoPricingTab form={form} setForm={setForm} menusById={menusById} originalTotal={originalTotal} promoTotal={promoTotal} qtyMenu={qtyMenu} qtySetPrice={qtySetPrice} />}
+          {tab === "schedule" && <PromoScheduleTab form={form} setForm={setForm} />}
+          {tab === "analytics" && <PromoAnalyticsTab />}
+          {tab === "settings" && <PromoSettingsTab form={form} setForm={setForm} />}
+        </div>
+
+        <div className="promo-insp-footer">
+          {mode === "edit" && <button className="promo-btn-danger-ghost" onClick={onDelete}><Icon name="trash" size={14} /> ลบโปรโมชั่น</button>}
+          <div style={{ flex: 1 }} />
+          <button className="inv-btn-ghost" onClick={onClose}>ยกเลิก</button>
+          <button className="promo-btn-primary" disabled={!canSave} style={{ opacity: canSave ? 1 : .55, cursor: canSave ? "pointer" : "not-allowed" }} onClick={() => onSave(form)}>
+            {mode === "add" ? "บันทึกโปรโมชั่น" : "บันทึกการแก้ไข"}
           </button>
-        ))}
-      </div>
-
-      <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ชื่อโปรโมชั่น (ถ้าเว้นว่างจะใช้ชื่อเมนูต่อกัน)</label>
-      <TextField className="cfield" value={form.name} onChange={(v) => setForm({ ...form, name: v })} placeholder="เช่น คู่หูสุดคุ้ม" style={{ marginBottom: 12 }} />
-
-      <p style={{ fontSize: 12, color: "var(--espresso-2)", margin: "0 0 6px" }}>
-        {form.type === "single" && "เลือกเมนูที่ต้องการลดราคา"}
-        {form.type === "bundle" && "เลือกเมนูทั้งหมดที่จะรวมเป็นเซ็ตคอมโบ (อย่างน้อย 2 รายการ)"}
-        {form.type === "qty" && "เลือกเมนูที่จะให้ซื้อครบจำนวนแล้วลดราคา"}
-        {form.type === "choice" && "เลือกกลุ่มเมนูที่ให้ลูกค้าเลือกเอง (ต้องมีมากกว่าหรือเท่ากับจำนวนที่ให้เลือก)"}
-      </p>
-      <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 10, padding: 8, marginBottom: 14 }}>
-        {menus.map((m) => (
-          <label key={m.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, padding: "5px 4px" }}>
-            <input
-              type={form.type === "single" || form.type === "qty" ? "radio" : "checkbox"}
-              name="promo-menu"
-              checked={form.menuIds.includes(m.id)}
-              onChange={() => toggleMenu(m.id)}
-            />
-            {m.name} <span style={{ color: "var(--espresso-2)", fontSize: 11.5 }}>฿{money(m.priceStore)}</span>
-          </label>
-        ))}
-      </div>
-
-      {form.type === "qty" && (
-        <div style={{ marginBottom: 14 }}>
-          <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ซื้อครบกี่ชิ้นต่อเซ็ต</label>
-          <input className="cfield" type="number" min={2} value={form.minQty} onChange={(e) => setForm({ ...form, minQty: Math.max(2, Number(e.target.value)) })} style={{ maxWidth: 120 }} />
         </div>
-      )}
-
-      {form.type === "choice" && (
-        <div style={{ marginBottom: 14 }}>
-          <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>ให้ลูกค้าเลือกกี่รายการจากกลุ่มนี้</label>
-          <input className="cfield" type="number" min={1} value={form.chooseCount} onChange={(e) => setForm({ ...form, chooseCount: Math.max(1, Number(e.target.value)) })} style={{ maxWidth: 120 }} />
-        </div>
-      )}
-
-      <div style={{ display: "flex", gap: 10, marginBottom: 6 }}>
-        <div style={{ flex: 1 }}>
-          <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>รูปแบบส่วนลด</label>
-          <select className="cfield" value={form.discountType} onChange={(e) => setForm({ ...form, discountType: e.target.value })}>
-            <option value="percent">ลดเป็น % จากราคารวม</option>
-            <option value="fixed">กำหนดราคาขายตายตัว</option>
-          </select>
-        </div>
-        <div style={{ flex: 1 }}>
-          <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>{form.discountType === "percent" ? "เปอร์เซ็นต์ส่วนลด (%)" : form.type === "qty" ? "ราคาต่อเซ็ต (บาท)" : "ราคาขาย (บาท)"}</label>
-          <input className="cfield" type="number" value={form.discountValue} onChange={(e) => setForm({ ...form, discountValue: Number(e.target.value) })} />
-        </div>
-      </div>
-
-      <p style={{ fontSize: 12, color: "var(--espresso-2)", margin: "14px 0 6px" }}>กำหนดช่วงเวลาโปรโมชั่น (ไม่บังคับ — เว้นว่างไว้ถ้าไม่ต้องการจำกัดเวลา)</p>
-      <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
-        <div style={{ flex: 1 }}>
-          <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>เริ่ม</label>
-          <input
-            className="cfield" type="datetime-local"
-            value={dtLocalValue(form.startAt)}
-            onChange={(e) => setForm({ ...form, startAt: e.target.value ? new Date(e.target.value).getTime() : null })}
-          />
-        </div>
-        <div style={{ flex: 1 }}>
-          <label style={{ fontSize: 12, color: "var(--espresso-2)" }}>สิ้นสุด</label>
-          <input
-            className="cfield" type="datetime-local"
-            value={dtLocalValue(form.endAt)}
-            onChange={(e) => setForm({ ...form, endAt: e.target.value ? new Date(e.target.value).getTime() : null })}
-          />
-        </div>
-      </div>
-
-      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "10px 0 14px" }}>
-        <input type="checkbox" checked={form.active !== false} onChange={(e) => setForm({ ...form, active: e.target.checked })} />
-        เปิดใช้งานโปรโมชั่นนี้
-      </label>
-
-      {(form.type === "single" || form.type === "bundle") && form.menuIds.length > 0 && (
-        <div style={{ background: "var(--sage-light)", borderRadius: 10, padding: "10px 12px", marginBottom: 16 }}>
-          <div style={{ fontSize: 11.5, color: "var(--espresso-3)", marginBottom: 4 }}>ตัวอย่างราคาที่ลูกค้าจะเห็น</div>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <span style={{ fontSize: 13, color: "var(--espresso-2)", textDecoration: "line-through" }}>฿{money(originalTotal)}</span>
-            <span style={{ fontSize: 18, fontWeight: 700, color: "var(--danger)" }}>฿{money(promoTotal)}</span>
-          </div>
-        </div>
-      )}
-
-      {form.type === "qty" && qtyMenu && (
-        <div style={{ background: "var(--sage-light)", borderRadius: 10, padding: "10px 12px", marginBottom: 16 }}>
-          <div style={{ fontSize: 11.5, color: "var(--espresso-3)", marginBottom: 4 }}>ตัวอย่างราคาที่ลูกค้าจะเห็น (ซื้อครบ {form.minQty} ชิ้น)</div>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <span style={{ fontSize: 13, color: "var(--espresso-2)", textDecoration: "line-through" }}>฿{money(qtyMenu.priceStore * form.minQty)}</span>
-            <span style={{ fontSize: 18, fontWeight: 700, color: "var(--danger)" }}>฿{money(qtySetPrice)}</span>
-          </div>
-        </div>
-      )}
-
-      {form.type === "choice" && (
-        <p style={{ fontSize: 11.5, color: "var(--espresso-2)", margin: "0 0 16px" }}>
-          ลูกค้าจะเลือกเอง {form.chooseCount} รายการจากกลุ่มนี้ตอนสั่งซื้อ ราคาจะคำนวณจาก{form.discountType === "percent" ? `ส่วนลด ${form.discountValue}% ของราคารวมที่เลือก` : `ราคาชุดคงที่ ฿${money(form.discountValue)}`}
-        </p>
-      )}
-
-      <div style={{ display: "flex", gap: 8 }}>
-        <button className="cbtn cbtn-accent" onClick={() => onSave(form)}>บันทึกโปรโมชั่น</button>
-        <button className="cbtn" onClick={onCancel}>ยกเลิก</button>
       </div>
     </div>
   );
 }
 
+function PromoOverviewTab({ form, setForm, setType }) {
+  const lbl = { display: "block", fontSize: 12, fontWeight: 600, color: "#9C9690", marginBottom: 6 };
+  const field = { width: "100%", height: 44, border: `1px solid ${POS.border}`, borderRadius: 10, background: "#fff", padding: "0 12px", fontSize: 14, color: "#1F2937", boxSizing: "border-box", outline: "none" };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div>
+        <label style={lbl}>ประเภทโปรโมชั่น</label>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          {PROMO_TYPES.map((t) => (
+            <button key={t.id} type="button" className={"promo-type-pill" + (form.type === t.id ? " active" : "")} onClick={() => setType(t.id)}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <label style={lbl}>ชื่อโปรโมชั่น (ถ้าเว้นว่างจะใช้ชื่อเมนูต่อกัน)</label>
+        <TextField className="promo-field" style={field} value={form.name || ""} onChange={(v) => setForm({ ...form, name: v })} placeholder="เช่น คู่หูสุดคุ้ม" />
+      </div>
+      <p style={{ fontSize: 12, color: "#9C9690", margin: 0, lineHeight: 1.5 }}>
+        {form.type === "single" && "เลือกเมนูที่ต้องการลดราคาในแท็บ \"Menus\""}
+        {form.type === "bundle" && "เลือกเมนูทั้งหมดที่จะรวมเป็นเซ็ตคอมโบในแท็บ \"Menus\" (อย่างน้อย 2 รายการ)"}
+        {form.type === "qty" && "เลือกเมนูที่จะให้ซื้อครบจำนวนแล้วลดราคาในแท็บ \"Menus\""}
+        {form.type === "choice" && "เลือกกลุ่มเมนูที่ให้ลูกค้าเลือกเองในแท็บ \"Menus\""}
+      </p>
+    </div>
+  );
+}
+
+function PromoMenusTab({ form, menus, toggleMenu }) {
+  return (
+    <div>
+      <p style={{ fontSize: 12, color: "#9C9690", margin: "0 0 10px", lineHeight: 1.5 }}>
+        {form.type === "single" && "เลือกเมนูที่ต้องการลดราคา"}
+        {form.type === "bundle" && "เลือกเมนูทั้งหมดที่จะรวมเป็นเซ็ตคอมโบ (อย่างน้อย 2 รายการ)"}
+        {form.type === "qty" && "เลือกเมนูที่จะให้ซื้อครบจำนวนแล้วลดราคา"}
+        {form.type === "choice" && "เลือกกลุ่มเมนูที่ให้ลูกค้าเลือกเอง (ต้องมีมากกว่าหรือเท่ากับจำนวนที่ให้เลือก)"}
+      </p>
+      <div className="promo-menu-list">
+        {menus.length === 0 ? <EmptyNote text="ยังไม่มีเมนูในระบบ" /> : menus.map((m) => (
+          <label key={m.id} className="promo-menu-row">
+            <input
+              type={form.type === "single" || form.type === "qty" ? "radio" : "checkbox"}
+              name="promo-menu"
+              checked={form.menuIds.includes(m.id)}
+              onChange={() => toggleMenu(m.id)}
+              style={{ width: 16, height: 16, flexShrink: 0 }}
+            />
+            <span style={{ flex: 1 }}>{m.name}</span>
+            <span style={{ color: "#9C9690", fontSize: 11.5, flexShrink: 0 }}>฿{money(m.priceStore)}</span>
+          </label>
+        ))}
+      </div>
+      {form.type === "qty" && (
+        <div style={{ marginTop: 16 }}>
+          <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#9C9690", marginBottom: 6 }}>ซื้อครบกี่ชิ้นต่อเซ็ต</label>
+          <input className="promo-field" type="number" min={2} value={form.minQty} style={{ width: 120, height: 40, border: `1px solid ${POS.border}`, borderRadius: 10, padding: "0 10px" }} disabled />
+        </div>
+      )}
+      {form.type === "choice" && (
+        <div style={{ marginTop: 16 }}>
+          <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#9C9690", marginBottom: 6 }}>ให้ลูกค้าเลือกกี่รายการจากกลุ่มนี้</label>
+          <p style={{ fontSize: 11.5, color: "#9C9690", margin: 0 }}>ตั้งค่าจำนวนได้ในแท็บ "Pricing"</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PromoPricingTab({ form, setForm, originalTotal, promoTotal, qtyMenu, qtySetPrice }) {
+  const lbl = { display: "block", fontSize: 12, fontWeight: 600, color: "#9C9690", marginBottom: 6 };
+  const field = { width: "100%", height: 44, border: `1px solid ${POS.border}`, borderRadius: 10, background: "#fff", padding: "0 12px", fontSize: 14, color: "#1F2937", boxSizing: "border-box", outline: "none" };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      {form.type === "qty" && (
+        <div>
+          <label style={lbl}>ซื้อครบกี่ชิ้นต่อเซ็ต</label>
+          <input className="promo-field" style={{ ...field, width: 140 }} type="number" min={2} value={form.minQty} onChange={(e) => setForm({ ...form, minQty: Math.max(2, Number(e.target.value)) })} />
+        </div>
+      )}
+      {form.type === "choice" && (
+        <div>
+          <label style={lbl}>ให้ลูกค้าเลือกกี่รายการจากกลุ่มนี้</label>
+          <input className="promo-field" style={{ ...field, width: 140 }} type="number" min={1} value={form.chooseCount} onChange={(e) => setForm({ ...form, chooseCount: Math.max(1, Number(e.target.value)) })} />
+        </div>
+      )}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <div>
+          <label style={lbl}>รูปแบบส่วนลด</label>
+          <select className="promo-field" style={field} value={form.discountType} onChange={(e) => setForm({ ...form, discountType: e.target.value })}>
+            <option value="percent">ลดเป็น % จากราคารวม</option>
+            <option value="fixed">กำหนดราคาขายตายตัว</option>
+          </select>
+        </div>
+        <div>
+          <label style={lbl}>{form.discountType === "percent" ? "เปอร์เซ็นต์ส่วนลด (%)" : form.type === "qty" ? "ราคาต่อเซ็ต (บาท)" : "ราคาขาย (บาท)"}</label>
+          <input className="promo-field" style={field} type="number" value={form.discountValue} onChange={(e) => setForm({ ...form, discountValue: Number(e.target.value) })} />
+        </div>
+      </div>
+
+      {(form.type === "single" || form.type === "bundle") && form.menuIds.length > 0 && (
+        <div style={{ background: POS.primarySoft, borderRadius: 14, padding: 16 }}>
+          <div style={{ fontSize: 11.5, color: POS.primaryDark, marginBottom: 6, fontWeight: 600 }}>ตัวอย่างราคาที่ลูกค้าจะเห็น</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+            <span style={{ fontSize: 14, color: "#9C9690", textDecoration: "line-through" }}>฿{money(originalTotal)}</span>
+            <span style={{ fontSize: 22, fontWeight: 700, color: POS.primary }}>฿{money(promoTotal)}</span>
+          </div>
+        </div>
+      )}
+      {form.type === "qty" && qtyMenu && (
+        <div style={{ background: POS.primarySoft, borderRadius: 14, padding: 16 }}>
+          <div style={{ fontSize: 11.5, color: POS.primaryDark, marginBottom: 6, fontWeight: 600 }}>ตัวอย่างราคาที่ลูกค้าจะเห็น (ซื้อครบ {form.minQty} ชิ้น)</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+            <span style={{ fontSize: 14, color: "#9C9690", textDecoration: "line-through" }}>฿{money(qtyMenu.priceStore * form.minQty)}</span>
+            <span style={{ fontSize: 22, fontWeight: 700, color: POS.primary }}>฿{money(qtySetPrice)}</span>
+          </div>
+        </div>
+      )}
+      {form.type === "choice" && (
+        <p style={{ fontSize: 12, color: "#9C9690", margin: 0, lineHeight: 1.6 }}>
+          ลูกค้าจะเลือกเอง {form.chooseCount} รายการจากกลุ่มนี้ตอนสั่งซื้อ ราคาจะคำนวณจาก{form.discountType === "percent" ? `ส่วนลด ${form.discountValue}% ของราคารวมที่เลือก` : `ราคาชุดคงที่ ฿${money(form.discountValue)}`}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function PromoScheduleTab({ form, setForm }) {
+  const lbl = { display: "block", fontSize: 12, fontWeight: 600, color: "#9C9690", marginBottom: 6 };
+  const field = { width: "100%", height: 44, border: `1px solid ${POS.border}`, borderRadius: 10, background: "#fff", padding: "0 12px", fontSize: 14, color: "#1F2937", boxSizing: "border-box", outline: "none" };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <p style={{ fontSize: 12, color: "#9C9690", margin: 0, lineHeight: 1.5 }}>กำหนดช่วงเวลาโปรโมชั่น (ไม่บังคับ — เว้นว่างไว้ถ้าไม่ต้องการจำกัดเวลา)</p>
+      <div>
+        <label style={lbl}>เริ่ม</label>
+        <input className="promo-field" style={field} type="datetime-local" value={dtLocalValue(form.startAt)} onChange={(e) => setForm({ ...form, startAt: e.target.value ? new Date(e.target.value).getTime() : null })} />
+      </div>
+      <div>
+        <label style={lbl}>สิ้นสุด</label>
+        <input className="promo-field" style={field} type="datetime-local" value={dtLocalValue(form.endAt)} onChange={(e) => setForm({ ...form, endAt: e.target.value ? new Date(e.target.value).getTime() : null })} />
+      </div>
+    </div>
+  );
+}
+
+function PromoAnalyticsTab() {
+  return (
+    <div style={{ textAlign: "center", padding: "32px 8px" }}>
+      <Icon name="chart-bar" size={26} style={{ color: "#9C9690" }} />
+      <p style={{ fontSize: 13.5, fontWeight: 600, color: "#1F2937", margin: "12px 0 4px" }}>ยังไม่มีข้อมูลสถิติ</p>
+      <p style={{ fontSize: 12, color: "#9C9690", margin: 0, lineHeight: 1.6, maxWidth: 320, marginLeft: "auto", marginRight: "auto" }}>
+        ระบบยังไม่ได้เก็บข้อมูลจำนวนครั้งที่ใช้/ยอดขายแยกรายโปรโมชั่น (ยอดขายที่ผ่านโปรฯ ในปัจจุบันจะรวมอยู่ในยอดขายปกติ)
+      </p>
+    </div>
+  );
+}
+
+function PromoSettingsTab({ form, setForm }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 4px" }}>
+        <OptgToggle checked={form.active !== false} onChange={(v) => setForm({ ...form, active: v })} color={POS.primary} />
+        <span style={{ fontSize: 13.5, fontWeight: 600, color: "#1F2937" }}>เปิดใช้งานโปรโมชั่นนี้</span>
+      </label>
+      <p style={{ fontSize: 12, color: "#9C9690", margin: "8px 0 0", lineHeight: 1.5 }}>
+        โปรโมชั่นที่เปิดใช้งานจะแสดงในหมวด "ดีลพิเศษ" อันดับแรกสุดของหน้าลูกค้า พร้อมราคาปกติขีดฆ่าและราคาโปรสีแดง ปิดใช้งานเพื่อซ่อนชั่วคราวโดยไม่ต้องลบ
+      </p>
+    </div>
+  );
+}
 // ต้นทุน/หน่วยของวัตถุดิบผสม = ค่าเฉลี่ยถ่วงน้ำหนักจากสัดส่วนวัตถุดิบจริงที่ประกอบขึ้น ไว้แสดงผลเฉยๆ ไม่ได้เก็บ/ตัดสต็อกจากค่านี้ตรงๆ
 function compositeCostPerUnit(ing, ingredientsById) {
   const totalRatio = ing.components.reduce((s, c) => s + (Number(c.ratio) || 0), 0) || 1;
