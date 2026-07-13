@@ -2351,7 +2351,7 @@ function openOrderStickerPrint(orderOrOrders, shopName) {
             align-content: start;
             width: 168mm;
             height: 219.8mm;
-            padding: 2mm 0 0 6mm;
+            padding: 0 0 0 1mm;
             overflow: hidden;
             break-after: page;
             page-break-after: always;
@@ -2364,16 +2364,16 @@ function openOrderStickerPrint(orderOrOrders, shopName) {
             width: 50mm;
             height: 19mm;
             overflow: hidden;
-            padding: 1.1mm 1.25mm .8mm;
+            padding: .4mm 1.25mm;
             font-size: 6.4pt;
             line-height: 1.08;
           }
           .label__top { display: flex; align-items: baseline; justify-content: space-between; gap: 1mm; }
           .label__top strong { min-width: 0; overflow: hidden; font-size: 8.2pt; line-height: 1.05; text-overflow: ellipsis; white-space: nowrap; }
           .label__top span { flex-shrink: 0; font-weight: 700; }
-          .label__details, .label__note { margin-top: .65mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .label__details, .label__note { margin-top: .35mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
           .label__note { font-weight: 700; }
-          .label__bottom { display: flex; justify-content: space-between; gap: 1mm; margin-top: .65mm; border-top: .2mm solid #000; padding-top: .55mm; font-size: 5.7pt; }
+          .label__bottom { display: flex; justify-content: space-between; gap: 1mm; margin-top: .35mm; border-top: .2mm solid #000; padding-top: .35mm; font-size: 5.7pt; }
           .label__bottom span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
           .label__bottom b { flex-shrink: 0; }
           @media screen {
