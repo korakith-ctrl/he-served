@@ -1901,6 +1901,68 @@ function IconMoreActions(props) {
 
 const ROAST_ICONS = { light: IconRoastLight, medium: IconRoastMedium, dark: IconRoastDark, reserve: IconReserve };
 
+const CUSTOMER_AVATAR_PALETTE = [
+  { background: "#DBEAFE", color: "#1E3A8A" }, // Blue
+  { background: "#DCFCE7", color: "#14532D" }, // Green
+  { background: "#EDE9FE", color: "#4C1D95" }, // Purple
+  { background: "#FCE7F3", color: "#831843" }, // Pink
+  { background: "#FFEDD5", color: "#7C2D12" }, // Orange
+  { background: "#CCFBF1", color: "#134E4A" }, // Teal
+];
+
+function customerAvatarInitial(name, phone) {
+  const firstLetter = Array.from(String(name || "").normalize("NFC")).find((char) => /\p{L}/u.test(char));
+  if (firstLetter) return firstLetter.toLocaleUpperCase("en-US");
+  const digits = String(phone || "").replace(/\D/g, "");
+  return digits.length > 0 ? digits.slice(-2) : "?";
+}
+
+function customerAvatarColors(customer) {
+  const seed = String(customer.id || customer.customerId || customer.phone || customer.name || "?");
+  let hash = 2166136261;
+  for (const char of seed) {
+    hash ^= char.codePointAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return CUSTOMER_AVATAR_PALETTE[(hash >>> 0) % CUSTOMER_AVATAR_PALETTE.length];
+}
+
+function CustomerAvatar({ customer }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const displayName = String(customer.name || "").trim() || customer.phone || "ไม่ทราบชื่อ";
+  const imageUrl = customer.profileImageUrl || customer.photoURL || customer.avatarUrl || "";
+  const initial = customerAvatarInitial(customer.name, customer.phone);
+  const colors = customerAvatarColors(customer);
+  const label = `รูปแทนลูกค้า ${displayName}`;
+  const baseStyle = {
+    width: 40, height: 40, borderRadius: "50%", flexShrink: 0,
+    display: "flex", alignItems: "center", justifyContent: "center",
+  };
+
+  if (imageUrl && !imageFailed) {
+    return (
+      <img
+        src={imageUrl}
+        alt={label}
+        title={label}
+        onError={() => setImageFailed(true)}
+        style={{ ...baseStyle, objectFit: "cover" }}
+      />
+    );
+  }
+
+  return (
+    <div
+      role="img"
+      aria-label={label}
+      title={label}
+      style={{ ...baseStyle, background: colors.background, color: colors.color, fontSize: 15, fontWeight: 700, lineHeight: 1 }}
+    >
+      {initial}
+    </div>
+  );
+}
+
 // รายชื่อลูกค้า/เมล็ดสะสม — อ่านจาก customers/{uid} (คนละโหนดจาก data ก้อนใหญ่ ดู awardLoyaltyBeans ว่าทำไม)
 // เรียงคนสะสมเยอะสุดขึ้นก่อน ค้นหาด้วยเบอร์/ชื่อได้ ปรับเมล็ดมือได้เผื่อกรณีพิเศษ
 function TierBadge({ lifetimeBeans, size }) {
@@ -2047,9 +2109,7 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans,
         <div>
           {filtered.map((c) => (
             <div key={c.phone} className="loy-row">
-              <div style={{ width: 40, height: 40, borderRadius: "50%", background: "#F7E9DD", color: "#9A4D16", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                <IconLoyaltyBeans size={20} aria-label="เมล็ดสะสม" />
-              </div>
+              <CustomerAvatar customer={c} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <span style={{ fontWeight: 700, fontSize: 14, color: POS.navy }}>{c.name || "(ไม่ทราบชื่อ)"} · {c.phone}</span>
