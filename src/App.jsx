@@ -78,6 +78,24 @@ function accountingTransactionFromSale(sale, paymentMethod) {
   };
 }
 
+function accountingTransactionFromPurchase(purchase, ingredient) {
+  const timestamp = purchase.timestamp || new Date().toISOString();
+  return {
+    type: "expense",
+    category: ingredient?.category === "packaging" ? "packaging" : "inventory_purchase",
+    description: `ซื้อ ${ingredient?.name || "วัตถุดิบ"} ${fmtQty(purchase.qtyAdded)} ${ingredient ? UNITS[ingredient.unit] : ""}`.trim(),
+    amount: Math.round((Number(purchase.totalCost) || 0) * 100) / 100,
+    transactionDate: timestamp.slice(0, 10),
+    paymentAccount: purchase.paymentAccount || "unassigned",
+    vendorName: purchase.supplierName || "",
+    note: purchase.note || "",
+    sourceType: "purchase",
+    sourceId: purchase.id,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
 const GLASS = {
   background: "rgba(255,255,255,0.6)",
   backdropFilter: "blur(20px) saturate(160%)",
@@ -753,6 +771,19 @@ function ShopApp({ uid, user }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [salesRecords, accountingTransactions, orders, cancelledOrderIds, uid]);
 
+  // เติมรายการซื้อสต็อกเก่าที่มีราคาเข้าบัญชี และรองรับการรับสต็อกจากอีกแท็บด้วย purchase id เดิม
+  useEffect(() => {
+    if (!data || data.purchases.length === 0) return;
+    const linkedPurchaseIds = new Set(accountingTransactions.filter((transaction) => transaction.sourceType === "purchase").map((transaction) => transaction.sourceId));
+    const ingredients = Object.fromEntries(data.ingredients.map((ingredient) => [ingredient.id, ingredient]));
+    const missing = data.purchases.filter((purchase) => Number(purchase.totalCost) > 0 && !linkedPurchaseIds.has(purchase.id));
+    if (missing.length === 0) return;
+    const patch = {};
+    for (const purchase of missing) patch[`accounting/${uid}/transactions/purchase_${purchase.id}`] = accountingTransactionFromPurchase(purchase, ingredients[purchase.ingredientId]);
+    update(ref(db), patch).catch((error) => showToast("เชื่อมรายการซื้อเข้าบัญชีไม่สำเร็จ: " + error.message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, accountingTransactions, uid]);
+
   // รุ่นที่เริ่มบันทึก completedAt เคยตั้ง beansAwarded ก่อนเรียกฟังก์ชันเพิ่มเมล็ด และฟังก์ชันไม่ได้ถูกส่งเข้า OrdersPanel
   // ทำให้ order ดูเหมือนนับแล้วทั้งที่ transaction ลูกค้าไม่เคยเกิดขึ้น กู้เฉพาะออเดอร์ช่วงนั้นอัตโนมัติจาก marker ราย order
   useEffect(() => {
@@ -1170,7 +1201,7 @@ function ShopApp({ uid, user }) {
           {tab === "orders" && <OrdersPanel uid={uid} orders={orders} recordSale={recordSale} cancelOrder={cancelOrder} awardLoyaltyBeans={awardLoyaltyBeans} showToast={showToast} data={data} ingredientsById={ingredientsById} />}
           {tab === "menus" && <MenusPanel data={dataForDisplay} ingredientsById={ingredientsById} updateData={updateData} showToast={showToast} />}
           {tab === "promotions" && <PromotionsPanel data={data} updateData={updateData} showToast={showToast} />}
-          {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} />}
+          {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} onSaveAccounting={saveAccountingTransaction} />}
           {tab === "reports" && <ReportsPanel data={dataForDisplay} orders={orders} shopName={data.settings.shopName} showToast={showToast} />}
           {tab === "accounting" && <AccountingPanel transactions={accountingTransactions} onSave={saveAccountingTransaction} onDelete={deleteAccountingTransaction} showToast={showToast} />}
           {tab === "loyalty" && <LoyaltyPanel customers={customers} orders={orders} loyaltyBeanGoal={data.settings.loyaltyBeanGoal} adjustCustomerBeans={adjustCustomerBeans} createLoyaltyCustomer={createLoyaltyCustomer} updateLoyaltyGoal={updateLoyaltyGoal} showToast={showToast} backfillEligibleCount={backfillEligibleOrders.length} backfillLoyaltyBeans={backfillLoyaltyBeans} />}
@@ -5094,7 +5125,7 @@ function InvConfirmDialog({ title, message, confirmLabel, onConfirm, onCancel })
   );
 }
 
-function IngredientsPanel({ data, updateData, showToast }) {
+function IngredientsPanel({ data, updateData, showToast, onSaveAccounting }) {
   const [restocking, setRestocking] = useState(null);
   const [adjusting, setAdjusting] = useState(null);
   const [drawer, setDrawer] = useState(null); // null | { mode: "add" | "edit", initial }
@@ -5121,16 +5152,34 @@ function IngredientsPanel({ data, updateData, showToast }) {
     });
   }
 
-  function doRestock(id, addQty, totalPaid) {
+  async function doRestock(id, purchaseForm) {
+    const addQty = Number(purchaseForm.qty) || 0;
+    const totalPaid = Number(purchaseForm.total) || 0;
+    const purchaseId = genId("purchase");
+    const purchasedAt = new Date(`${purchaseForm.purchaseDate}T12:00:00`).toISOString();
+    const ingredient = data.ingredients.find((item) => item.id === id);
+    const purchaseRecord = {
+      id: purchaseId, timestamp: purchasedAt, ingredientId: id, qtyAdded: addQty, totalCost: totalPaid,
+      supplierName: purchaseForm.supplierName || "", paymentAccount: purchaseForm.paymentAccount || "bank", note: purchaseForm.note || "",
+    };
     updateData((next) => {
       const ing = next.ingredients.find((i) => i.id === id);
       if (!ing) return;
       ing.stockQty = round4(ing.stockQty + addQty);
       if (addQty > 0 && totalPaid > 0) ing.costPerUnit = round4(totalPaid / addQty);
-      next.purchases.push({ id: genId("purchase"), timestamp: new Date().toISOString(), ingredientId: id, qtyAdded: addQty, totalCost: totalPaid });
+      next.purchases.push(purchaseRecord);
     });
     setRestocking(null);
-    showToast("เติมสต็อกแล้ว");
+    if (totalPaid > 0) {
+      try {
+        await onSaveAccounting({ id: `purchase_${purchaseId}`, ...accountingTransactionFromPurchase(purchaseRecord, ingredient) });
+        showToast("เติมสต็อกและบันทึกรายจ่ายแล้ว");
+      } catch (error) {
+        showToast("เติมสต็อกแล้ว แต่บันทึกรายจ่ายไม่สำเร็จ: " + error.message);
+      }
+    } else {
+      showToast("เติมสต็อกแล้ว (ไม่ได้ลงรายจ่ายเพราะไม่ระบุราคา)");
+    }
   }
 
   function doAdjustStock(id, countedQty) {
@@ -5598,7 +5647,7 @@ function InvModalShell({ icon, iconTone, title, subtitle, onClose, children }) {
   const t = tones[iconTone] || tones.primary;
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(17,24,39,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 16 }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title} style={{ background: "#fff", borderRadius: 18, padding: 24, width: 380, maxWidth: "100%", boxShadow: "0 24px 64px rgba(0,0,0,.28)" }}>
+      <div onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title} style={{ background: "#fff", borderRadius: 18, padding: 24, width: 380, maxWidth: "100%", maxHeight: "calc(100vh - 32px)", overflowY: "auto", boxSizing: "border-box", boxShadow: "0 24px 64px rgba(0,0,0,.28)" }}>
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 18 }}>
           <div style={{ width: 40, height: 40, borderRadius: 11, background: t.bg, color: t.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon name={icon} size={20} /></div>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -5616,6 +5665,10 @@ function InvModalShell({ icon, iconTone, title, subtitle, onClose, children }) {
 function RestockModal({ ingredient, onClose, onConfirm }) {
   const [qty, setQty] = useState("");
   const [total, setTotal] = useState("");
+  const [purchaseDate, setPurchaseDate] = useState(todayStr());
+  const [supplierName, setSupplierName] = useState("");
+  const [paymentAccount, setPaymentAccount] = useState("bank");
+  const [note, setNote] = useState("");
   const qtyRef = useRef(null);
   useEscape(onClose);
   useEffect(() => { qtyRef.current?.focus(); }, []);
@@ -5624,7 +5677,10 @@ function RestockModal({ ingredient, onClose, onConfirm }) {
   const totalNum = Number(total) || 0;
   const valid = qtyNum > 0;
   const newCost = valid && totalNum > 0 ? totalNum / qtyNum : null;
-  function submit(e) { e.preventDefault(); if (valid) onConfirm(ingredient.id, qtyNum, totalNum); }
+  function submit(e) {
+    e.preventDefault();
+    if (valid) onConfirm(ingredient.id, { qty: qtyNum, total: totalNum, purchaseDate, supplierName: supplierName.trim(), paymentAccount, note: note.trim() });
+  }
   return (
     <InvModalShell icon="package-import" iconTone="primary" title="เติมสต็อก" subtitle={ingredient.name} onClose={onClose}>
       <form onSubmit={submit}>
@@ -5636,13 +5692,31 @@ function RestockModal({ ingredient, onClose, onConfirm }) {
           <label style={invLabelStyle} htmlFor="rs-total">ราคาที่จ่ายทั้งหมด (บาท)</label>
           <input id="rs-total" {...invFocusProps} style={invFieldStyle} type="number" min="0" value={total} placeholder="ไม่บังคับ" onChange={(e) => setTotal(e.target.value)} />
         </div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:14 }}>
+          <div>
+            <label style={invLabelStyle} htmlFor="rs-date">วันที่ซื้อ</label>
+            <input id="rs-date" {...invFocusProps} style={invFieldStyle} type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
+          </div>
+          <div>
+            <label style={invLabelStyle} htmlFor="rs-account">จ่ายผ่าน</label>
+            <select id="rs-account" {...invFocusProps} style={invFieldStyle} value={paymentAccount} onChange={(e) => setPaymentAccount(e.target.value)}>{ACCOUNTING_PAYMENT_ACCOUNTS.filter((account) => account.id !== "unassigned").map((account) => <option key={account.id} value={account.id}>{account.label}</option>)}</select>
+          </div>
+        </div>
+        <div style={{ marginBottom:14 }}>
+          <label style={invLabelStyle} htmlFor="rs-supplier">ผู้ขาย / ร้านค้า</label>
+          <TextField id="rs-supplier" {...invFocusProps} style={invFieldStyle} value={supplierName} onChange={setSupplierName} placeholder="ไม่บังคับ" />
+        </div>
+        <div style={{ marginBottom:14 }}>
+          <label style={invLabelStyle} htmlFor="rs-note">หมายเหตุ</label>
+          <TextField id="rs-note" {...invFocusProps} style={invFieldStyle} value={note} onChange={setNote} placeholder="เช่น เลขที่ใบเสร็จ" />
+        </div>
         <div style={{ background: newCost != null ? INV.primarySoft : "#F7F6F3", borderRadius: 10, padding: "10px 12px", marginBottom: 18, fontSize: 12.5, lineHeight: 1.5, color: newCost != null ? INV.primaryDark : INV.gray }}>
           {valid ? (
             <>
               <div>สต็อกใหม่: <b>{fmtQty(ingredient.stockQty)} → {fmtQty(round4(ingredient.stockQty + qtyNum))} {UNITS[ingredient.unit]}</b></div>
               {newCost != null
                 ? <div style={{ marginTop: 2 }}>ต้นทุน/หน่วยใหม่: <b>฿{money(newCost)}/{UNITS[ingredient.unit]}</b> (เดิม ฿{money(ingredient.costPerUnit)})</div>
-                : <div style={{ marginTop: 2 }}>ใส่ราคารวมเพื่ออัปเดตต้นทุน/หน่วย (เว้นว่างได้ ต้นทุนเดิมคงไว้)</div>}
+                : <div style={{ marginTop: 2 }}>ไม่ระบุราคา: ระบบจะเพิ่มเฉพาะสต็อกและไม่สร้างรายจ่าย</div>}
             </>
           ) : "กรอกปริมาณที่ซื้อเพื่อดูผลลัพธ์"}
         </div>
