@@ -3238,9 +3238,12 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, 
   function onCardPointerDown(e, order) {
     if (e.button !== undefined && e.button !== 0) return;
     if (e.target.closest("button")) return; // let taps on the card's own buttons work normally, not start a drag
+    // บนจอสัมผัส พื้นที่การ์ดทั้งหมดต้องเลื่อนหน้าได้ตามธรรมชาติ การย้ายสถานะจึงเริ่มได้จาก handle เท่านั้น
+    // ส่วน mouse/trackpad ยังคงลากจากพื้นที่ว่างบนการ์ดได้เหมือนเดิม
+    if (e.pointerType === "touch" && !e.target.closest("[data-kanban-drag-handle]")) return;
     const card = e.currentTarget;
     card.setPointerCapture(e.pointerId);
-    dragInfoRef.current = { id: order.id, pointerId: e.pointerId, moved: false, startX: e.clientX, startY: e.clientY };
+    dragInfoRef.current = { id: order.id, pointerId: e.pointerId, pointerType:e.pointerType, moved: false, startX: e.clientX, startY: e.clientY };
     setDragPos({ x: e.clientX, y: e.clientY });
   }
 
@@ -3253,6 +3256,7 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, 
       setDragId(info.id);
     }
     if (!info.moved) return;
+    if (info.pointerType === "touch") e.preventDefault();
     setDragPos({ x: e.clientX, y: e.clientY });
     const el = document.elementFromPoint(e.clientX, e.clientY);
     const colEl = el && el.closest("[data-kanban-col]");
@@ -3272,13 +3276,20 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, 
     setOverCol(null);
   }
 
+  function onCardPointerCancel() {
+    dragInfoRef.current = null;
+    setDragId(null);
+    setDragPos(null);
+    setOverCol(null);
+  }
+
   const draggedOrder = dragId ? orders.find((o) => o.id === dragId) : null;
   const printableOrders = orders.filter((order) => ["pending", "paid", "preparing", "ready", "done"].includes(order.status));
   const allPrintableSelected = printableOrders.length > 0 && printableOrders.every((order) => selectedOrderIds.has(order.id));
 
   return (
     <div>
-      <SectionTitle icon="layout-kanban" text="บอร์ดออเดอร์ — ลากการ์ดข้ามคอลัมน์เพื่ออัปเดตสถานะ" />
+      <SectionTitle icon="layout-kanban" text={compact ? "บอร์ดออเดอร์ — เลื่อนบนการ์ดได้ · ลากที่ปุ่มจับเพื่อย้ายสถานะ" : "บอร์ดออเดอร์ — ลากการ์ดข้ามคอลัมน์เพื่ออัปเดตสถานะ"} />
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap",
         margin: "0 0 12px", padding: "9px 12px", border: "1px solid var(--line)", borderRadius: 12, background: "rgba(255,255,255,.55)",
@@ -3359,11 +3370,11 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, 
                     onPointerDown={(e) => onCardPointerDown(e, o)}
                     onPointerMove={onCardPointerMove}
                     onPointerUp={onCardPointerUp}
-                    onPointerCancel={onCardPointerUp}
+                    onPointerCancel={onCardPointerCancel}
                     style={glass({
                       borderRadius: compact ? 10 : 14, padding: compact ? 7 : 12,
                       borderLeft: `${compact ? 3 : 5}px solid ${c.dot}`,
-                      cursor: "grab", touchAction: "none",
+                      cursor: "grab", touchAction: "auto",
                       opacity: dragId === o.id ? 0.35 : 1,
                       outline: selectedOrderIds.has(o.id) ? "2px solid var(--sage-dark)" : "none",
                       outlineOffset: selectedOrderIds.has(o.id) ? 1 : 0,
@@ -3387,7 +3398,15 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, 
                         >
                           <Icon name={selectedOrderIds.has(o.id) ? "check" : "plus"} size={12} />
                         </button>
-                        {!compact && <Icon name="grip-vertical" size={14} style={{ color: "var(--espresso-2)" }} />}
+                        <span
+                          data-kanban-drag-handle
+                          aria-hidden="true"
+                          title="ลากเพื่อย้ายสถานะ"
+                          style={{
+                            width: compact ? 25 : 28, height: compact ? 25 : 28, display:"grid", placeItems:"center",
+                            color:"var(--espresso-2)", borderRadius:7, cursor:"grab", touchAction:"none", userSelect:"none",
+                          }}
+                        ><Icon name="grip-vertical" size={compact ? 13 : 15} /></span>
                       </span>
                     </div>
                     {!compact && (
