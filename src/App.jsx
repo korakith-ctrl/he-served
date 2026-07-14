@@ -17,6 +17,37 @@ const CATEGORIES = [
 ];
 const CHANNELS = { store: "หน้าร้าน", delivery: "เดลิเวอรี่", online: "สั่งออนไลน์" };
 
+// หมวดบัญชีพื้นฐานใช้ id คงที่ เพื่อให้รายงานย้อนหลังไม่เปลี่ยนเมื่อแก้ข้อความที่แสดงในอนาคต
+const ACCOUNTING_CATEGORIES = {
+  income: [
+    { id: "manual_sales", label: "ยอดขายที่บันทึกเอง" },
+    { id: "service_income", label: "รายได้ค่าบริการ" },
+    { id: "other_income", label: "รายรับอื่น" },
+  ],
+  expense: [
+    { id: "inventory_purchase", label: "ซื้อวัตถุดิบ" },
+    { id: "packaging", label: "บรรจุภัณฑ์" },
+    { id: "rent", label: "ค่าเช่า" },
+    { id: "utilities", label: "ค่าน้ำ / ค่าไฟ" },
+    { id: "payroll", label: "ค่าแรง / เงินเดือน" },
+    { id: "platform_fee", label: "ค่า GP แพลตฟอร์ม" },
+    { id: "marketing", label: "การตลาด / โปรโมชั่น" },
+    { id: "delivery", label: "ค่าขนส่ง" },
+    { id: "bank_fee", label: "ค่าธรรมเนียมธนาคาร" },
+    { id: "repairs", label: "ซ่อมและบำรุงรักษา" },
+    { id: "supplies", label: "อุปกรณ์สิ้นเปลือง" },
+    { id: "software", label: "ซอฟต์แวร์ / Subscription" },
+    { id: "tax_fee", label: "ภาษีและค่าธรรมเนียม" },
+    { id: "other_expense", label: "รายจ่ายอื่น" },
+  ],
+};
+const ACCOUNTING_PAYMENT_ACCOUNTS = [
+  { id: "cash", label: "เงินสด" },
+  { id: "bank", label: "บัญชีธนาคาร" },
+  { id: "promptpay", label: "PromptPay" },
+  { id: "credit_card", label: "บัตรเครดิต" },
+];
+
 const GLASS = {
   background: "rgba(255,255,255,0.6)",
   backdropFilter: "blur(20px) saturate(160%)",
@@ -495,6 +526,7 @@ const TABS = [
   { id: "options", label: "Add-on Options", icon: "list-details" },
   { id: "ingredients", label: "Inventory & Stock", icon: "box-multiple" },
   { id: "reports", label: "Reports", icon: "chart-line" },
+  { id: "accounting", label: "Accounting", icon: "book-2" },
   { id: "settings", label: "Settings", icon: "settings" },
 ];
 
@@ -508,6 +540,7 @@ function ShopApp({ uid, user }) {
   const [orders, setOrders] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [salesRecords, setSalesRecords] = useState([]);
+  const [accountingTransactions, setAccountingTransactions] = useState([]);
   // เช็คแค่ตอน mount ครั้งเดียวไม่พอ — ถ้าหน้าจอเปลี่ยนขนาดทีหลัง (resize, หมุนแท็บเล็ต) โดยไม่ reload หน้า
   // sidebarCollapsed จะค้างค่าตอน mount ตลอด ทำให้ sidebar เต็มบีบเนื้อหาแคบเกินจนอ่านไม่ออกบนจอมือถือจริง
   useEffect(() => {
@@ -558,6 +591,17 @@ function ShopApp({ uid, user }) {
     const unsub = onValue(ref(db, `sales/${uid}`), (snap) => {
       const val = snap.val() || {};
       setSalesRecords(Object.values(val));
+    });
+    return () => unsub();
+  }, [uid]);
+
+  // สมุดรายรับรายจ่ายแยกจาก shops/{uid} เพื่อให้เพิ่ม/แก้รายการเป็นราย record โดยไม่ถูก autosave ก้อนใหญ่เขียนทับ
+  useEffect(() => {
+    const unsub = onValue(ref(db, `accounting/${uid}/transactions`), (snap) => {
+      const value = snap.val() || {};
+      const rows = Object.entries(value).map(([id, transaction]) => ({ id, ...transaction }));
+      rows.sort((a, b) => `${b.transactionDate || ""}${b.createdAt || ""}`.localeCompare(`${a.transactionDate || ""}${a.createdAt || ""}`));
+      setAccountingTransactions(rows);
     });
     return () => unsub();
   }, [uid]);
@@ -619,6 +663,32 @@ function ShopApp({ uid, user }) {
   function showToast(msg) {
     setToast(msg);
     setTimeout(() => setToast(null), 2400);
+  }
+
+  async function saveAccountingTransaction(transaction) {
+    const now = new Date().toISOString();
+    const id = transaction.id || push(ref(db, `accounting/${uid}/transactions`)).key;
+    const payload = {
+      type: transaction.type === "income" ? "income" : "expense",
+      category: transaction.category,
+      description: String(transaction.description || "").trim(),
+      amount: Math.round((Number(transaction.amount) || 0) * 100) / 100,
+      transactionDate: transaction.transactionDate,
+      paymentAccount: transaction.paymentAccount || "cash",
+      vendorName: String(transaction.vendorName || "").trim(),
+      note: String(transaction.note || "").trim(),
+      sourceType: transaction.sourceType || "manual",
+      sourceId: transaction.sourceId || null,
+      createdAt: transaction.createdAt || now,
+      updatedAt: now,
+    };
+    if (!payload.transactionDate || !payload.category || !payload.description || payload.amount <= 0) throw new Error("กรุณากรอกข้อมูลที่จำเป็นให้ครบ");
+    await set(ref(db, `accounting/${uid}/transactions/${id}`), payload);
+  }
+
+  async function deleteAccountingTransaction(transaction) {
+    if (transaction.sourceType && transaction.sourceType !== "manual") throw new Error("รายการจากระบบต้องยกเลิกจากเอกสารต้นทาง");
+    await set(ref(db, `accounting/${uid}/transactions/${transaction.id}`), null);
   }
 
   const ingredientsById = useMemo(() => {
@@ -1029,6 +1099,7 @@ function ShopApp({ uid, user }) {
           {tab === "promotions" && <PromotionsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "reports" && <ReportsPanel data={dataForDisplay} orders={orders} shopName={data.settings.shopName} showToast={showToast} />}
+          {tab === "accounting" && <AccountingPanel transactions={accountingTransactions} onSave={saveAccountingTransaction} onDelete={deleteAccountingTransaction} showToast={showToast} />}
           {tab === "loyalty" && <LoyaltyPanel customers={customers} orders={orders} loyaltyBeanGoal={data.settings.loyaltyBeanGoal} adjustCustomerBeans={adjustCustomerBeans} createLoyaltyCustomer={createLoyaltyCustomer} updateLoyaltyGoal={updateLoyaltyGoal} showToast={showToast} backfillEligibleCount={backfillEligibleOrders.length} backfillLoyaltyBeans={backfillLoyaltyBeans} />}
           {tab === "options" && <OptionGroupsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "settings" && <SettingsPanel data={data} updateData={updateData} showToast={showToast} uid={uid} />}
@@ -5670,6 +5741,183 @@ function RepMenuTable({ rows }) {
 }
 
 // ยอดขายรวมทุกวันในช่วงที่เลือก แจกแจงตาม "ชั่วโมงของวัน" (0-23) เพื่อดูช่วงเวลาขายดี ไว้จัดกะ/เตรียมของล่วงหน้า
+function accountingCategoryLabel(type, categoryId) {
+  return ACCOUNTING_CATEGORIES[type]?.find((category) => category.id === categoryId)?.label || categoryId || "—";
+}
+
+function accountingAccountLabel(accountId) {
+  return ACCOUNTING_PAYMENT_ACCOUNTS.find((account) => account.id === accountId)?.label || accountId || "—";
+}
+
+function AccountingPanel({ transactions, onSave, onDelete, showToast }) {
+  const [month, setMonth] = useState(todayStr().slice(0, 7));
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [query, setQuery] = useState("");
+  const [editing, setEditing] = useState(null);
+  const [deleteFor, setDeleteFor] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return transactions.filter((transaction) => {
+      if (month && !String(transaction.transactionDate || "").startsWith(month)) return false;
+      if (typeFilter !== "all" && transaction.type !== typeFilter) return false;
+      if (q && !`${transaction.description || ""} ${transaction.vendorName || ""} ${accountingCategoryLabel(transaction.type, transaction.category)}`.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [transactions, month, typeFilter, query]);
+
+  const income = filtered.filter((transaction) => transaction.type === "income").reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
+  const expense = filtered.filter((transaction) => transaction.type === "expense").reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
+  const netCash = income - expense;
+
+  function openNew(type) {
+    setEditing({
+      type,
+      category: ACCOUNTING_CATEGORIES[type][0].id,
+      description: "",
+      amount: "",
+      transactionDate: todayStr(),
+      paymentAccount: type === "income" ? "promptpay" : "bank",
+      vendorName: "",
+      note: "",
+      sourceType: "manual",
+    });
+  }
+
+  async function confirmDelete() {
+    if (!deleteFor) return;
+    setDeleting(true);
+    try {
+      await onDelete(deleteFor);
+      setDeleteFor(null);
+      showToast("ลบรายการบัญชีแล้ว");
+    } catch (error) {
+      showToast("ลบรายการไม่สำเร็จ: " + error.message);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <div className="acc-page">
+      <style>{`
+        .acc-page { --acc-blue:#2563EB; --acc-green:#15803D; --acc-red:#B91C1C; --acc-ink:#172033; --acc-muted:#6B7280; }
+        .acc-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; }
+        .acc-actions { display:flex; gap:8px; flex-wrap:wrap; }
+        .acc-kpis { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:16px; }
+        .acc-kpi { padding:16px 18px; background:#fff; border:1px solid ${POS.border}; border-radius:15px; }
+        .acc-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px; margin-bottom:12px; border:1px solid ${POS.border}; border-radius:14px; background:#fff; }
+        .acc-search { position:relative; min-width:220px; flex:1; }
+        .acc-search input,.acc-filter { width:100%; height:40px; box-sizing:border-box; border:1px solid ${POS.border}; border-radius:10px; background:#fff; color:var(--acc-ink); font:inherit; font-size:12.5px; outline:none; }
+        .acc-search input { padding:0 12px 0 36px; }
+        .acc-filter { width:auto; min-width:132px; padding:0 10px; }
+        .acc-table { overflow:hidden; border:1px solid ${POS.border}; border-radius:15px; background:#fff; }
+        .acc-row { display:grid; grid-template-columns:105px minmax(210px,1.5fr) 155px 120px 130px 110px 72px; gap:12px; align-items:center; padding:12px 14px; border-bottom:1px solid #F0EEE9; }
+        .acc-row:last-child { border-bottom:0; }
+        .acc-row-head { padding-top:9px; padding-bottom:9px; color:var(--acc-muted); background:#FAFAF8; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; }
+        .acc-type { display:inline-flex; width:max-content; align-items:center; gap:5px; padding:4px 8px; border-radius:7px; font-size:10.5px; font-weight:700; }
+        .acc-modal-bg { position:fixed; inset:0; z-index:90; display:flex; align-items:center; justify-content:center; padding:18px; background:rgba(17,24,39,.44); }
+        .acc-modal { width:min(520px,100%); max-height:calc(100vh - 36px); overflow-y:auto; padding:20px; border-radius:18px; background:#fff; box-shadow:0 24px 70px rgba(0,0,0,.2); }
+        .acc-form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+        .acc-field-label { display:block; margin-bottom:6px; color:var(--acc-muted); font-size:11.5px; font-weight:700; }
+        .acc-field { width:100%; height:42px; box-sizing:border-box; padding:0 11px; border:1px solid ${POS.border}; border-radius:10px; background:#fff; color:var(--acc-ink); font:inherit; font-size:13.5px; outline:none; }
+        textarea.acc-field { height:76px; padding-top:10px; resize:vertical; }
+        @media(max-width:1100px){ .acc-row{grid-template-columns:95px minmax(190px,1.5fr) 140px 115px 110px 72px;} .acc-col-account{display:none;} }
+        @media(max-width:760px){ .acc-head{flex-direction:column;} .acc-kpis{grid-template-columns:1fr;} .acc-table{border:0;background:transparent;overflow:visible;} .acc-row-head{display:none;} .acc-row{display:grid;grid-template-columns:1fr auto;gap:7px;margin-bottom:8px;padding:13px;border:1px solid ${POS.border};border-radius:13px;background:#fff;} .acc-row:last-child{border-bottom:1px solid ${POS.border};} .acc-col-date,.acc-col-category,.acc-col-account{font-size:11.5px;} .acc-col-description{grid-column:1/2;grid-row:1;} .acc-col-amount{grid-column:2;grid-row:1;text-align:right;} .acc-col-type{grid-column:1;} .acc-col-actions{grid-column:2;grid-row:2/4;} }
+        @media(max-width:520px){ .acc-actions>*{flex:1;} .acc-form-grid{grid-template-columns:1fr;} .acc-filter{width:100%;} }
+      `}</style>
+
+      <div className="acc-head">
+        <div>
+          <p style={{ margin:0, color:POS.gray, fontSize:11.5, fontWeight:700, letterSpacing:".04em", textTransform:"uppercase" }}>Cash Book</p>
+          <h2 style={{ margin:"3px 0 4px", color:POS.navy, fontSize:22 }}>รายรับ–รายจ่าย</h2>
+          <p style={{ margin:0, color:POS.gray, fontSize:12.5 }}>บันทึกกระแสเงินสดของร้าน ขั้นนี้ยังไม่รวมยอดขายและการรับสต็อกอัตโนมัติ</p>
+        </div>
+        <div className="acc-actions">
+          <button className="cbtn" onClick={() => openNew("expense")}><Icon name="minus" size={15} /> <span style={{ marginLeft:5 }}>เพิ่มรายจ่าย</span></button>
+          <button className="cbtn cbtn-accent" onClick={() => openNew("income")}><Icon name="plus" size={15} /> <span style={{ marginLeft:5 }}>เพิ่มรายรับ</span></button>
+        </div>
+      </div>
+
+      <div className="acc-kpis">
+        <AccountingKpi label="เงินรับ" value={income} color="#15803D" background="#EAF7EE" icon="arrow-down-left" />
+        <AccountingKpi label="เงินจ่าย" value={expense} color="#B91C1C" background="#FDECEC" icon="arrow-up-right" />
+        <AccountingKpi label="กระแสเงินสดสุทธิ" value={netCash} color={netCash >= 0 ? "#1D4ED8" : "#B91C1C"} background={netCash >= 0 ? "#E8EEFF" : "#FDECEC"} icon="arrows-exchange" />
+      </div>
+
+      <div className="acc-toolbar">
+        <div className="acc-search"><Icon name="search" size={15} style={{ position:"absolute", left:12, top:12, color:POS.gray }} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ค้นหารายละเอียด คู่ค้า หรือหมวด..." /></div>
+        <input className="acc-filter" type="month" value={month} onChange={(event) => setMonth(event.target.value)} aria-label="เลือกเดือน" />
+        <select className="acc-filter" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} aria-label="กรองประเภทรายการ"><option value="all">ทุกรายการ</option><option value="income">รายรับ</option><option value="expense">รายจ่าย</option></select>
+        {month && <button className="cbtn" onClick={() => setMonth("")}>ดูทั้งหมด</button>}
+      </div>
+
+      {filtered.length === 0 ? <div style={{ padding:30, border:`1px solid ${POS.border}`, borderRadius:15, background:"#fff", textAlign:"center" }}><Icon name="book-2" size={27} style={{ color:POS.gray }} /><p style={{ margin:"8px 0 2px", color:POS.navy, fontWeight:700, fontSize:13.5 }}>ยังไม่มีรายการในช่วงนี้</p><p style={{ margin:0, color:POS.gray, fontSize:12 }}>เพิ่มรายรับหรือรายจ่ายรายการแรกได้จากปุ่มด้านบน</p></div> : <div className="acc-table">
+        <div className="acc-row acc-row-head"><span>วันที่</span><span>รายละเอียด</span><span>หมวด</span><span>ช่องทางเงิน</span><span>ประเภท</span><span style={{ textAlign:"right" }}>จำนวน</span><span /></div>
+        {filtered.map((transaction) => {
+          const isIncome = transaction.type === "income";
+          return <div className="acc-row" key={transaction.id}>
+            <div className="acc-col-date" style={{ color:POS.gray, fontSize:11.5 }}>{new Date(`${transaction.transactionDate}T00:00:00`).toLocaleDateString("th-TH", { day:"numeric", month:"short", year:"2-digit" })}</div>
+            <div className="acc-col-description" style={{ minWidth:0 }}><div style={{ color:POS.navy, fontSize:13, fontWeight:700, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{transaction.description}</div>{transaction.vendorName && <div style={{ marginTop:2, color:POS.gray, fontSize:10.5 }}>{transaction.vendorName}</div>}</div>
+            <div className="acc-col-category" style={{ color:POS.gray, fontSize:11.5 }}>{accountingCategoryLabel(transaction.type, transaction.category)}</div>
+            <div className="acc-col-account" style={{ color:POS.gray, fontSize:11.5 }}>{accountingAccountLabel(transaction.paymentAccount)}</div>
+            <div className="acc-col-type"><span className="acc-type" style={{ color:isIncome ? "#15803D" : "#B91C1C", background:isIncome ? "#EAF7EE" : "#FDECEC" }}>{isIncome ? "รายรับ" : "รายจ่าย"}</span></div>
+            <div className="acc-col-amount" style={{ color:isIncome ? "#15803D" : "#B91C1C", fontSize:13, fontWeight:700, textAlign:"right", whiteSpace:"nowrap" }}>{isIncome ? "+" : "−"}฿{money(transaction.amount)}</div>
+            <div className="acc-col-actions" style={{ display:"flex", gap:4, justifyContent:"flex-end" }}><button className="cbtn" disabled={transaction.sourceType !== "manual"} style={{ width:32, height:32, padding:0, display:"grid", placeItems:"center" }} onClick={() => setEditing(transaction)} aria-label={`แก้ไข ${transaction.description}`}><Icon name="edit" size={14} /></button><button className="cbtn" disabled={transaction.sourceType !== "manual"} style={{ width:32, height:32, padding:0, display:"grid", placeItems:"center", color:"#B91C1C" }} onClick={() => setDeleteFor(transaction)} aria-label={`ลบ ${transaction.description}`}><Icon name="trash" size={14} /></button></div>
+          </div>;
+        })}
+      </div>}
+
+      {editing && <AccountingTransactionModal transaction={editing} onClose={() => setEditing(null)} onSave={async (value) => { await onSave(value); setEditing(null); showToast(value.id ? "แก้ไขรายการบัญชีแล้ว" : "บันทึกรายการบัญชีแล้ว"); }} />}
+      {deleteFor && <div className="acc-modal-bg" onClick={() => !deleting && setDeleteFor(null)}><div className="acc-modal" style={{ width:"min(390px,100%)" }} role="alertdialog" aria-modal="true" onClick={(event) => event.stopPropagation()}><h3 style={{ margin:"0 0 7px", color:POS.navy }}>ลบรายการนี้?</h3><p style={{ margin:"0 0 16px", color:POS.gray, fontSize:12.5 }}>“{deleteFor.description}” จำนวน ฿{money(deleteFor.amount)} จะถูกลบออกจากสมุดบัญชี</p><div style={{ display:"flex", gap:8 }}><button className="cbtn" disabled={deleting} style={{ flex:1 }} onClick={() => setDeleteFor(null)}>ยกเลิก</button><button className="cbtn cbtn-danger" disabled={deleting} style={{ flex:1 }} onClick={confirmDelete}>{deleting ? "กำลังลบ..." : "ลบรายการ"}</button></div></div></div>}
+    </div>
+  );
+}
+
+function AccountingKpi({ label, value, color, background, icon }) {
+  return <div className="acc-kpi"><div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10 }}><div><div style={{ color:POS.gray, fontSize:11.5, fontWeight:600 }}>{label}</div><div style={{ marginTop:4, color, fontSize:22, fontWeight:700 }}>{value < 0 ? "−" : ""}฿{money(Math.abs(value))}</div></div><div style={{ width:40, height:40, borderRadius:11, display:"grid", placeItems:"center", color, background }}><Icon name={icon} size={20} /></div></div></div>;
+}
+
+function AccountingTransactionModal({ transaction, onClose, onSave }) {
+  const [form, setForm] = useState({ ...transaction });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  useEscape(onClose);
+  const categories = ACCOUNTING_CATEGORIES[form.type] || [];
+
+  function patch(field, value) { setForm((current) => ({ ...current, [field]: value })); }
+
+  async function submit(event) {
+    event.preventDefault();
+    setError("");
+    if (!form.description.trim() || !form.transactionDate || !form.category || Number(form.amount) <= 0) { setError("กรุณากรอกวันที่ รายละเอียด หมวด และจำนวนเงินให้ครบ"); return; }
+    setSaving(true);
+    try {
+      await onSave(form);
+    } catch (saveError) {
+      setError(saveError.message || "บันทึกไม่สำเร็จ");
+      setSaving(false);
+    }
+  }
+
+  return <div className="acc-modal-bg" onClick={onClose}><form className="acc-modal" role="dialog" aria-modal="true" aria-label={form.id ? "แก้ไขรายการบัญชี" : "เพิ่มรายการบัญชี"} onSubmit={submit} onClick={(event) => event.stopPropagation()}>
+    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, marginBottom:16 }}><div><p style={{ margin:0, color:POS.gray, fontSize:10.5, fontWeight:700, textTransform:"uppercase" }}>Manual transaction</p><h3 style={{ margin:"2px 0 0", color:POS.navy }}>{form.id ? "แก้ไขรายการ" : "เพิ่มรายการบัญชี"}</h3></div><button type="button" className="cbtn" style={{ width:34, height:34, padding:0 }} onClick={onClose}><Icon name="x" size={15} /></button></div>
+    <div style={{ display:"flex", gap:6, padding:4, marginBottom:14, borderRadius:11, background:POS.chipBg }}><button type="button" className="cbtn" style={{ flex:1, border:0, color:form.type === "income" ? "#15803D" : POS.gray, background:form.type === "income" ? "#fff" : "transparent", boxShadow:form.type === "income" ? "0 1px 4px rgba(0,0,0,.08)" : "none" }} onClick={() => setForm((current) => ({ ...current, type:"income", category:ACCOUNTING_CATEGORIES.income[0].id }))}>รายรับ</button><button type="button" className="cbtn" style={{ flex:1, border:0, color:form.type === "expense" ? "#B91C1C" : POS.gray, background:form.type === "expense" ? "#fff" : "transparent", boxShadow:form.type === "expense" ? "0 1px 4px rgba(0,0,0,.08)" : "none" }} onClick={() => setForm((current) => ({ ...current, type:"expense", category:ACCOUNTING_CATEGORIES.expense[0].id }))}>รายจ่าย</button></div>
+    <div className="acc-form-grid">
+      <div><label className="acc-field-label">วันที่รายการ *</label><input className="acc-field" type="date" value={form.transactionDate} onChange={(event) => patch("transactionDate", event.target.value)} /></div>
+      <div><label className="acc-field-label">จำนวนเงิน *</label><input className="acc-field" type="number" min="0.01" step="0.01" inputMode="decimal" value={form.amount} onChange={(event) => patch("amount", event.target.value)} placeholder="0.00" /></div>
+      <div style={{ gridColumn:"1/-1" }}><label className="acc-field-label">รายละเอียด *</label><TextField className="acc-field" value={form.description} onChange={(value) => patch("description", value)} placeholder={form.type === "income" ? "เช่น รายรับจากออกบูธ" : "เช่น ค่าไฟเดือนกรกฎาคม"} /></div>
+      <div><label className="acc-field-label">หมวด *</label><select className="acc-field" value={form.category} onChange={(event) => patch("category", event.target.value)}>{categories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}</select></div>
+      <div><label className="acc-field-label">ช่องทางเงิน</label><select className="acc-field" value={form.paymentAccount} onChange={(event) => patch("paymentAccount", event.target.value)}>{ACCOUNTING_PAYMENT_ACCOUNTS.map((account) => <option key={account.id} value={account.id}>{account.label}</option>)}</select></div>
+      <div style={{ gridColumn:"1/-1" }}><label className="acc-field-label">คู่ค้า / ผู้รับเงิน</label><TextField className="acc-field" value={form.vendorName || ""} onChange={(value) => patch("vendorName", value)} placeholder="ไม่บังคับ" /></div>
+      <div style={{ gridColumn:"1/-1" }}><label className="acc-field-label">หมายเหตุ</label><textarea className="acc-field" value={form.note || ""} onChange={(event) => patch("note", event.target.value)} placeholder="รายละเอียดเพิ่มเติม (ถ้ามี)" /></div>
+    </div>
+    {error && <p style={{ margin:"10px 0 0", color:"#B91C1C", fontSize:12 }}>{error}</p>}
+    <div style={{ display:"flex", gap:8, marginTop:16 }}><button type="button" className="cbtn" disabled={saving} style={{ flex:1 }} onClick={onClose}>ยกเลิก</button><button type="submit" className="cbtn cbtn-accent" disabled={saving} style={{ flex:1 }}>{saving ? "กำลังบันทึก..." : "บันทึกรายการ"}</button></div>
+  </form></div>;
+}
+
 function RepHourlyChart({ sales }) {
   const hourly = useMemo(() => {
     const buckets = Array.from({ length: 24 }, (_, h) => ({ hour: h, revenue: 0 }));
