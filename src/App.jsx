@@ -600,6 +600,8 @@ function ShopApp({ uid, user }) {
   const [accountingTransactions, setAccountingTransactions] = useState([]);
   const [accountingAssets, setAccountingAssets] = useState([]);
   const [recurringExpenses, setRecurringExpenses] = useState([]);
+  const [accountingAccounts, setAccountingAccounts] = useState([]);
+  const [accountReconciliations, setAccountReconciliations] = useState([]);
   // เช็คแค่ตอน mount ครั้งเดียวไม่พอ — ถ้าหน้าจอเปลี่ยนขนาดทีหลัง (resize, หมุนแท็บเล็ต) โดยไม่ reload หน้า
   // sidebarCollapsed จะค้างค่าตอน mount ตลอด ทำให้ sidebar เต็มบีบเนื้อหาแคบเกินจนอ่านไม่ออกบนจอมือถือจริง
   useEffect(() => {
@@ -679,6 +681,28 @@ function ShopApp({ uid, user }) {
     const unsub = onValue(ref(db, `accounting/${uid}/recurringExpenses`), (snap) => {
       const value = snap.val() || {};
       setRecurringExpenses(Object.entries(value).map(([id, template]) => ({ id, ...template })));
+    });
+    return () => unsub();
+  }, [uid]);
+
+  useEffect(() => {
+    const accountsRef = ref(db, `accounting/${uid}/accounts`);
+    const unsub = onValue(accountsRef, (snap) => {
+      if (snap.exists()) {
+        setAccountingAccounts(Object.entries(snap.val()).map(([id, account]) => ({ id, ...account })));
+        return;
+      }
+      const defaults = Object.fromEntries(ACCOUNTING_PAYMENT_ACCOUNTS.filter((account) => account.id !== "unassigned").map((account) => [account.id, { name:account.label, openingBalance:0, active:true, createdAt:new Date().toISOString() }]));
+      set(accountsRef, defaults).catch((error)=>showToast("สร้างบัญชีเงินไม่สำเร็จ: "+error.message));
+      setAccountingAccounts(Object.entries(defaults).map(([id, account])=>({id,...account})));
+    });
+    return () => unsub();
+  }, [uid]);
+
+  useEffect(() => {
+    const unsub = onValue(ref(db, `accounting/${uid}/reconciliations`), (snap) => {
+      const value = snap.val() || {};
+      setAccountReconciliations(Object.entries(value).map(([id, reconciliation])=>({id,...reconciliation})));
     });
     return () => unsub();
   }, [uid]);
@@ -844,6 +868,15 @@ function ShopApp({ uid, user }) {
     await update(ref(db, `accounting/${uid}/transactions/${transaction.id}`), {
       status, transactionDate: status === "paid" ? todayStr() : transaction.transactionDate, updatedAt: new Date().toISOString(),
     });
+  }
+
+  async function updateAccountingAccount(account, patch) {
+    await update(ref(db, `accounting/${uid}/accounts/${account.id}`), { ...patch, updatedAt:new Date().toISOString() });
+  }
+
+  async function saveAccountReconciliation(reconciliation) {
+    const newRef = push(ref(db, `accounting/${uid}/reconciliations`));
+    await set(newRef, { ...reconciliation, reconciledAt:new Date().toISOString(), createdAt:new Date().toISOString() });
   }
 
   const ingredientsById = useMemo(() => {
@@ -1334,7 +1367,7 @@ function ShopApp({ uid, user }) {
           {tab === "promotions" && <PromotionsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} onSaveAccounting={saveAccountingTransaction} />}
           {tab === "reports" && <ReportsPanel data={dataForDisplay} orders={orders} shopName={data.settings.shopName} showToast={showToast} />}
-          {tab === "accounting" && <AccountingPanel transactions={accountingTransactions} assets={accountingAssets} recurringExpenses={recurringExpenses} sales={dataForDisplay.sales} overheadPerCup={data.settings.overheadPerCup} onSave={saveAccountingTransaction} onDelete={deleteAccountingTransaction} onSaveAsset={saveAccountingAsset} onDeleteAsset={deleteAccountingAsset} onSaveRecurring={saveRecurringExpense} onDeleteRecurring={deleteRecurringExpense} onUpdateOccurrence={updateRecurringOccurrence} showToast={showToast} />}
+          {tab === "accounting" && <AccountingPanel transactions={accountingTransactions} assets={accountingAssets} recurringExpenses={recurringExpenses} accounts={accountingAccounts} reconciliations={accountReconciliations} sales={dataForDisplay.sales} overheadPerCup={data.settings.overheadPerCup} onSave={saveAccountingTransaction} onDelete={deleteAccountingTransaction} onSaveAsset={saveAccountingAsset} onDeleteAsset={deleteAccountingAsset} onSaveRecurring={saveRecurringExpense} onDeleteRecurring={deleteRecurringExpense} onUpdateOccurrence={updateRecurringOccurrence} onUpdateAccount={updateAccountingAccount} onSaveReconciliation={saveAccountReconciliation} showToast={showToast} />}
           {tab === "loyalty" && <LoyaltyPanel customers={customers} orders={orders} loyaltyBeanGoal={data.settings.loyaltyBeanGoal} adjustCustomerBeans={adjustCustomerBeans} createLoyaltyCustomer={createLoyaltyCustomer} updateLoyaltyGoal={updateLoyaltyGoal} showToast={showToast} backfillEligibleCount={backfillEligibleOrders.length} backfillLoyaltyBeans={backfillLoyaltyBeans} />}
           {tab === "options" && <OptionGroupsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "settings" && <SettingsPanel data={data} updateData={updateData} showToast={showToast} uid={uid} />}
@@ -6049,7 +6082,7 @@ function assetDepreciationForPeriod(asset, month) {
   return Math.max(0, accumulatedAssetDepreciation(asset, end) - accumulatedAssetDepreciation(asset, previousEnd));
 }
 
-function AccountingPanel({ transactions, assets, recurringExpenses, sales, overheadPerCup, onSave, onDelete, onSaveAsset, onDeleteAsset, onSaveRecurring, onDeleteRecurring, onUpdateOccurrence, showToast }) {
+function AccountingPanel({ transactions, assets, recurringExpenses, accounts, reconciliations, sales, overheadPerCup, onSave, onDelete, onSaveAsset, onDeleteAsset, onSaveRecurring, onDeleteRecurring, onUpdateOccurrence, onUpdateAccount, onSaveReconciliation, showToast }) {
   const [month, setMonth] = useState(todayStr().slice(0, 7));
   const [typeFilter, setTypeFilter] = useState("all");
   const [query, setQuery] = useState("");
@@ -6216,6 +6249,7 @@ function AccountingPanel({ transactions, assets, recurringExpenses, sales, overh
 
       <AccountingAssetsSection assets={assets} onSave={onSaveAsset} onDelete={onDeleteAsset} showToast={showToast} />
       <AccountingRecurringSection templates={recurringExpenses} transactions={transactions} onSave={onSaveRecurring} onDelete={onDeleteRecurring} onUpdateOccurrence={onUpdateOccurrence} showToast={showToast} />
+      <AccountingAccountsSection accounts={accounts} transactions={transactions} reconciliations={reconciliations} onUpdateAccount={onUpdateAccount} onSaveReconciliation={onSaveReconciliation} showToast={showToast} />
 
       {editing && <AccountingTransactionModal transaction={editing} onClose={() => setEditing(null)} onSave={async (value) => { await onSave(value); setEditing(null); showToast(value.id ? "แก้ไขรายการบัญชีแล้ว" : "บันทึกรายการบัญชีแล้ว"); }} />}
       {deleteFor && <div className="acc-modal-bg" onClick={() => !deleting && setDeleteFor(null)}><div className="acc-modal" style={{ width:"min(390px,100%)" }} role="alertdialog" aria-modal="true" onClick={(event) => event.stopPropagation()}><h3 style={{ margin:"0 0 7px", color:POS.navy }}>ลบรายการนี้?</h3><p style={{ margin:"0 0 16px", color:POS.gray, fontSize:12.5 }}>“{deleteFor.description}” จำนวน ฿{money(deleteFor.amount)} จะถูกลบออกจากสมุดบัญชี</p><div style={{ display:"flex", gap:8 }}><button className="cbtn" disabled={deleting} style={{ flex:1 }} onClick={() => setDeleteFor(null)}>ยกเลิก</button><button className="cbtn cbtn-danger" disabled={deleting} style={{ flex:1 }} onClick={confirmDelete}>{deleting ? "กำลังลบ..." : "ลบรายการ"}</button></div></div></div>}
@@ -6303,6 +6337,30 @@ function AccountingRecurringSection({ templates, transactions, onSave, onDelete,
     {templates.length===0?<div style={{padding:22,border:`1px dashed ${POS.border}`,borderRadius:13,textAlign:"center",color:POS.gray,fontSize:12.5}}>ยังไม่มีค่าใช้จ่ายประจำ</div>:<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(245px,1fr))",gap:8}}>{templates.map((template)=><div key={template.id} style={{padding:13,border:`1px solid ${POS.border}`,borderRadius:12,background:"#fff",opacity:template.active===false?.6:1}}><div style={{display:"flex",justifyContent:"space-between",gap:8}}><div><div style={{fontSize:13,fontWeight:700,color:POS.navy}}>{template.name}</div><div style={{marginTop:3,fontSize:10.5,color:POS.gray}}>{accountingCategoryLabel("expense",template.category)} · ทุกวันที่ {template.dayOfMonth}</div></div><span className="acc-type" style={{color:template.active===false?POS.gray:"#15803D",background:template.active===false?"#F3F4F6":"#EAF7EE"}}>{template.active===false?"พัก":"ใช้งาน"}</span></div><div style={{marginTop:10,fontSize:18,fontWeight:700,color:"#B91C1C"}}>฿{money(template.amount)}<span style={{fontSize:10.5,fontWeight:500,color:POS.gray}}>/เดือน</span></div><div style={{display:"flex",gap:5,marginTop:10}}><button className="cbtn" style={{flex:1}} onClick={()=>setEditing(template)}><Icon name="edit" size={13}/><span style={{marginLeft:4}}>แก้ไข</span></button><button className="cbtn" style={{width:34,padding:0,color:"#B91C1C"}} onClick={()=>removeTemplate(template)} aria-label={`ลบ ${template.name}`}><Icon name="trash" size={13}/></button></div></div>)}</div>}
     {editing&&<AccountingRecurringModal template={editing} onClose={()=>setEditing(null)} onSave={async(template)=>{await onSave(template);setEditing(null);showToast(template.id?"แก้ไขค่าใช้จ่ายประจำแล้ว":"เพิ่มค่าใช้จ่ายประจำแล้ว");}}/>}
   </section>;
+}
+
+function AccountingAccountsSection({accounts,transactions,reconciliations,onUpdateAccount,onSaveReconciliation,showToast}){
+  const [openingFor,setOpeningFor]=useState(null);
+  const [openingValue,setOpeningValue]=useState("");
+  const [reconcileFor,setReconcileFor]=useState(null);
+  function expectedBalance(account){return (Number(account.openingBalance)||0)+transactions.filter((transaction)=>transaction.paymentAccount===account.id&&(!transaction.status||transaction.status==="paid")).reduce((sum,transaction)=>sum+(transaction.type==="income"?1:-1)*(Number(transaction.amount)||0),0);}
+  function latestFor(accountId){return [...reconciliations].filter((item)=>item.accountId===accountId).sort((a,b)=>String(b.reconciledAt).localeCompare(String(a.reconciledAt)))[0]||null;}
+  async function saveOpening(){try{await onUpdateAccount(openingFor,{openingBalance:Number(openingValue)||0});setOpeningFor(null);showToast("บันทึกยอดตั้งต้นแล้ว");}catch(error){showToast("บันทึกไม่สำเร็จ: "+error.message);}}
+  return <section style={{marginTop:20}}><div className="acc-assets-head"><div><h3 style={{margin:"0 0 3px",color:POS.navy,fontSize:17}}>บัญชีเงินและกระทบยอด</h3><p style={{margin:0,color:POS.gray,fontSize:11.5}}>เปรียบเทียบยอดตามรายการในระบบกับยอดเงินจริงในเงินสดหรือบัญชีธนาคาร</p></div></div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(230px,1fr))",gap:9}}>{accounts.map((account)=>{const expected=expectedBalance(account);const latest=latestFor(account.id);return <div key={account.id} style={{padding:14,border:`1px solid ${POS.border}`,borderRadius:13,background:"#fff"}}><div style={{display:"flex",alignItems:"center",gap:9}}><div style={{width:34,height:34,borderRadius:9,display:"grid",placeItems:"center",background:"#E8EEFF",color:"#1D4ED8"}}><Icon name={account.id==="cash"?"cash":account.id==="credit_card"?"credit-card":"building-bank"} size={17}/></div><div><div style={{fontSize:12.5,fontWeight:700,color:POS.navy}}>{account.name}</div><div style={{fontSize:10,color:POS.gray}}>ยอดตามระบบ</div></div></div><div style={{marginTop:10,fontSize:21,fontWeight:700,color:expected>=0?POS.navy:"#B91C1C"}}>฿{money(expected)}</div><div style={{marginTop:5,minHeight:30,fontSize:10.5,color:latest?Math.abs(Number(latest.difference)||0)<.01?"#15803D":"#B45309":POS.gray}}>{latest?`กระทบล่าสุด ${new Date(latest.reconciledAt).toLocaleDateString("th-TH")} · ต่าง ฿${money(latest.difference)}`:"ยังไม่เคยกระทบยอด"}</div><div style={{display:"flex",gap:5,marginTop:8}}><button className="cbtn" style={{flex:1}} onClick={()=>{setOpeningFor(account);setOpeningValue(String(account.openingBalance||0));}}>ยอดตั้งต้น</button><button className="cbtn cbtn-accent" style={{flex:1}} onClick={()=>setReconcileFor({...account,expectedBalance:expected})}>กระทบยอด</button></div></div>;})}</div>
+    {openingFor&&<div className="acc-modal-bg" onClick={()=>setOpeningFor(null)}><div className="acc-modal" style={{width:"min(380px,100%)"}} role="dialog" aria-modal="true" onClick={(event)=>event.stopPropagation()}><h3 style={{margin:"0 0 5px",color:POS.navy}}>ยอดตั้งต้น — {openingFor.name}</h3><p style={{margin:"0 0 13px",fontSize:11.5,color:POS.gray}}>ใช้ยอดก่อนวันที่เริ่มบันทึกรายการในระบบ</p><input className="acc-field" type="number" step="0.01" value={openingValue} onChange={(event)=>setOpeningValue(event.target.value)}/><div style={{display:"flex",gap:8,marginTop:14}}><button className="cbtn" style={{flex:1}} onClick={()=>setOpeningFor(null)}>ยกเลิก</button><button className="cbtn cbtn-accent" style={{flex:1}} onClick={saveOpening}>บันทึก</button></div></div></div>}
+    {reconcileFor&&<AccountingReconciliationModal account={reconcileFor} onClose={()=>setReconcileFor(null)} onSave={async(value)=>{await onSaveReconciliation(value);setReconcileFor(null);showToast(Math.abs(value.difference)<.01?"กระทบยอดตรงกันแล้ว":"บันทึกส่วนต่างกระทบยอดแล้ว");}}/>}
+  </section>;
+}
+
+function AccountingReconciliationModal({account,onClose,onSave}){
+  const [actual,setActual]=useState(String(account.expectedBalance));
+  const [date,setDate]=useState(todayStr());
+  const [note,setNote]=useState("");
+  const [saving,setSaving]=useState(false);
+  const difference=(Number(actual)||0)-account.expectedBalance;
+  useEscape(onClose);
+  async function submit(event){event.preventDefault();setSaving(true);try{await onSave({accountId:account.id,accountName:account.name,reconciliationDate:date,expectedBalance:account.expectedBalance,actualBalance:Number(actual)||0,difference,note:note.trim()});}catch(error){setSaving(false);}}
+  return <div className="acc-modal-bg" onClick={onClose}><form className="acc-modal" style={{width:"min(420px,100%)"}} role="dialog" aria-modal="true" onSubmit={submit} onClick={(event)=>event.stopPropagation()}><h3 style={{margin:"0 0 4px",color:POS.navy}}>กระทบยอด — {account.name}</h3><p style={{margin:"0 0 14px",fontSize:11.5,color:POS.gray}}>ยอดตามระบบ ฿{money(account.expectedBalance)}</p><div className="acc-form-grid"><div><label className="acc-field-label">วันที่ตรวจยอด</label><input className="acc-field" type="date" value={date} onChange={(event)=>setDate(event.target.value)}/></div><div><label className="acc-field-label">ยอดเงินจริง</label><input className="acc-field" type="number" step="0.01" value={actual} onChange={(event)=>setActual(event.target.value)}/></div><div style={{gridColumn:"1/-1",padding:11,borderRadius:10,background:Math.abs(difference)<.01?"#EAF7EE":"#FFF4E5",color:Math.abs(difference)<.01?"#15803D":"#92400E",fontSize:12.5,fontWeight:700}}>ส่วนต่าง {difference<0?"−":""}฿{money(Math.abs(difference))}</div><div style={{gridColumn:"1/-1"}}><label className="acc-field-label">หมายเหตุ</label><TextField className="acc-field" value={note} onChange={setNote} placeholder="เช่น เงินสดขาด/เกินจากอะไร"/></div></div><div style={{display:"flex",gap:8,marginTop:15}}><button type="button" className="cbtn" style={{flex:1}} onClick={onClose}>ยกเลิก</button><button type="submit" className="cbtn cbtn-accent" disabled={saving} style={{flex:1}}>{saving?"กำลังบันทึก...":"บันทึกกระทบยอด"}</button></div></form></div>;
 }
 
 function AccountingRecurringModal({template,onClose,onSave}){
