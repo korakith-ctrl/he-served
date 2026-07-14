@@ -20,11 +20,13 @@ const CHANNELS = { store: "หน้าร้าน", delivery: "เดลิเ
 // หมวดบัญชีพื้นฐานใช้ id คงที่ เพื่อให้รายงานย้อนหลังไม่เปลี่ยนเมื่อแก้ข้อความที่แสดงในอนาคต
 const ACCOUNTING_CATEGORIES = {
   income: [
+    { id: "sales", label: "ยอดขาย" },
     { id: "manual_sales", label: "ยอดขายที่บันทึกเอง" },
     { id: "service_income", label: "รายได้ค่าบริการ" },
     { id: "other_income", label: "รายรับอื่น" },
   ],
   expense: [
+    { id: "sales_refund", label: "คืนเงิน / ยกเลิกยอดขาย" },
     { id: "inventory_purchase", label: "ซื้อวัตถุดิบ" },
     { id: "packaging", label: "บรรจุภัณฑ์" },
     { id: "rent", label: "ค่าเช่า" },
@@ -46,7 +48,35 @@ const ACCOUNTING_PAYMENT_ACCOUNTS = [
   { id: "bank", label: "บัญชีธนาคาร" },
   { id: "promptpay", label: "PromptPay" },
   { id: "credit_card", label: "บัตรเครดิต" },
+  { id: "unassigned", label: "ยังไม่ระบุ" },
 ];
+
+function accountingPaymentAccount(paymentMethod) {
+  if (paymentMethod === "promptpay") return "promptpay";
+  if (paymentMethod === "cash" || paymentMethod === "thaihelpthai") return "cash";
+  if (paymentMethod === "credit_card") return "credit_card";
+  return "unassigned";
+}
+
+function accountingTransactionFromSale(sale, paymentMethod) {
+  const timestamp = sale.timestamp || new Date().toISOString();
+  return {
+    type: "income",
+    category: "sales",
+    description: `ขาย ${sale.menuName || "สินค้า"} ×${Number(sale.qty) || 1}`,
+    amount: Math.round((Number(sale.netRevenue) || 0) * 100) / 100,
+    transactionDate: timestamp.slice(0, 10),
+    paymentAccount: accountingPaymentAccount(paymentMethod || sale.paymentMethod),
+    vendorName: "",
+    note: sale.platformName ? `ช่องทาง ${sale.platformName}` : "",
+    sourceType: "sale",
+    sourceId: sale.id,
+    orderId: sale.orderId || null,
+    channel: sale.channel || null,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
 
 const GLASS = {
   background: "rgba(255,255,255,0.6)",
@@ -640,7 +670,7 @@ function ShopApp({ uid, user }) {
           const itemMenu = data.menus.find((m) => m.id === item.menuId);
           const substitutions = itemMenu ? resolveIngredientAdjustmentsFromOptions(itemMenu, item.options, ingredientsById) : {};
           const promoDiscount = item.freeUnit && itemMenu ? itemMenu.priceStore + upcharge : 0;
-          recordSale(item.menuId, item.qty, "online", { upcharge, substitutions, promoDiscount, milkLabel: (item.options || []).map((x) => x.label).join(", ") || null, orderId: o.id });
+          recordSale(item.menuId, item.qty, "online", { upcharge, substitutions, promoDiscount, milkLabel: (item.options || []).map((x) => x.label).join(", ") || null, orderId: o.id, paymentMethod: o.paymentMethod });
         }
         // สลิปยืนยันอัตโนมัติทำให้ order ค้างที่ status "paid" ซึ่งไม่ใช่หนึ่งใน 4 คอลัมน์ Kanban แล้ว
         // ต้องเลื่อนเข้า "preparing" ทันที เหมือนตอนบาริสต้ากดยืนยันรับเงินสดเอง ไม่งั้นการ์ดจะหายไปจากบอร์ด
@@ -706,6 +736,22 @@ function ShopApp({ uid, user }) {
     if (!data) return data;
     return { ...data, sales: salesRecords.filter((s) => !s.orderId || !cancelledOrderIds.has(s.orderId)) };
   }, [data, salesRecords, cancelledOrderIds]);
+
+  // สร้างรายรับจากยอดขายเก่าและยอดที่เข้าจากอุปกรณ์อื่น โดยใช้ sale id เป็น key คงที่จึงรันซ้ำได้โดยไม่เกิดรายการซ้ำ
+  useEffect(() => {
+    if (salesRecords.length === 0) return;
+    const linkedSaleIds = new Set(accountingTransactions.filter((transaction) => transaction.sourceType === "sale").map((transaction) => transaction.sourceId));
+    const ordersById = Object.fromEntries(orders.map((order) => [order.id, order]));
+    const missing = salesRecords.filter((sale) => Number(sale.netRevenue) > 0 && !linkedSaleIds.has(sale.id) && !cancelledOrderIds.has(sale.orderId));
+    if (missing.length === 0) return;
+    const patch = {};
+    for (const sale of missing) {
+      const order = sale.orderId ? ordersById[sale.orderId] : null;
+      patch[`accounting/${uid}/transactions/sale_${sale.id}`] = accountingTransactionFromSale(sale, order?.paymentMethod);
+    }
+    update(ref(db), patch).catch((error) => showToast("เชื่อมยอดขายเข้าบัญชีไม่สำเร็จ: " + error.message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [salesRecords, accountingTransactions, orders, cancelledOrderIds, uid]);
 
   // รุ่นที่เริ่มบันทึก completedAt เคยตั้ง beansAwarded ก่อนเรียกฟังก์ชันเพิ่มเมล็ด และฟังก์ชันไม่ได้ถูกส่งเข้า OrdersPanel
   // ทำให้ order ดูเหมือนนับแล้วทั้งที่ transaction ลูกค้าไม่เคยเกิดขึ้น กู้เฉพาะออเดอร์ช่วงนั้นอัตโนมัติจาก marker ราย order
@@ -774,15 +820,20 @@ function ShopApp({ uid, user }) {
     // ยอดขายเขียนตรงไปโหนด sales/{uid} แยกจาก updateData ข้างบน (ซึ่งยังแก้ next.ingredients ในก้อนใหญ่ตามเดิม) —
     // กัน full-object set() ของ shops/{uid} ทับยอดขายที่เพิ่งเพิ่มหายไปเวลาเปิดแดชบอร์ดพร้อมกันหลายแท็บ (ดู useEffect ที่ subscribe sales/{uid} ด้านบนสำหรับรายละเอียด)
     const saleId = genId("sale");
-    set(ref(db, `sales/${uid}/${saleId}`), {
-      id: saleId, timestamp: new Date().toISOString(), menuId, menuName: menu.name,
+    const timestamp = new Date().toISOString();
+    const sale = {
+      id: saleId, timestamp, menuId, menuName: menu.name,
       channel, qty, unitPrice, grossRevenue, gpAmount, gpPercent, promoDiscount, netRevenue,
       totalCost, profit: netRevenue - totalCost,
       platformName: platform ? platform.name : null,
       milkNote: opts.milkLabel || null,
       note: opts.note || null,
       orderId: opts.orderId || null,
-    }).catch((err) => showToast("บันทึกยอดขายไม่สำเร็จ: " + err.message));
+      paymentMethod: opts.paymentMethod || null,
+    };
+    const salePatch = { [`sales/${uid}/${saleId}`]: sale };
+    if (netRevenue > 0) salePatch[`accounting/${uid}/transactions/sale_${saleId}`] = accountingTransactionFromSale(sale, opts.paymentMethod);
+    update(ref(db), salePatch).catch((err) => showToast("บันทึกยอดขายไม่สำเร็จ: " + err.message));
     showToast(`บันทึกการขาย ${menu.name} x${qty} (${channel === "delivery" ? (platform ? platform.name : "เดลิเวอรี่") : "หน้าร้าน"}) แล้ว`);
   }
 
@@ -824,12 +875,34 @@ function ShopApp({ uid, user }) {
           }
         }
       });
-      // ลบยอดขายที่ผูกกับออเดอร์นี้ออกจากโหนด sales/{uid} แยกต่างหาก (ดูเหตุผลเดียวกับตอนบันทึกใน recordSale)
+      // ตัดยอดขายออกจากรายงานเดิม แต่เก็บ audit trail ฝั่งบัญชีด้วยรายการกลับยอดที่ใช้ sale id เดิมเป็น idempotency key
       const toRemove = salesRecords.filter((s) => s.orderId === order.id);
       if (toRemove.length > 0) {
         const patch = {};
-        for (const s of toRemove) patch[s.id] = null;
-        update(ref(db, `sales/${uid}`), patch).catch((err) => showToast("ลบยอดขายไม่สำเร็จ: " + err.message));
+        const cancelledAt = new Date().toISOString();
+        for (const sale of toRemove) {
+          patch[`sales/${uid}/${sale.id}`] = null;
+          if (Number(sale.netRevenue) > 0) {
+            // รับประกันว่ามีรายการต้นทางก่อนลงรายการกลับยอด แม้เป็นยอดขายเก่าที่ยังไม่เคย sync เข้าบัญชี
+            patch[`accounting/${uid}/transactions/sale_${sale.id}`] = accountingTransactionFromSale(sale, order.paymentMethod);
+            patch[`accounting/${uid}/transactions/sale_refund_${sale.id}`] = {
+            type: "expense",
+            category: "sales_refund",
+            description: `ยกเลิกยอดขาย ${sale.menuName || "สินค้า"} ×${Number(sale.qty) || 1}`,
+            amount: Math.round((Number(sale.netRevenue) || 0) * 100) / 100,
+            transactionDate: cancelledAt.slice(0, 10),
+            paymentAccount: accountingPaymentAccount(order.paymentMethod || sale.paymentMethod),
+            vendorName: order.customerName || "",
+            note: `ออเดอร์ #${String(order.id).slice(-6).toUpperCase()}`,
+            sourceType: "sale_refund",
+            sourceId: sale.id,
+            orderId: order.id,
+            createdAt: cancelledAt,
+            updatedAt: cancelledAt,
+            };
+          }
+        }
+        update(ref(db), patch).catch((err) => showToast("ตัดยอดขายออกจากบัญชีไม่สำเร็จ: " + err.message));
       }
     }
     update(ref(db, `orders/${uid}/${order.id}`), {
@@ -1562,7 +1635,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
       recordSale(line.menuId, line.qty, line.channel, {
         substitutions: line.substitutions, upcharge: line.upcharge,
         promoDiscount: line.promo, platformId: line.platformId, milkLabel: line.optionsLabel,
-        note: cartNote.trim() || null, orderId,
+        note: cartNote.trim() || null, orderId, paymentMethod: "cash",
       });
     }
     setCart([]);
@@ -2742,7 +2815,7 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, 
       const substitutions = itemMenu ? resolveIngredientAdjustmentsFromOptions(itemMenu, item.options, ingredientsById) : {};
       // แลกเมล็ดฟรี 1 แก้ว — หักรายได้ที่บันทึกออกเท่าราคาแก้วนั้น (1 หน่วย) ไม่งั้นยอดขาย/กำไรจะเพี้ยนสูงเกินจริงทั้งที่ลูกค้าไม่ได้จ่าย
       const promoDiscount = item.freeUnit && itemMenu ? itemMenu.priceStore + upcharge : 0;
-      recordSale(item.menuId, item.qty, "online", { upcharge, substitutions, promoDiscount, milkLabel: (item.options || []).map((o) => o.label).join(", ") || null, orderId: order.id });
+      recordSale(item.menuId, item.qty, "online", { upcharge, substitutions, promoDiscount, milkLabel: (item.options || []).map((o) => o.label).join(", ") || null, orderId: order.id, paymentMethod: order.paymentMethod });
     }
     showToast(`ยืนยันออเดอร์ ${order.customerName || order.customerPhone} แล้ว บันทึกยอดขายให้อัตโนมัติ`);
   }
@@ -5859,7 +5932,7 @@ function AccountingPanel({ transactions, onSave, onDelete, showToast }) {
           const isIncome = transaction.type === "income";
           return <div className="acc-row" key={transaction.id}>
             <div className="acc-col-date" style={{ color:POS.gray, fontSize:11.5 }}>{new Date(`${transaction.transactionDate}T00:00:00`).toLocaleDateString("th-TH", { day:"numeric", month:"short", year:"2-digit" })}</div>
-            <div className="acc-col-description" style={{ minWidth:0 }}><div style={{ color:POS.navy, fontSize:13, fontWeight:700, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{transaction.description}</div>{transaction.vendorName && <div style={{ marginTop:2, color:POS.gray, fontSize:10.5 }}>{transaction.vendorName}</div>}</div>
+            <div className="acc-col-description" style={{ minWidth:0 }}><div style={{ color:POS.navy, fontSize:13, fontWeight:700, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{transaction.description}</div>{(transaction.vendorName || transaction.sourceType !== "manual") && <div style={{ marginTop:2, color:POS.gray, fontSize:10.5 }}>{transaction.vendorName || "รายการจากระบบอัตโนมัติ"}</div>}</div>
             <div className="acc-col-category" style={{ color:POS.gray, fontSize:11.5 }}>{accountingCategoryLabel(transaction.type, transaction.category)}</div>
             <div className="acc-col-account" style={{ color:POS.gray, fontSize:11.5 }}>{accountingAccountLabel(transaction.paymentAccount)}</div>
             <div className="acc-col-type"><span className="acc-type" style={{ color:isIncome ? "#15803D" : "#B91C1C", background:isIncome ? "#EAF7EE" : "#FDECEC" }}>{isIncome ? "รายรับ" : "รายจ่าย"}</span></div>
