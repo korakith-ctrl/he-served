@@ -811,6 +811,23 @@ function ShopApp({ uid, user }) {
       .catch((err) => showToast("ปรับเมล็ดไม่สำเร็จ: " + err.message));
   }
 
+  async function createLoyaltyCustomer(name, phone) {
+    const phoneKey = normalizeThaiPhone(phone);
+    if (!phoneKey) throw new Error("กรุณากรอกเบอร์โทรศัพท์ไทยให้ครบ 10 หลัก");
+    const customerRef = ref(db, `customers/${uid}/${phoneKey}`);
+    const result = await runTransaction(customerRef, (current) => current || {
+      phone: phoneKey,
+      name: String(name || "").trim(),
+      beans: 0,
+      lifetimeBeans: 0,
+      redeemedCount: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    if (!result.committed) throw new Error("เพิ่มลูกค้าไม่สำเร็จ");
+    return result.snapshot.val();
+  }
+
   function updateLoyaltyGoal(goal) {
     updateData((next) => { next.settings.loyaltyBeanGoal = Math.max(1, Number(goal) || 10); });
   }
@@ -1012,7 +1029,7 @@ function ShopApp({ uid, user }) {
           {tab === "promotions" && <PromotionsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "reports" && <ReportsPanel data={dataForDisplay} orders={orders} shopName={data.settings.shopName} showToast={showToast} />}
-          {tab === "loyalty" && <LoyaltyPanel customers={customers} orders={orders} loyaltyBeanGoal={data.settings.loyaltyBeanGoal} adjustCustomerBeans={adjustCustomerBeans} updateLoyaltyGoal={updateLoyaltyGoal} showToast={showToast} backfillEligibleCount={backfillEligibleOrders.length} backfillLoyaltyBeans={backfillLoyaltyBeans} />}
+          {tab === "loyalty" && <LoyaltyPanel customers={customers} orders={orders} loyaltyBeanGoal={data.settings.loyaltyBeanGoal} adjustCustomerBeans={adjustCustomerBeans} createLoyaltyCustomer={createLoyaltyCustomer} updateLoyaltyGoal={updateLoyaltyGoal} showToast={showToast} backfillEligibleCount={backfillEligibleOrders.length} backfillLoyaltyBeans={backfillLoyaltyBeans} />}
           {tab === "options" && <OptionGroupsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "settings" && <SettingsPanel data={data} updateData={updateData} showToast={showToast} uid={uid} />}
         </main>
@@ -1980,269 +1997,309 @@ function TierBadge({ lifetimeBeans, size }) {
   );
 }
 
-function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans, updateLoyaltyGoal, showToast, backfillEligibleCount, backfillLoyaltyBeans }) {
+function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans, createLoyaltyCustomer, updateLoyaltyGoal, showToast, backfillEligibleCount, backfillLoyaltyBeans }) {
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [tierFilter, setTierFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("beans");
   const [goalInput, setGoalInput] = useState(String(loyaltyBeanGoal));
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newPhone, setNewPhone] = useState("");
+  const [addError, setAddError] = useState("");
+  const [adding, setAdding] = useState(false);
   const [adjustFor, setAdjustFor] = useState(null);
   const [adjustAmount, setAdjustAmount] = useState("1");
   const [confirmBackfill, setConfirmBackfill] = useState(false);
-  const [detailFor, setDetailFor] = useState(null);
+  const [detailPhone, setDetailPhone] = useState(null);
+  const [actionMenuPhone, setActionMenuPhone] = useState(null);
+
+  const orderMetrics = useMemo(() => {
+    const map = {};
+    for (const order of orders || []) {
+      const phone = normalizeThaiPhone(order.customerPhone);
+      if (!phone) continue;
+      if (!map[phone]) map[phone] = { cups: 0, doneOrders: 0, lastAt: null };
+      const metric = map[phone];
+      const timestamp = order.completedAt || order.createdAt;
+      if (!metric.lastAt || new Date(timestamp) > new Date(metric.lastAt)) metric.lastAt = timestamp;
+      if (order.status === "done") {
+        metric.doneOrders += 1;
+        metric.cups += (order.items || []).reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+      }
+    }
+    return map;
+  }, [orders]);
+
+  const customerRows = useMemo(() => customers.map((customer) => {
+    const metric = orderMetrics[normalizeThaiPhone(customer.phone)] || { cups: 0, doneOrders: 0, lastAt: null };
+    const beans = Number(customer.beans) || 0;
+    const remaining = Math.max(0, loyaltyBeanGoal - beans);
+    const inactive = !metric.lastAt || (Date.now() - new Date(metric.lastAt).getTime()) / 86400000 > 30;
+    const status = beans >= loyaltyBeanGoal ? "eligible" : beans > 0 && remaining <= 3 ? "near" : inactive ? "inactive" : "collecting";
+    return { ...customer, _metric: metric, _status: status, _tier: loyaltyTierFor(customer.lifetimeBeans).id };
+  }), [customers, orderMetrics, loyaltyBeanGoal]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const list = q
-      ? customers.filter((c) => c.phone.includes(q) || (c.name || "").toLowerCase().includes(q))
-      : customers;
-    return [...list].sort((a, b) => (b.beans || 0) - (a.beans || 0));
-  }, [customers, search]);
+    const rows = customerRows.filter((customer) => {
+      if (q && !`${customer.name || ""} ${customer.phone || ""}`.toLowerCase().includes(q)) return false;
+      if (statusFilter !== "all" && customer._status !== statusFilter) return false;
+      if (tierFilter !== "all" && customer._tier !== tierFilter) return false;
+      return true;
+    });
+    return rows.sort((a, b) => {
+      if (sortBy === "recent") return new Date(b._metric.lastAt || 0) - new Date(a._metric.lastAt || 0);
+      if (sortBy === "name") return (a.name || a.phone || "").localeCompare(b.name || b.phone || "", "th");
+      return (b.beans || 0) - (a.beans || 0) || (b.lifetimeBeans || 0) - (a.lifetimeBeans || 0);
+    });
+  }, [customerRows, search, statusFilter, tierFilter, sortBy]);
 
   const totalCustomers = customers.length;
-  const totalBeansOut = customers.reduce((s, c) => s + (c.beans || 0), 0);
-  const eligibleCount = customers.filter((c) => (c.beans || 0) >= loyaltyBeanGoal).length;
-  const tierCounts = useMemo(() => {
-    const counts = {};
-    for (const t of LOYALTY_TIERS) counts[t.id] = 0;
-    for (const c of customers) counts[loyaltyTierFor(c.lifetimeBeans).id]++;
-    return counts;
-  }, [customers]);
+  const totalBeansOut = customers.reduce((sum, customer) => sum + (Number(customer.beans) || 0), 0);
+  const eligibleCount = customerRows.filter((customer) => customer._status === "eligible").length;
+  const repeatCount = customerRows.filter((customer) => customer._metric.doneOrders >= 2).length;
+  const detailCustomer = customers.find((customer) => customer.phone === detailPhone) || null;
 
   function saveGoal() {
     updateLoyaltyGoal(goalInput);
-    showToast("บันทึกเกณฑ์แลกแล้ว");
+    setSettingsOpen(false);
+    showToast("บันทึกเกณฑ์แลกรางวัลแล้ว");
   }
 
   function submitAdjust(sign) {
-    const n = Math.max(1, Number(adjustAmount) || 1);
-    adjustCustomerBeans(adjustFor.phone, n * sign, adjustFor.name);
+    const amount = Math.max(1, Number(adjustAmount) || 1);
+    adjustCustomerBeans(adjustFor.phone, amount * sign, adjustFor.name);
     setAdjustFor(null);
     setAdjustAmount("1");
   }
 
+  async function submitNewCustomer() {
+    setAddError("");
+    const phone = normalizeThaiPhone(newPhone);
+    if (!phone) { setAddError("กรุณากรอกเบอร์โทรศัพท์ไทยให้ครบ 10 หลัก"); return; }
+    if (customers.some((customer) => normalizeThaiPhone(customer.phone) === phone)) { setAddError("มีลูกค้าเบอร์นี้อยู่แล้ว"); return; }
+    setAdding(true);
+    try {
+      await createLoyaltyCustomer(newName, phone);
+      setNewName(""); setNewPhone(""); setAddOpen(false);
+      showToast("เพิ่มลูกค้าแล้ว");
+    } catch (error) {
+      setAddError(error.message || "เพิ่มลูกค้าไม่สำเร็จ");
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  const statusMeta = {
+    eligible: { label: "พร้อมแลก", color: "#166534", bg: "#DCFCE7" },
+    near: { label: "ใกล้ครบ", color: "#92400E", bg: "#FEF3C7" },
+    inactive: { label: "ไม่มีความเคลื่อนไหว", color: "#6B7280", bg: "#F3F4F6" },
+    collecting: { label: "กำลังสะสม", color: "#1D4ED8", bg: "#DBEAFE" },
+  };
+
   return (
-    <div>
+    <div className="loy-crm">
       <style>{`
-        .loy-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 18px; }
-        @media (max-width: 720px) { .loy-stats { grid-template-columns: 1fr; } }
-        .loy-stat { background: #fff; border: 1px solid ${POS.border}; border-radius: 18px; padding: 16px 18px; }
-        .loy-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; border: 1px solid ${POS.border}; background: #fff; margin-bottom: 8px; }
-        .loy-goal-input { padding: 8px 10px; border-radius: 10px; border: 1px solid ${POS.border}; font-size: 13.5px; width: 80px; font-family: inherit; }
+        .loy-crm-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; }
+        .loy-head-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+        .loy-stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:18px; }
+        .loy-stat { display:flex; align-items:center; gap:12px; min-height:94px; background:#fff; border:1px solid ${POS.border}; border-radius:16px; padding:15px 16px; }
+        .loy-stat-icon { width:42px; height:42px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+        .loy-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; background:#fff; border:1px solid ${POS.border}; border-radius:14px; padding:10px; margin-bottom:12px; }
+        .loy-search { flex:1; min-width:220px; position:relative; }
+        .loy-search input { width:100%; height:40px; padding:0 12px 0 36px; border:1px solid ${POS.border}; border-radius:10px; font-family:inherit; font-size:13px; outline:none; }
+        .loy-filter { height:40px; border:1px solid ${POS.border}; border-radius:10px; background:#fff; padding:0 30px 0 11px; color:${POS.navy}; font-family:inherit; font-size:12.5px; font-weight:600; }
+        .loy-table { background:#fff; border:1px solid ${POS.border}; border-radius:16px; overflow:visible; }
+        .loy-table-head,.loy-row { display:grid; grid-template-columns:minmax(220px,1.5fr) 130px minmax(170px,1fr) 100px 130px 135px 40px; gap:12px; align-items:center; }
+        .loy-table-head { padding:10px 14px; color:${POS.gray}; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; border-bottom:1px solid ${POS.border}; }
+        .loy-row { position:relative; padding:12px 14px; border-bottom:1px solid #F1EFEA; cursor:pointer; transition:background .15s ease; }
+        .loy-row:last-child { border-bottom:none; }
+        .loy-row:hover { background:#FAFAF8; }
+        .loy-customer { display:flex; align-items:center; gap:12px; min-width:0; }
+        .loy-progress { height:6px; border-radius:999px; overflow:hidden; background:#E9E7E2; margin-top:6px; }
+        .loy-progress > span { display:block; height:100%; border-radius:inherit; background:#2563EB; }
+        .loy-action-menu { position:absolute; z-index:12; right:12px; top:46px; width:160px; padding:6px; background:#fff; border:1px solid ${POS.border}; border-radius:11px; box-shadow:0 12px 30px rgba(0,0,0,.14); }
+        .loy-action-menu button { width:100%; display:flex; align-items:center; gap:7px; border:0; border-radius:8px; background:transparent; padding:8px 9px; color:${POS.navy}; font:inherit; font-size:12.5px; text-align:left; }
+        .loy-action-menu button:hover { background:${POS.chipBg}; }
+        .loy-modal-backdrop { position:fixed; inset:0; z-index:80; display:flex; align-items:center; justify-content:center; padding:18px; background:rgba(17,24,39,.45); }
+        .loy-modal { width:min(420px,100%); background:#fff; border-radius:18px; padding:20px; box-shadow:0 24px 70px rgba(0,0,0,.22); }
+        .loy-field { width:100%; height:42px; box-sizing:border-box; border:1px solid ${POS.border}; border-radius:10px; padding:0 11px; font-family:inherit; font-size:14px; outline:none; }
+        @media(max-width:1100px){ .loy-stats{grid-template-columns:repeat(2,minmax(0,1fr));} .loy-table-head,.loy-row{grid-template-columns:minmax(210px,1.5fr) 120px minmax(160px,1fr) 90px 120px 40px;} .loy-col-lifetime{display:none;} }
+        @media(max-width:760px){
+          .loy-crm-head{flex-direction:column;} .loy-head-actions{justify-content:flex-start;} .loy-stats{grid-template-columns:1fr 1fr;}
+          .loy-table{border:0;background:transparent;} .loy-table-head{display:none;} .loy-row{display:grid;grid-template-columns:1fr auto;gap:10px;background:#fff;border:1px solid ${POS.border};border-radius:14px;margin-bottom:8px;padding:13px;}
+          .loy-row:last-child{border-bottom:1px solid ${POS.border};} .loy-customer{grid-column:1/2;} .loy-col-tier{grid-column:1/2;} .loy-col-progress{grid-column:1/-1;} .loy-col-cups,.loy-col-recent,.loy-col-status{font-size:12px;} .loy-col-action{grid-column:2;grid-row:1;}
+        }
+        @media(max-width:480px){ .loy-stats{grid-template-columns:1fr;} .loy-toolbar>*{width:100%;} .loy-filter{width:100%;} }
       `}</style>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, color: "var(--espresso-3)" }}>
-        <IconLoyaltyBeans size={16} aria-label="ลูกค้า / เมล็ดสะสม" />
-        <span style={{ fontSize: 12.5, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".03em" }}>ลูกค้า / เมล็ดสะสม</span>
+      <div className="loy-crm-head">
+        <div>
+          <p style={{ margin:0, color:POS.gray, fontSize:11.5, fontWeight:700, letterSpacing:".04em", textTransform:"uppercase" }}>Loyalty CRM</p>
+          <h2 style={{ margin:"3px 0 4px", color:POS.navy, fontSize:22 }}>ลูกค้าและสมาชิก</h2>
+          <p style={{ margin:0, color:POS.gray, fontSize:12.5 }}>ติดตามความคืบหน้า ระดับสมาชิก และประวัติการกลับมาซื้อซ้ำ</p>
+        </div>
+        <div className="loy-head-actions">
+          <button className="cbtn" onClick={() => { setGoalInput(String(loyaltyBeanGoal)); setSettingsOpen(true); }}><IconRewardSettings size={16} /> <span style={{marginLeft:5}}>ตั้งค่ารางวัล</span></button>
+          <button className="cbtn cbtn-accent" onClick={() => { setAddError(""); setAddOpen(true); }}><IconAddCustomer size={16} /> <span style={{marginLeft:5}}>เพิ่มลูกค้า</span></button>
+        </div>
       </div>
 
       {backfillEligibleCount > 0 && (
-        <div style={{
-          display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10,
-          background: "#FFF4E5", border: "1px solid #FBD5B5", borderRadius: 16, padding: "12px 16px", marginBottom: 16,
-        }}>
-          <div style={{ fontSize: 13, color: "#92400E" }}>
-            <b>พบออเดอร์เก่าที่ทำเสร็จแล้ว {backfillEligibleCount} รายการ</b> ที่มีเบอร์โทรลูกค้า แต่ยังไม่เคยถูกนับเป็นเมล็ดสะสม (เพราะเป็นออเดอร์ก่อนระบบนี้เปิดใช้งาน)
-          </div>
-          <button className="cbtn cbtn-accent" style={{ padding: "8px 14px", fontSize: 13, flexShrink: 0 }} onClick={() => setConfirmBackfill(true)}>
-            คำนวณเมล็ดจากประวัติออเดอร์
-          </button>
+        <div style={{ display:"flex", flexWrap:"wrap", alignItems:"center", justifyContent:"space-between", gap:10, background:"#FFF4E5", border:"1px solid #FBD5B5", borderRadius:14, padding:"11px 14px", marginBottom:16, color:"#92400E", fontSize:12.5 }}>
+          <span><b>พบออเดอร์เก่าที่ยังไม่นับ {backfillEligibleCount} รายการ</b> สามารถคำนวณเมล็ดย้อนหลังได้อย่างปลอดภัย</span>
+          <button className="cbtn" onClick={() => setConfirmBackfill(true)}>คำนวณย้อนหลัง</button>
         </div>
       )}
 
       <div className="loy-stats">
-        <div className="loy-stat" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 46, height: 46, borderRadius: "50%", background: POS.chipBg, color: POS.navy, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <IconCustomers size={24} aria-label="ลูกค้าทั้งหมด" />
-          </div>
-          <div>
-            <div style={{ fontSize: 12, color: POS.gray, fontWeight: 600 }}>ลูกค้าทั้งหมด</div>
-            <div style={{ fontSize: 24, fontWeight: 700, color: POS.navy, marginTop: 2 }}>{totalCustomers} คน</div>
-          </div>
-        </div>
-        <div className="loy-stat" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 46, height: 46, borderRadius: "50%", background: "#F7E9DD", color: "#9A4D16", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <IconLoyaltyBeans size={24} aria-label="เมล็ดสะสมค้างอยู่" />
-          </div>
-          <div>
-            <div style={{ fontSize: 12, color: POS.gray, fontWeight: 600 }}>เมล็ดสะสมค้างอยู่ (ยังไม่แลก)</div>
-            <div style={{ fontSize: 24, fontWeight: 700, color: "#9A4D16", marginTop: 2 }}>{totalBeansOut}</div>
-          </div>
-        </div>
-        <div className="loy-stat" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 46, height: 46, borderRadius: "50%", background: "#E1F2E7", color: "#237A43", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <IconRewardReady size={24} aria-label="พร้อมแลกฟรีตอนนี้" />
-          </div>
-          <div>
-            <div style={{ fontSize: 12, color: POS.gray, fontWeight: 600 }}>พร้อมแลกฟรีตอนนี้</div>
-            <div style={{ fontSize: 24, fontWeight: 700, color: "#237A43", marginTop: 2 }}>{eligibleCount} คน</div>
-          </div>
-        </div>
+        {[
+          { label:"ลูกค้าทั้งหมด", value:`${totalCustomers} คน`, icon:IconCustomers, bg:POS.chipBg, color:POS.navy },
+          { label:"เมล็ดคงค้าง", value:totalBeansOut, icon:IconLoyaltyBeans, bg:"#F7E9DD", color:"#9A4D16" },
+          { label:"พร้อมแลกรางวัล", value:`${eligibleCount} คน`, icon:IconRewardReady, bg:"#E1F2E7", color:"#237A43" },
+          { label:"ลูกค้าซื้อซ้ำ", value:`${repeatCount} คน`, icon:IconRepeatCustomer, bg:"#E8EEFF", color:"#315AA8" },
+        ].map((item) => <div className="loy-stat" key={item.label}><div className="loy-stat-icon" style={{background:item.bg,color:item.color}}><item.icon size={22} aria-label={item.label}/></div><div><div style={{fontSize:11.5,color:POS.gray,fontWeight:600}}>{item.label}</div><div style={{fontSize:22,fontWeight:700,color:item.color,marginTop:2}}>{item.value}</div></div></div>)}
       </div>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
-        {LOYALTY_TIERS.slice().reverse().map((t) => {
-          const RoastIcon = ROAST_ICONS[t.id];
-          return (
-            <span key={t.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12.5, fontWeight: 600, color: t.color, background: t.bg, borderRadius: 999, padding: "5px 12px" }}>
-              <RoastIcon size={16} color={t.color} aria-label={t.label} />
-              {t.label} · {tierCounts[t.id]} คน
-            </span>
-          );
-        })}
+      <div className="loy-toolbar">
+        <div className="loy-search"><Icon name="search" size={15} style={{position:"absolute",left:12,top:12,color:POS.gray}}/><input value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="ค้นหาชื่อหรือเบอร์โทร..." /></div>
+        <select className="loy-filter" value={statusFilter} onChange={(e)=>setStatusFilter(e.target.value)} aria-label="กรองสถานะลูกค้า"><option value="all">ทุกสถานะ</option><option value="eligible">พร้อมแลก</option><option value="near">ใกล้ครบ</option><option value="collecting">กำลังสะสม</option><option value="inactive">ไม่มีความเคลื่อนไหว</option></select>
+        <select className="loy-filter" value={tierFilter} onChange={(e)=>setTierFilter(e.target.value)} aria-label="กรองระดับสมาชิก"><option value="all">ทุกระดับ</option>{LOYALTY_TIERS.map((tier)=><option key={tier.id} value={tier.id}>{tier.label}</option>)}</select>
+        <select className="loy-filter" value={sortBy} onChange={(e)=>setSortBy(e.target.value)} aria-label="เรียงลูกค้า"><option value="beans">เมล็ดมากสุด</option><option value="recent">มาล่าสุด</option><option value="name">ชื่อลูกค้า</option></select>
       </div>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-        <input
-          value={search} onChange={(e) => setSearch(e.target.value)}
-          placeholder="ค้นหาเบอร์โทร/ชื่อลูกค้า..."
-          style={{ padding: "9px 14px", borderRadius: 12, border: `1px solid ${POS.border}`, fontSize: 13.5, minWidth: 220, fontFamily: "inherit" }}
-        />
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <IconRewardSettings size={16} color={POS.gray} aria-label="ตั้งค่าเงื่อนไขรางวัล" />
-          <span style={{ fontSize: 13, color: POS.gray, fontWeight: 600 }}>สะสมกี่เมล็ดแลกฟรี 1 แก้ว</span>
-          <input className="loy-goal-input" value={goalInput} onChange={(e) => setGoalInput(e.target.value)} inputMode="numeric" />
-          <button className="cbtn cbtn-accent" style={{ padding: "8px 14px", fontSize: 13 }} onClick={saveGoal}>บันทึก</button>
-        </div>
-      </div>
-
-      {filtered.length === 0 ? (
-        <EmptyNote text="ยังไม่มีลูกค้าสะสมเมล็ด — เมล็ดจะเริ่มนับอัตโนมัติเมื่อออเดอร์ที่มีเบอร์โทรลูกค้าถูกทำเสร็จ (สถานะ “เสร็จ” บนบอร์ดออเดอร์)" />
-      ) : (
-        <div>
-          {filtered.map((c) => (
-            <div key={c.phone} className="loy-row">
-              <CustomerAvatar customer={c} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <span style={{ fontWeight: 700, fontSize: 14, color: POS.navy }}>{c.name || "(ไม่ทราบชื่อ)"} · {c.phone}</span>
-                  <TierBadge lifetimeBeans={c.lifetimeBeans} size="sm" />
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: POS.gray, marginTop: 1 }}>
-                  <span>สะสม {c.beans || 0} / {loyaltyBeanGoal} เมล็ด</span>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
-                    <IconRepeatCustomer size={16} aria-label="ยอดสะสมตลอดกาล" />
-                    รวมตลอดกาล {c.lifetimeBeans || 0} เมล็ด
-                  </span>
-                </div>
+      {filtered.length === 0 ? <EmptyNote text="ไม่พบลูกค้าที่ตรงกับตัวกรอง" /> : (
+        <div className="loy-table">
+          <div className="loy-table-head"><span>ลูกค้า</span><span>ระดับ</span><span>ความคืบหน้า</span><span>ซื้อทั้งหมด</span><span className="loy-col-lifetime">ล่าสุด</span><span>สถานะ</span><span /></div>
+          {filtered.map((customer) => {
+            const beans = Number(customer.beans) || 0;
+            const progress = Math.min(100, (beans / Math.max(1, loyaltyBeanGoal)) * 100);
+            const status = statusMeta[customer._status];
+            return (
+              <div key={customer.phone} className="loy-row" role="button" tabIndex={0} onClick={() => setDetailPhone(customer.phone)} onKeyDown={(e)=>{if(e.key==="Enter")setDetailPhone(customer.phone);}}>
+                <div className="loy-customer"><CustomerAvatar customer={customer}/><div style={{minWidth:0}}><div style={{fontWeight:700,fontSize:13.5,color:POS.navy,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{customer.name||"(ไม่ทราบชื่อ)"}</div><div style={{fontSize:11.5,color:POS.gray,marginTop:2}}>{customer.phone}</div></div></div>
+                <div className="loy-col-tier"><TierBadge lifetimeBeans={customer.lifetimeBeans} size="sm"/></div>
+                <div className="loy-col-progress"><div style={{display:"flex",justifyContent:"space-between",fontSize:11.5,color:POS.gray}}><span>{beans} / {loyaltyBeanGoal} เมล็ด</span><b style={{color:POS.navy}}>{Math.round(progress)}%</b></div><div className="loy-progress"><span style={{width:`${progress}%`,background:customer._status==="eligible"?"#16A34A":"#2563EB"}}/></div></div>
+                <div className="loy-col-cups" style={{fontSize:12.5,color:POS.navy,fontWeight:600}}>{customer._metric.cups} แก้ว</div>
+                <div className="loy-col-lifetime" style={{fontSize:11.5,color:POS.gray}}>{customer._metric.lastAt?new Date(customer._metric.lastAt).toLocaleDateString("th-TH",{day:"numeric",month:"short",year:"2-digit"}):"ยังไม่มี"}</div>
+                <div className="loy-col-status"><span style={{display:"inline-flex",padding:"4px 8px",borderRadius:999,fontSize:10.5,fontWeight:700,color:status.color,background:status.bg,whiteSpace:"nowrap"}}>{status.label}</span></div>
+                <div className="loy-col-action" onClick={(e)=>e.stopPropagation()}><button className="cbtn" aria-label={`ตัวเลือก ${customer.name||customer.phone}`} aria-expanded={actionMenuPhone===customer.phone} style={{width:34,height:34,padding:0,display:"grid",placeItems:"center"}} onClick={()=>setActionMenuPhone(actionMenuPhone===customer.phone?null:customer.phone)}><IconMoreActions size={18}/></button>{actionMenuPhone===customer.phone&&<div className="loy-action-menu"><button onClick={()=>{setDetailPhone(customer.phone);setActionMenuPhone(null);}}><IconCustomerDetails size={16}/>ดูรายละเอียด</button><button onClick={()=>{setAdjustFor(customer);setActionMenuPhone(null);}}><IconLoyaltyBeans size={16}/>ปรับเมล็ด</button></div>}</div>
               </div>
-              {(c.beans || 0) >= loyaltyBeanGoal && (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700, color: "#237A43", background: "#E1F2E7", borderRadius: 999, padding: "4px 10px", flexShrink: 0 }}>
-                  <IconRewardReady size={16} aria-label="พร้อมแลกฟรี" />แลกฟรีได้
-                </span>
-              )}
-              <button className="cbtn" style={{ padding: "7px 12px", fontSize: 12.5, flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 5 }} onClick={() => setDetailFor(c)} title="ดูรายละเอียดลูกค้า">
-                <IconCustomerDetails size={20} aria-label="ดูรายละเอียดลูกค้า" />รายละเอียด
-              </button>
-              <button className="cbtn" style={{ padding: "7px 12px", fontSize: 12.5, flexShrink: 0 }} onClick={() => setAdjustFor(c)}>ปรับเมล็ด</button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
-      {detailFor && (
-        <LoyaltyDetailModal customer={detailFor} orders={orders} loyaltyBeanGoal={loyaltyBeanGoal} onClose={() => setDetailFor(null)} />
-      )}
+      {detailCustomer && <LoyaltyDetailDrawer customer={detailCustomer} orders={orders} loyaltyBeanGoal={loyaltyBeanGoal} onClose={()=>setDetailPhone(null)} onAdjust={()=>{setDetailPhone(null);setAdjustFor(detailCustomer);}} />}
 
-      {adjustFor && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }} onClick={() => setAdjustFor(null)}>
-          <div style={{ background: "#fff", borderRadius: 18, padding: 22, width: 300 }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: POS.navy, marginBottom: 4 }}>ปรับเมล็ด — {adjustFor.name || adjustFor.phone}</div>
-            <div style={{ fontSize: 12, color: POS.gray, marginBottom: 12 }}>ปัจจุบัน {adjustFor.beans || 0} เมล็ด</div>
-            <input
-              value={adjustAmount} onChange={(e) => setAdjustAmount(e.target.value)} inputMode="numeric"
-              style={{ width: "100%", boxSizing: "border-box", padding: "9px 11px", borderRadius: 10, border: `1px solid ${POS.border}`, fontSize: 14, marginBottom: 12, fontFamily: "inherit" }}
-            />
-            <div style={{ display: "flex", gap: 8 }}>
-              <button className="cbtn cbtn-accent" style={{ flex: 1, padding: "9px 0" }} onClick={() => submitAdjust(1)}>+ เพิ่ม</button>
-              <button className="cbtn cbtn-danger" style={{ flex: 1, padding: "9px 0" }} onClick={() => submitAdjust(-1)}>− หัก</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {adjustFor && <div className="loy-modal-backdrop" onClick={()=>setAdjustFor(null)}><div className="loy-modal" role="dialog" aria-modal="true" aria-label={`ปรับเมล็ด ${adjustFor.name||adjustFor.phone}`} onClick={(e)=>e.stopPropagation()}><h3 style={{margin:"0 0 4px",color:POS.navy}}>ปรับเมล็ด — {adjustFor.name||adjustFor.phone}</h3><p style={{margin:"0 0 14px",fontSize:12,color:POS.gray}}>ปัจจุบัน {adjustFor.beans||0} เมล็ด</p><input className="loy-field" value={adjustAmount} onChange={(e)=>setAdjustAmount(e.target.value)} inputMode="numeric"/><div style={{display:"flex",gap:8,marginTop:14}}><button className="cbtn cbtn-accent" style={{flex:1}} onClick={()=>submitAdjust(1)}>+ เพิ่ม</button><button className="cbtn cbtn-danger" style={{flex:1}} onClick={()=>submitAdjust(-1)}>− หัก</button></div></div></div>}
 
-      {confirmBackfill && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }} onClick={() => setConfirmBackfill(false)}>
-          <div style={{ background: "#fff", borderRadius: 18, padding: 22, width: 340 }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: POS.navy, marginBottom: 8 }}>คำนวณเมล็ดจากประวัติออเดอร์?</div>
-            <div style={{ fontSize: 13, color: POS.gray, marginBottom: 16, lineHeight: 1.5 }}>
-              จะรวมจำนวนแก้วจากออเดอร์เก่าที่ทำเสร็จแล้ว {backfillEligibleCount} รายการ (ที่มีเบอร์โทรลูกค้า) มาบวกเข้าเมล็ดสะสมของแต่ละคนให้ ทำครั้งเดียวพอ กดซ้ำได้แต่จะไม่นับออเดอร์เดิมซ้ำ
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button className="cbtn" style={{ flex: 1, padding: "9px 0" }} onClick={() => setConfirmBackfill(false)}>ยกเลิก</button>
-              <button className="cbtn cbtn-accent" style={{ flex: 1, padding: "9px 0" }} onClick={() => { backfillLoyaltyBeans(); setConfirmBackfill(false); }}>ยืนยัน</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {settingsOpen && <div className="loy-modal-backdrop" onClick={()=>setSettingsOpen(false)}><div className="loy-modal" role="dialog" aria-modal="true" aria-label="ตั้งค่ารางวัล" onClick={(e)=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><h3 style={{margin:0,color:POS.navy}}>ตั้งค่ารางวัล</h3><button className="cbtn" style={{width:32,height:32,padding:0}} onClick={()=>setSettingsOpen(false)}><Icon name="x"/></button></div><p style={{fontSize:12.5,color:POS.gray,lineHeight:1.5}}>กำหนดจำนวนเมล็ดที่ลูกค้าต้องใช้สำหรับแลกเครื่องดื่มฟรี 1 แก้ว</p><label style={{display:"block",fontSize:12,fontWeight:700,color:POS.navy,marginBottom:6}}>จำนวนเมล็ด</label><input className="loy-field" value={goalInput} onChange={(e)=>setGoalInput(e.target.value)} inputMode="numeric"/><button className="cbtn cbtn-accent" style={{width:"100%",marginTop:14}} onClick={saveGoal}>บันทึกการตั้งค่า</button></div></div>}
+
+      {addOpen && <div className="loy-modal-backdrop" onClick={()=>setAddOpen(false)}><div className="loy-modal" role="dialog" aria-modal="true" aria-label="เพิ่มลูกค้า" onClick={(e)=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><h3 style={{margin:0,color:POS.navy}}>เพิ่มลูกค้า</h3><button className="cbtn" style={{width:32,height:32,padding:0}} onClick={()=>setAddOpen(false)}><Icon name="x"/></button></div><label style={{display:"block",fontSize:12,fontWeight:700,color:POS.navy,marginBottom:6}}>ชื่อลูกค้า</label><input className="loy-field" value={newName} onChange={(e)=>setNewName(e.target.value)} placeholder="ไม่บังคับ"/><label style={{display:"block",fontSize:12,fontWeight:700,color:POS.navy,margin:"12px 0 6px"}}>เบอร์โทรศัพท์</label><input className="loy-field" value={newPhone} onChange={(e)=>setNewPhone(e.target.value)} inputMode="tel" placeholder="0xx-xxx-xxxx"/>{addError&&<p style={{fontSize:12,color:"#B91C1C",margin:"8px 0 0"}}>{addError}</p>}<button className="cbtn cbtn-accent" disabled={adding} style={{width:"100%",marginTop:14,opacity:adding?.65:1}} onClick={submitNewCustomer}>{adding?"กำลังเพิ่ม...":"เพิ่มลูกค้า"}</button></div></div>}
+
+      {confirmBackfill && <div className="loy-modal-backdrop" onClick={()=>setConfirmBackfill(false)}><div className="loy-modal" role="alertdialog" aria-modal="true" aria-label="ยืนยันคำนวณเมล็ดย้อนหลัง" onClick={(e)=>e.stopPropagation()}><h3 style={{margin:"0 0 8px",color:POS.navy}}>คำนวณเมล็ดจากประวัติ?</h3><p style={{fontSize:12.5,color:POS.gray,lineHeight:1.5}}>จะเพิ่มเมล็ดจากออเดอร์เก่าที่ยังไม่เคยนับจำนวน {backfillEligibleCount} รายการ ระบบป้องกันการนับซ้ำด้วยรหัสออเดอร์</p><div style={{display:"flex",gap:8}}><button className="cbtn" style={{flex:1}} onClick={()=>setConfirmBackfill(false)}>ยกเลิก</button><button className="cbtn cbtn-accent" style={{flex:1}} onClick={()=>{backfillLoyaltyBeans();setConfirmBackfill(false);}}>ยืนยัน</button></div></div></div>}
     </div>
   );
 }
 
-// ไล่ดูออเดอร์ทั้งหมดของเบอร์นี้ ว่านับเป็นเมล็ดไปกี่ออเดอร์ ไม่นับกี่ออเดอร์ (และเพราะอะไร) — ไว้ตรวจสอบเวลาตัวเลขดูไม่ตรงกับที่คาดไว้
-// เทียบด้วย "9 หลักท้าย" ด้วย ไม่ใช่แค่ตรงเป๊ะ เผื่อเบอร์เดียวกันถูกบันทึกคนละฟอร์แมต (เช่น มี +66 นำหน้าบางออเดอร์) ทำให้แยกเป็นคนละ key กัน
-function LoyaltyDetailModal({ customer, orders, loyaltyBeanGoal, onClose }) {
-  const last9 = customer.phone.slice(-9);
-  const matches = useMemo(() => {
-    return (orders || [])
-      .map((o) => ({ order: o, digits: (o.customerPhone || "").replace(/\D/g, "") }))
-      .filter((x) => x.digits.slice(-9) === last9 && x.digits.length > 0);
-  }, [orders, last9]);
+// Drawer โปรไฟล์ลูกค้า — เก็บข้อมูลสำคัญและ audit trail ไว้ในหน้าเดียวโดยไม่พาผู้ใช้หลุดจากตาราง CRM
+function LoyaltyDetailDrawer({ customer, orders, loyaltyBeanGoal, onClose, onAdjust }) {
+  useEscape(onClose);
+  const normalizedPhone = normalizeThaiPhone(customer.phone);
+  const last9 = normalizedPhone.slice(-9);
+  const matches = useMemo(() => (orders || [])
+    .map((order) => ({ order, normalized: normalizeThaiPhone(order.customerPhone) }))
+    .filter((entry) => entry.normalized && entry.normalized.slice(-9) === last9)
+    .sort((a, b) => new Date(b.order.completedAt || b.order.createdAt || 0) - new Date(a.order.completedAt || a.order.createdAt || 0)), [orders, last9]);
 
-  const exact = matches.filter((x) => x.digits === customer.phone);
-  const variants = matches.filter((x) => x.digits !== customer.phone);
-  const cupsOf = (o) => (o.items || []).reduce((s, it) => s + (it.qty || 0), 0);
-  const countedCups = exact.filter((x) => x.order.beansAwarded === true).reduce((s, x) => s + cupsOf(x.order), 0);
+  const exact = matches.filter((entry) => entry.normalized === normalizedPhone);
+  const variants = matches.filter((entry) => entry.normalized !== normalizedPhone);
+  const cupsOf = (order) => (order.items || []).reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+  const completedOrders = exact.filter((entry) => entry.order.status === "done");
+  const completedCups = completedOrders.reduce((sum, entry) => sum + cupsOf(entry.order), 0);
+  const countedCups = exact.filter((entry) => entry.order.beansAwarded === true).reduce((sum, entry) => sum + cupsOf(entry.order), 0);
+  const beans = Number(customer.beans) || 0;
+  const lifetimeBeans = Number(customer.lifetimeBeans) || 0;
+  const progress = Math.min(100, (beans / Math.max(1, loyaltyBeanGoal)) * 100);
+  const redeemedCount = Number(customer.redeemedCount || customer.rewardsRedeemed) || 0;
+  const nextTier = loyaltyNextTier(lifetimeBeans);
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16 }} onClick={onClose}>
-      <div style={{ background: "#fff", borderRadius: 18, padding: 22, width: 480, maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 2 }}>
-          <span style={{ fontWeight: 700, fontSize: 15, color: POS.navy }}>รายละเอียด — {customer.name || "(ไม่ทราบชื่อ)"} · {customer.phone}</span>
-          <TierBadge lifetimeBeans={customer.lifetimeBeans} />
-        </div>
-        <div style={{ fontSize: 12.5, color: POS.gray, marginBottom: 14 }}>
-          พบออเดอร์เบอร์นี้ {exact.length} รายการ · นับเป็นเมล็ดแล้ว {countedCups} แก้ว (เฉพาะสถานะ "เสร็จ") · ปัจจุบันมี {customer.beans || 0} เมล็ด
-          {(() => {
-            const next = loyaltyNextTier(customer.lifetimeBeans);
-            return next ? ` · อีก ${next.min - (customer.lifetimeBeans || 0)} เมล็ดถึงระดับ ${next.label}` : " · ถึงระดับสูงสุดแล้ว";
-          })()}
-        </div>
-
-        {variants.length > 0 && (
-          <div style={{ background: "#FFF4E5", border: "1px solid #FBD5B5", borderRadius: 12, padding: "10px 12px", marginBottom: 14, fontSize: 12.5, color: "#92400E" }}>
-            <b>พบเบอร์ใกล้เคียงที่บันทึกคนละฟอร์แมต {variants.length} ออเดอร์</b> (9 หลักท้ายตรงกันแต่ไม่ตรงเป๊ะ — อาจมี +66 หรืออักขระอื่นปนมา) ยังไม่ถูกนับรวมให้เพราะระบบถือเป็นคนละเบอร์:
-            <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 3 }}>
-              {variants.map((x) => (
-                <div key={x.order.id}>เบอร์ที่บันทึก "{x.order.customerPhone}" ({ORDER_STATUS_LABEL[x.order.status] || x.order.status}, {cupsOf(x.order)} แก้ว)</div>
-              ))}
+    <div className="loy-drawer-backdrop" onClick={onClose}>
+      <style>{`
+        .loy-drawer-backdrop { position:fixed; inset:0; z-index:90; display:flex; justify-content:flex-end; background:rgba(17,24,39,.36); }
+        .loy-drawer { width:min(480px,100%); height:100%; display:flex; flex-direction:column; background:#fff; box-shadow:-18px 0 55px rgba(17,24,39,.16); animation:loyDrawerIn .2s ease-out; }
+        .loy-drawer-head { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; padding:20px; border-bottom:1px solid ${POS.border}; }
+        .loy-drawer-body { flex:1; overflow-y:auto; padding:18px 20px 24px; }
+        .loy-drawer-foot { display:flex; gap:8px; padding:14px 20px; border-top:1px solid ${POS.border}; background:#fff; }
+        .loy-profile-stats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin:12px 0 22px; }
+        .loy-profile-stat { padding:11px; border:1px solid ${POS.border}; border-radius:12px; background:#FAFAF8; }
+        .loy-timeline { position:relative; display:flex; flex-direction:column; gap:10px; }
+        .loy-timeline-item { position:relative; margin-left:9px; padding:11px 12px 11px 17px; border:1px solid ${POS.border}; border-radius:12px; background:#fff; }
+        .loy-timeline-item:before { content:""; position:absolute; left:-14px; top:17px; width:8px; height:8px; border-radius:50%; background:#2563EB; border:3px solid #DBEAFE; }
+        @keyframes loyDrawerIn { from { transform:translateX(24px); opacity:.5; } to { transform:translateX(0); opacity:1; } }
+        @media(max-width:560px){ .loy-drawer{width:100%;} .loy-drawer-head,.loy-drawer-body{padding-left:16px;padding-right:16px;} .loy-drawer-foot{padding:12px 16px;} }
+      `}</style>
+      <aside className="loy-drawer" role="dialog" aria-modal="true" aria-label={`รายละเอียดลูกค้า ${customer.name || customer.phone}`} onClick={(event) => event.stopPropagation()}>
+        <header className="loy-drawer-head">
+          <div style={{ display:"flex", alignItems:"center", gap:12, minWidth:0 }}>
+            <CustomerAvatar customer={customer} />
+            <div style={{ minWidth:0 }}>
+              <h3 style={{ margin:"0 0 3px", color:POS.navy, fontSize:17, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{customer.name || "(ไม่ทราบชื่อ)"}</h3>
+              <div style={{ color:POS.gray, fontSize:12.5 }}>{customer.phone}</div>
+              <div style={{ marginTop:7 }}><TierBadge lifetimeBeans={lifetimeBeans} size="sm" /></div>
             </div>
-            <div style={{ marginTop: 6 }}>ถ้าใช่เบอร์เดียวกันจริง ใช้ปุ่ม "ปรับเมล็ด" เพิ่มจำนวนแก้วจากรายการข้างบนให้เองได้เลย</div>
           </div>
-        )}
+          <button className="cbtn" aria-label="ปิดรายละเอียดลูกค้า" style={{ width:34, height:34, padding:0, display:"grid", placeItems:"center", flexShrink:0 }} onClick={onClose}><Icon name="x" size={16} /></button>
+        </header>
 
-        {exact.length === 0 ? (
-          <EmptyNote text="ไม่พบออเดอร์ที่ตรงเบอร์นี้เป๊ะๆ" />
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {exact.map((x) => {
-              const counted = x.order.beansAwarded === true;
-              return (
-                <div key={x.order.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 10, border: `1px solid ${POS.border}`, background: counted ? "#fff" : "#FAFAFA" }}>
-                  <div style={{ fontSize: 12.5, color: POS.navy }}>
-                    {new Date(x.order.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })} · {cupsOf(x.order)} แก้ว
-                  </div>
-                  <span style={{
-                    fontSize: 11, fontWeight: 700, borderRadius: 999, padding: "3px 9px", flexShrink: 0,
-                    color: counted ? "#15803D" : "#92400E", background: counted ? "#EAF7EE" : "#FFF4E5",
-                  }}>
-                    {counted ? "นับแล้ว" : `ยังไม่นับ (${ORDER_STATUS_LABEL[x.order.status] || x.order.status})`}
-                  </span>
+        <div className="loy-drawer-body">
+          <section style={{ padding:15, borderRadius:14, background:POS.chipBg, border:`1px solid ${POS.border}` }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:10 }}>
+              <div><div style={{ color:POS.gray, fontSize:11.5, fontWeight:700 }}>เมล็ดพร้อมใช้</div><div style={{ marginTop:2, color:POS.navy, fontSize:25, fontWeight:700 }}>{beans} <span style={{ fontSize:12, fontWeight:600, color:POS.gray }}>/ {loyaltyBeanGoal} เมล็ด</span></div></div>
+              <span style={{ fontSize:11.5, fontWeight:700, color:beans >= loyaltyBeanGoal ? "#166534" : "#1D4ED8" }}>{beans >= loyaltyBeanGoal ? "พร้อมแลกรางวัล" : `เหลืออีก ${Math.max(0, loyaltyBeanGoal - beans)}`}</span>
+            </div>
+            <div className="loy-progress" style={{ marginTop:10 }}><span style={{ width:`${progress}%`, background:beans >= loyaltyBeanGoal ? "#16A34A" : "#2563EB" }} /></div>
+            <div style={{ marginTop:9, color:POS.gray, fontSize:11.5 }}>{nextTier ? `อีก ${Math.max(0, nextTier.min - lifetimeBeans)} เมล็ด ถึงระดับ ${nextTier.label}` : "ถึงระดับสมาชิกสูงสุดแล้ว"}</div>
+          </section>
+
+          <div className="loy-profile-stats">
+            <div className="loy-profile-stat"><div style={{ fontSize:10.5, color:POS.gray }}>สะสมตลอดชีพ</div><b style={{ display:"block", marginTop:3, color:POS.navy, fontSize:17 }}>{lifetimeBeans}</b></div>
+            <div className="loy-profile-stat"><div style={{ fontSize:10.5, color:POS.gray }}>ซื้อสำเร็จ</div><b style={{ display:"block", marginTop:3, color:POS.navy, fontSize:17 }}>{completedCups} แก้ว</b></div>
+            <div className="loy-profile-stat"><div style={{ fontSize:10.5, color:POS.gray }}>แลกแล้ว</div><b style={{ display:"block", marginTop:3, color:POS.navy, fontSize:17 }}>{redeemedCount} ครั้ง</b></div>
+          </div>
+
+          {variants.length > 0 && <div style={{ marginBottom:16, padding:"10px 12px", borderRadius:11, background:"#FFF4E5", border:"1px solid #FBD5B5", color:"#92400E", fontSize:11.5 }}><b>พบ {variants.length} ออเดอร์ที่ใช้รูปแบบเบอร์ต่างกัน</b><div style={{ marginTop:3 }}>ตรวจสอบก่อนปรับเมล็ดด้วยตนเอง เพื่อป้องกันการนับผิดคน</div></div>}
+
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:10 }}>
+            <h4 style={{ margin:0, color:POS.navy, fontSize:14 }}>ประวัติออเดอร์</h4>
+            <span style={{ color:POS.gray, fontSize:11.5 }}>{exact.length} ออเดอร์ · นับแล้ว {countedCups} เมล็ด</span>
+          </div>
+          {exact.length === 0 ? <EmptyNote text="ยังไม่มีประวัติออเดอร์" /> : <div className="loy-timeline">
+            {exact.map(({ order }) => {
+              const counted = order.beansAwarded === true;
+              const itemSummary = (order.items || []).map((item) => `${item.name || "สินค้า"} ×${Number(item.qty) || 1}`).join(", ");
+              const statusColor = STATUS_COLORS[order.status] || { color:POS.gray, bg:POS.chipBg };
+              return <div className="loy-timeline-item" key={order.id}>
+                <div style={{ display:"flex", justifyContent:"space-between", gap:8, alignItems:"flex-start" }}>
+                  <div style={{ color:POS.navy, fontSize:12.5, fontWeight:700 }}>{new Date(order.completedAt || order.createdAt).toLocaleString("th-TH", { dateStyle:"medium", timeStyle:"short" })}</div>
+                  <span style={{ flexShrink:0, padding:"3px 7px", borderRadius:999, color:statusColor.color, background:statusColor.bg, fontSize:10, fontWeight:700 }}>{ORDER_STATUS_LABEL[order.status] || order.status}</span>
                 </div>
-              );
+                <div style={{ marginTop:5, color:POS.gray, fontSize:11.5, lineHeight:1.45 }}>{itemSummary || `${cupsOf(order)} แก้ว`}</div>
+                <div style={{ display:"flex", justifyContent:"space-between", gap:8, marginTop:7, fontSize:10.5 }}><span style={{ color:POS.gray }}>#{String(order.id || "").slice(-6).toUpperCase()}</span><b style={{ color:counted ? "#15803D" : "#92400E" }}>{counted ? `นับแล้ว +${cupsOf(order)}` : "ยังไม่นับเมล็ด"}</b></div>
+              </div>;
             })}
-          </div>
-        )}
+          </div>}
+        </div>
 
-        <button className="cbtn" style={{ width: "100%", marginTop: 16, padding: "9px 0" }} onClick={onClose}>ปิด</button>
-      </div>
+        <footer className="loy-drawer-foot">
+          <button className="cbtn" style={{ flex:1 }} onClick={onClose}>ปิด</button>
+          <button className="cbtn cbtn-accent" style={{ flex:1 }} onClick={onAdjust}><IconLoyaltyBeans size={15} /><span style={{ marginLeft:5 }}>ปรับเมล็ด</span></button>
+        </footer>
+      </aside>
     </div>
   );
 }
