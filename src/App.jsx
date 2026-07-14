@@ -6131,12 +6131,15 @@ function exportAccountingCsv(transactions, month) {
 }
 
 function AccountingPanel({ transactions, assets, recurringExpenses, accounts, reconciliations, accountingSettings, periodClosings, sales, overheadPerCup, onSave, onDelete, onSaveAsset, onDeleteAsset, onSaveRecurring, onDeleteRecurring, onUpdateOccurrence, onUpdateAccount, onSaveReconciliation, onSaveSettings, onSetPeriodClosed, showToast }) {
+  const [section, setSection] = useState("overview");
   const [month, setMonth] = useState(todayStr().slice(0, 7));
   const [typeFilter, setTypeFilter] = useState("all");
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState(null);
   const [deleteFor, setDeleteFor] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   const periodTransactions = useMemo(() => transactions.filter((transaction) => !month || String(transaction.transactionDate || "").startsWith(month)), [transactions, month]);
   const paidPeriodTransactions = useMemo(() => periodTransactions.filter((transaction) => !transaction.status || transaction.status === "paid"), [periodTransactions]);
@@ -6150,6 +6153,10 @@ function AccountingPanel({ transactions, assets, recurringExpenses, accounts, re
       return true;
     });
   }, [periodTransactions, typeFilter, query]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pagedTransactions = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  useEffect(() => { setPage(1); }, [month, typeFilter, query, pageSize]);
 
   const cashIncome = paidPeriodTransactions.filter((transaction) => transaction.type === "income").reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
   const cashExpense = paidPeriodTransactions.filter((transaction) => transaction.type === "expense").reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
@@ -6175,6 +6182,7 @@ function AccountingPanel({ transactions, assets, recurringExpenses, accounts, re
   const closedPeriod = month ? periodClosings[month] : null;
 
   function openNew(type) {
+    setSection("transactions");
     const firstManualCategory = ACCOUNTING_CATEGORIES[type].find((category) => !ACCOUNTING_SYSTEM_CATEGORIES.has(category.id));
     setEditing({
       type,
@@ -6209,21 +6217,30 @@ function AccountingPanel({ transactions, assets, recurringExpenses, accounts, re
         .acc-page { --acc-blue:#2563EB; --acc-green:#15803D; --acc-red:#B91C1C; --acc-ink:#172033; --acc-muted:#6B7280; }
         .acc-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; }
         .acc-actions { display:flex; gap:8px; flex-wrap:wrap; }
+        .acc-subnav { position:sticky; top:10px; z-index:20; display:flex; gap:4px; margin-bottom:16px; padding:5px; overflow-x:auto; border:1px solid ${POS.border}; border-radius:13px; background:rgba(255,255,255,.94); backdrop-filter:blur(12px); box-shadow:0 5px 18px rgba(17,24,39,.06); }
+        .acc-subnav button { display:inline-flex; align-items:center; gap:6px; min-height:36px; padding:0 12px; border:0; border-radius:9px; background:transparent; color:var(--acc-muted); font:inherit; font-size:11.5px; font-weight:700; white-space:nowrap; cursor:pointer; }
+        .acc-subnav button.active { color:#1D4ED8; background:#E8EEFF; }
+        .acc-subnav-count { min-width:16px; padding:2px 5px; border-radius:999px; color:#92400E; background:#FFF4E5; font-size:9.5px; text-align:center; }
+        .acc-nav-period { display:flex; align-items:center; gap:5px; margin-left:auto; padding-left:8px; color:var(--acc-muted); font-size:10.5px; white-space:nowrap; }
+        .acc-nav-period input { width:128px; height:34px; box-sizing:border-box; border:1px solid ${POS.border}; border-radius:8px; padding:0 7px; background:#fff; color:var(--acc-ink); font:inherit; font-size:11px; }
+        .acc-overview-links { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:8px; margin-top:12px; }
+        .acc-overview-link { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:11px 12px; border:1px solid ${POS.border}; border-radius:11px; background:#fff; color:${POS.navy}; font:inherit; font-size:11.5px; font-weight:700; cursor:pointer; }
         .acc-kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:12px; }
         .acc-kpi { padding:16px 18px; background:#fff; border:1px solid ${POS.border}; border-radius:15px; }
         .acc-summary-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px; }
         .acc-statement { padding:16px 18px; border:1px solid ${POS.border}; border-radius:15px; background:#fff; }
         .acc-statement-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:7px 0; color:var(--acc-muted); font-size:12.5px; border-bottom:1px solid #F2F0EC; }
         .acc-statement-row:last-child { border-bottom:0; }
-        .acc-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px; margin-bottom:12px; border:1px solid ${POS.border}; border-radius:14px; background:#fff; }
+        .acc-toolbar { position:sticky; top:62px; z-index:15; display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px; margin-bottom:12px; border:1px solid ${POS.border}; border-radius:14px; background:rgba(255,255,255,.96); backdrop-filter:blur(10px); }
         .acc-search { position:relative; min-width:220px; flex:1; }
         .acc-search input,.acc-filter { width:100%; height:40px; box-sizing:border-box; border:1px solid ${POS.border}; border-radius:10px; background:#fff; color:var(--acc-ink); font:inherit; font-size:12.5px; outline:none; }
         .acc-search input { padding:0 12px 0 36px; }
         .acc-filter { width:auto; min-width:132px; padding:0 10px; }
-        .acc-table { overflow:hidden; border:1px solid ${POS.border}; border-radius:15px; background:#fff; }
+        .acc-table { overflow:auto; max-height:62vh; border:1px solid ${POS.border}; border-radius:15px; background:#fff; }
         .acc-row { display:grid; grid-template-columns:105px minmax(210px,1.5fr) 155px 120px 130px 110px 72px; gap:12px; align-items:center; padding:12px 14px; border-bottom:1px solid #F0EEE9; }
         .acc-row:last-child { border-bottom:0; }
-        .acc-row-head { padding-top:9px; padding-bottom:9px; color:var(--acc-muted); background:#FAFAF8; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; }
+        .acc-row-head { position:sticky; top:0; z-index:3; padding-top:9px; padding-bottom:9px; color:var(--acc-muted); background:#FAFAF8; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; }
+        .acc-pagination { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:10px; padding:9px 11px; border:1px solid ${POS.border}; border-radius:11px; background:#fff; color:var(--acc-muted); font-size:11.5px; }
         .acc-type { display:inline-flex; width:max-content; align-items:center; gap:5px; padding:4px 8px; border-radius:7px; font-size:10.5px; font-weight:700; }
         .acc-modal-bg { position:fixed; inset:0; z-index:90; display:flex; align-items:center; justify-content:center; padding:18px; background:rgba(17,24,39,.44); }
         .acc-modal { width:min(520px,100%); max-height:calc(100vh - 36px); overflow-y:auto; padding:20px; border-radius:18px; background:#fff; box-shadow:0 24px 70px rgba(0,0,0,.2); }
@@ -6231,8 +6248,8 @@ function AccountingPanel({ transactions, assets, recurringExpenses, accounts, re
         .acc-field-label { display:block; margin-bottom:6px; color:var(--acc-muted); font-size:11.5px; font-weight:700; }
         .acc-field { width:100%; height:42px; box-sizing:border-box; padding:0 11px; border:1px solid ${POS.border}; border-radius:10px; background:#fff; color:var(--acc-ink); font:inherit; font-size:13.5px; outline:none; }
         textarea.acc-field { height:76px; padding-top:10px; resize:vertical; }
-        @media(max-width:1100px){ .acc-kpis{grid-template-columns:repeat(2,minmax(0,1fr));} .acc-row{grid-template-columns:95px minmax(190px,1.5fr) 140px 115px 110px 72px;} .acc-col-account{display:none;} }
-        @media(max-width:760px){ .acc-head{flex-direction:column;} .acc-kpis,.acc-summary-grid{grid-template-columns:1fr;} .acc-table{border:0;background:transparent;overflow:visible;} .acc-row-head{display:none;} .acc-row{display:grid;grid-template-columns:1fr auto;gap:7px;margin-bottom:8px;padding:13px;border:1px solid ${POS.border};border-radius:13px;background:#fff;} .acc-row:last-child{border-bottom:1px solid ${POS.border};} .acc-col-date,.acc-col-category,.acc-col-account{font-size:11.5px;} .acc-col-description{grid-column:1/2;grid-row:1;} .acc-col-amount{grid-column:2;grid-row:1;text-align:right;} .acc-col-type{grid-column:1;} .acc-col-actions{grid-column:2;grid-row:2/4;} }
+        @media(max-width:1100px){ .acc-kpis{grid-template-columns:repeat(2,minmax(0,1fr));} .acc-overview-links{grid-template-columns:repeat(3,minmax(0,1fr));} .acc-row{grid-template-columns:95px minmax(190px,1.5fr) 140px 115px 110px 72px;} .acc-col-account{display:none;} }
+        @media(max-width:760px){ .acc-head{flex-direction:column;} .acc-kpis,.acc-summary-grid{grid-template-columns:1fr;} .acc-overview-links{grid-template-columns:1fr 1fr;} .acc-subnav{top:6px;} .acc-nav-period{margin-left:4px;} .acc-toolbar{position:static;} .acc-table{max-height:none;border:0;background:transparent;overflow:visible;} .acc-row-head{display:none;} .acc-row{display:grid;grid-template-columns:1fr auto;gap:7px;margin-bottom:8px;padding:13px;border:1px solid ${POS.border};border-radius:13px;background:#fff;} .acc-row:last-child{border-bottom:1px solid ${POS.border};} .acc-col-date,.acc-col-category,.acc-col-account{font-size:11.5px;} .acc-col-description{grid-column:1/2;grid-row:1;} .acc-col-amount{grid-column:2;grid-row:1;text-align:right;} .acc-col-type{grid-column:1;} .acc-col-actions{grid-column:2;grid-row:2/4;} }
         @media(max-width:520px){ .acc-actions>*{flex:1;} .acc-form-grid{grid-template-columns:1fr;} .acc-filter{width:100%;} }
       `}</style>
 
@@ -6248,6 +6265,16 @@ function AccountingPanel({ transactions, assets, recurringExpenses, accounts, re
         </div>
       </div>
 
+      <nav className="acc-subnav" aria-label="ส่วนต่างๆ ของระบบบัญชี">
+        {[
+          ["overview","ภาพรวม","layout-dashboard"], ["transactions","รายรับ–รายจ่าย","receipt"],
+          ["assets","สินทรัพย์","tools"], ["recurring","ค่าใช้จ่ายประจำ","calendar-repeat"],
+          ["accounts","บัญชีเงิน","building-bank"], ["tax","ภาษีและปิดงวด","file-invoice"],
+        ].map(([id,label,icon])=><button key={id} className={section===id?"active":""} onClick={()=>setSection(id)}><Icon name={icon} size={14}/>{label}{id==="recurring"&&transactions.filter((transaction)=>transaction.status==="pending").length>0&&<span className="acc-subnav-count">{transactions.filter((transaction)=>transaction.status==="pending").length}</span>}</button>)}
+        <div className="acc-nav-period"><span>งวด</span><input type="month" value={month} onChange={(event)=>setMonth(event.target.value)} aria-label="งวดบัญชี"/></div>
+      </nav>
+
+      {section === "overview" && <>
       <div className="acc-kpis">
         <AccountingKpi label="รายได้สุทธิ" value={netRevenue} color="#15803D" background="#EAF7EE" icon="cash" />
         <AccountingKpi label="ต้นทุนขาย" value={costOfGoods} color="#92400E" background="#FFF4E5" icon="cup" />
@@ -6277,9 +6304,14 @@ function AccountingPanel({ transactions, assets, recurringExpenses, accounts, re
         </section>
       </div>
 
+      <div className="acc-overview-links">
+        {[["transactions","ดูรายการทั้งหมด","receipt"],["assets",`${assets.length} สินทรัพย์`,"tools"],["recurring",`${transactions.filter((transaction)=>transaction.status==="pending").length} รายการรอชำระ`,"calendar-repeat"],["accounts","กระทบยอดบัญชี","building-bank"],["tax",closedPeriod?"ปิดงวดแล้ว":"ภาษีและปิดงวด","file-invoice"]].map(([id,label,icon])=><button className="acc-overview-link" key={id} onClick={()=>setSection(id)}><span style={{display:"inline-flex",alignItems:"center",gap:6}}><Icon name={icon} size={14}/>{label}</span><Icon name="chevron-right" size={13}/></button>)}
+      </div>
+      </>}
+
+      {section === "transactions" && <>
       <div className="acc-toolbar">
         <div className="acc-search"><Icon name="search" size={15} style={{ position:"absolute", left:12, top:12, color:POS.gray }} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ค้นหารายละเอียด คู่ค้า หรือหมวด..." /></div>
-        <input className="acc-filter" type="month" value={month} onChange={(event) => setMonth(event.target.value)} aria-label="เลือกเดือน" />
         <select className="acc-filter" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} aria-label="กรองประเภทรายการ"><option value="all">ทุกรายการ</option><option value="income">รายรับ</option><option value="expense">รายจ่าย</option></select>
         <button className="cbtn" onClick={()=>exportAccountingCsv(periodTransactions,month)}><Icon name="download" size={14}/><span style={{marginLeft:4}}>Export CSV</span></button>
         {month && <button className="cbtn" onClick={() => setMonth("")}>ดูทั้งหมด</button>}
@@ -6288,7 +6320,7 @@ function AccountingPanel({ transactions, assets, recurringExpenses, accounts, re
 
       {filtered.length === 0 ? <div style={{ padding:30, border:`1px solid ${POS.border}`, borderRadius:15, background:"#fff", textAlign:"center" }}><Icon name="book-2" size={27} style={{ color:POS.gray }} /><p style={{ margin:"8px 0 2px", color:POS.navy, fontWeight:700, fontSize:13.5 }}>ยังไม่มีรายการในช่วงนี้</p><p style={{ margin:0, color:POS.gray, fontSize:12 }}>เพิ่มรายรับหรือรายจ่ายรายการแรกได้จากปุ่มด้านบน</p></div> : <div className="acc-table">
         <div className="acc-row acc-row-head"><span>วันที่</span><span>รายละเอียด</span><span>หมวด</span><span>ช่องทางเงิน</span><span>ประเภท</span><span style={{ textAlign:"right" }}>จำนวน</span><span /></div>
-        {filtered.map((transaction) => {
+        {pagedTransactions.map((transaction) => {
           const isIncome = transaction.type === "income";
           return <div className="acc-row" key={transaction.id}>
             <div className="acc-col-date" style={{ color:POS.gray, fontSize:11.5 }}>{new Date(`${transaction.transactionDate}T00:00:00`).toLocaleDateString("th-TH", { day:"numeric", month:"short", year:"2-digit" })}</div>
@@ -6301,11 +6333,13 @@ function AccountingPanel({ transactions, assets, recurringExpenses, accounts, re
           </div>;
         })}
       </div>}
+      {filtered.length > 0 && <div className="acc-pagination"><span>แสดง {(currentPage-1)*pageSize+1}–{Math.min(currentPage*pageSize,filtered.length)} จาก {filtered.length} รายการ</span><div style={{display:"flex",alignItems:"center",gap:6}}><label htmlFor="acc-page-size">ต่อหน้า</label><select id="acc-page-size" className="acc-filter" style={{height:32,minWidth:68}} value={pageSize} onChange={(event)=>setPageSize(Number(event.target.value))}><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select><button className="cbtn" disabled={currentPage<=1} onClick={()=>setPage((value)=>Math.max(1,value-1))}><Icon name="chevron-left" size={13}/> ก่อนหน้า</button><span style={{minWidth:48,textAlign:"center"}}>{currentPage}/{totalPages}</span><button className="cbtn" disabled={currentPage>=totalPages} onClick={()=>setPage((value)=>Math.min(totalPages,value+1))}>ถัดไป <Icon name="chevron-right" size={13}/></button></div></div>}
+      </>}
 
-      <AccountingAssetsSection assets={assets} onSave={onSaveAsset} onDelete={onDeleteAsset} showToast={showToast} />
-      <AccountingRecurringSection templates={recurringExpenses} transactions={transactions} onSave={onSaveRecurring} onDelete={onDeleteRecurring} onUpdateOccurrence={onUpdateOccurrence} showToast={showToast} />
-      <AccountingAccountsSection accounts={accounts} transactions={transactions} reconciliations={reconciliations} onUpdateAccount={onUpdateAccount} onSaveReconciliation={onSaveReconciliation} showToast={showToast} />
-      <AccountingTaxClosingSection month={month} settings={accountingSettings} outputVat={outputVat} inputVat={inputVat} closedPeriod={closedPeriod} summary={{netRevenue,costOfGoods,operatingExpenses,depreciationExpense,netProfit,netCash,outputVat,inputVat}} onSaveSettings={onSaveSettings} onSetPeriodClosed={onSetPeriodClosed} showToast={showToast}/>
+      {section === "assets" && <AccountingAssetsSection assets={assets} onSave={onSaveAsset} onDelete={onDeleteAsset} showToast={showToast} />}
+      {section === "recurring" && <AccountingRecurringSection templates={recurringExpenses} transactions={transactions} onSave={onSaveRecurring} onDelete={onDeleteRecurring} onUpdateOccurrence={onUpdateOccurrence} showToast={showToast} />}
+      {section === "accounts" && <AccountingAccountsSection accounts={accounts} transactions={transactions} reconciliations={reconciliations} onUpdateAccount={onUpdateAccount} onSaveReconciliation={onSaveReconciliation} showToast={showToast} />}
+      {section === "tax" && <AccountingTaxClosingSection month={month} settings={accountingSettings} outputVat={outputVat} inputVat={inputVat} closedPeriod={closedPeriod} summary={{netRevenue,costOfGoods,operatingExpenses,depreciationExpense,netProfit,netCash,outputVat,inputVat}} onSaveSettings={onSaveSettings} onSetPeriodClosed={onSetPeriodClosed} showToast={showToast}/>}
 
       {editing && <AccountingTransactionModal transaction={editing} vatRegistered={accountingSettings.vatRegistered} onClose={() => setEditing(null)} onSave={async (value) => { await onSave(value); setEditing(null); showToast(value.id ? "แก้ไขรายการบัญชีแล้ว" : "บันทึกรายการบัญชีแล้ว"); }} />}
       {deleteFor && <div className="acc-modal-bg" onClick={() => !deleting && setDeleteFor(null)}><div className="acc-modal" style={{ width:"min(390px,100%)" }} role="alertdialog" aria-modal="true" onClick={(event) => event.stopPropagation()}><h3 style={{ margin:"0 0 7px", color:POS.navy }}>ลบรายการนี้?</h3><p style={{ margin:"0 0 16px", color:POS.gray, fontSize:12.5 }}>“{deleteFor.description}” จำนวน ฿{money(deleteFor.amount)} จะถูกลบออกจากสมุดบัญชี</p><div style={{ display:"flex", gap:8 }}><button className="cbtn" disabled={deleting} style={{ flex:1 }} onClick={() => setDeleteFor(null)}>ยกเลิก</button><button className="cbtn cbtn-danger" disabled={deleting} style={{ flex:1 }} onClick={confirmDelete}>{deleting ? "กำลังลบ..." : "ลบรายการ"}</button></div></div></div>}
