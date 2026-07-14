@@ -1306,13 +1306,12 @@ const POS = {
 
 // ระดับสมาชิกล้อธีมคั่วกาแฟ คำนวณจาก lifetimeBeans (เมล็ดสะสมตลอดกาล ไม่ลดตอนแลกของ) — เรียงจากสูงไปต่ำ
 // เพื่อหาระดับปัจจุบันง่ายๆ ด้วย .find() ตัวแรกที่ min ต่ำกว่าหรือเท่ากับที่มี เป็นแค่ป้ายแสดงสถานะ ยังไม่มีสิทธิพิเศษผูกกับระดับ
-// สี tier แต่ละระดับผ่าน WCAG AA กับพื้นหลัง bg ของตัวเอง (ทดสอบไว้แล้วตอนออกแบบ badge เดิม) — ไอคอนของแต่ละระดับ
-// อยู่ใน ROAST_ICONS (custom SVG set ด้านบน) ไม่ใช้ emoji แล้ว
+// Tier ใช้ label ขนาดเล็กและสีอ่อน เพื่อแยกชั้นข้อมูลออกจาก status badge ที่เน้นการดำเนินการ
 const LOYALTY_TIERS = [
-  { id: "reserve", label: "Reserve", min: 100, color: "#8B5E00", bg: "#FBF0D9" },
-  { id: "dark", label: "Dark Roast", min: 50, color: "#3B2410", bg: "#EDE4DA" },
-  { id: "medium", label: "Medium Roast", min: 20, color: "#B45309", bg: "#FFF1DE" },
-  { id: "light", label: "Light Roast", min: 0, color: "#8A6D3B", bg: "#FAF3E4" },
+  { id: "reserve", label: "Reserve", shortLabel: "Reserve", min: 100, color: "#7A5A00", bg: "#FFF9E5", border: "#E8D28B" },
+  { id: "dark", label: "Dark Roast", shortLabel: "Dark", min: 50, color: "#5B3824", bg: "#F7F1EC", border: "#DDCBBE" },
+  { id: "medium", label: "Medium Roast", shortLabel: "Medium", min: 20, color: "#9A5B13", bg: "#FFF8ED", border: "#F1D7AD" },
+  { id: "light", label: "Light Roast", shortLabel: "Light", min: 0, color: "#475569", bg: "#F8FAFC", border: "#E2E8F0" },
 ];
 function loyaltyTierFor(lifetimeBeans) {
   return LOYALTY_TIERS.find((t) => (lifetimeBeans || 0) >= t.min) || LOYALTY_TIERS[LOYALTY_TIERS.length - 1];
@@ -1985,14 +1984,23 @@ function CustomerAvatar({ customer }) {
 function TierBadge({ lifetimeBeans, size }) {
   const tier = loyaltyTierFor(lifetimeBeans);
   const dense = size === "sm";
-  const RoastIcon = ROAST_ICONS[tier.id];
   return (
-    <span style={{
-      display: "inline-flex", alignItems: "center", gap: 4, fontWeight: 700, borderRadius: 999, flexShrink: 0,
-      fontSize: dense ? 10.5 : 12, padding: dense ? "3px 8px" : "4px 10px", color: tier.color, background: tier.bg,
-    }}>
-      <RoastIcon size={16} color={tier.color} aria-label={`ระดับ ${tier.label}`} />
-      {tier.label}
+    <span
+      aria-label={`ระดับสมาชิก ${tier.label}`}
+      title={`ระดับสมาชิก ${tier.label}`}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 7, height: dense ? 24 : 28, boxSizing: "border-box",
+        padding: dense ? "0 8px" : "0 10px", borderRadius: 8, border: `1px solid ${tier.border}`,
+        color: tier.color, background: tier.bg, fontSize: dense ? 11 : 12, fontWeight: 600,
+        letterSpacing: ".01em", lineHeight: 1, whiteSpace: "nowrap", flexShrink: 0,
+      }}
+    >
+      <span aria-hidden="true" style={{
+        width: 6, height: 6, flexShrink: 0, background: tier.color,
+        borderRadius: tier.id === "reserve" ? 1 : "50%",
+        transform: tier.id === "reserve" ? "rotate(45deg)" : "none",
+      }} />
+      {tier.shortLabel}
     </span>
   );
 }
