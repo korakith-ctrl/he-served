@@ -400,6 +400,13 @@ function todayStr(d = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+function normalizeThaiPhone(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (/^66\d{9}$/.test(digits)) return `0${digits.slice(2)}`;
+  if (/^0\d{9}$/.test(digits)) return digits;
+  return "";
+}
+
 function playOrderChime() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -513,6 +520,7 @@ function ShopApp({ uid, user }) {
   const prevPendingCount = useRef(0);
   const isFirstOrdersSnapshot = useRef(true);
   const autoRecordedRef = useRef(new Set());
+  const loyaltyRepairAttemptedRef = useRef(new Set());
 
   const shopRef = ref(db, "shops/" + uid);
   const isFirstSnapshot = useMemo(() => ({ current: true }), [uid]);
@@ -629,6 +637,30 @@ function ShopApp({ uid, user }) {
     return { ...data, sales: salesRecords.filter((s) => !s.orderId || !cancelledOrderIds.has(s.orderId)) };
   }, [data, salesRecords, cancelledOrderIds]);
 
+  // รุ่นที่เริ่มบันทึก completedAt เคยตั้ง beansAwarded ก่อนเรียกฟังก์ชันเพิ่มเมล็ด และฟังก์ชันไม่ได้ถูกส่งเข้า OrdersPanel
+  // ทำให้ order ดูเหมือนนับแล้วทั้งที่ transaction ลูกค้าไม่เคยเกิดขึ้น กู้เฉพาะออเดอร์ช่วงนั้นอัตโนมัติจาก marker ราย order
+  useEffect(() => {
+    const customersByPhone = {};
+    for (const customer of customers) {
+      const phoneKey = normalizeThaiPhone(customer.phone);
+      if (phoneKey) customersByPhone[phoneKey] = customer;
+    }
+    const repairable = orders.filter((order) => {
+      if (order.status !== "done" || !order.completedAt || !order.beansAwarded) return false;
+      const phoneKey = normalizeThaiPhone(order.customerPhone);
+      if (!phoneKey || loyaltyRepairAttemptedRef.current.has(order.id)) return false;
+      return !customersByPhone[phoneKey]?.loyaltyAwards?.[order.id];
+    });
+    if (repairable.length === 0) return;
+    for (const order of repairable) loyaltyRepairAttemptedRef.current.add(order.id);
+    Promise.allSettled(repairable.map((order) => awardLoyaltyBeans(order))).then((results) => {
+      const repaired = results.filter((result) => result.status === "fulfilled" && result.value.cups > 0).length;
+      if (repaired > 0) showToast(`กู้เมล็ดสะสมที่ตกหล่นให้แล้ว ${repaired} ออเดอร์`);
+    });
+    // awardLoyaltyBeans ใช้ uid ปัจจุบันและ transaction แบบ idempotent; จำกัด dependency ให้ทำงานเมื่อ snapshot เปลี่ยนเท่านั้น
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders, customers, uid]);
+
   if (!data) {
     return (
       <div style={{ padding: "3rem", textAlign: "center", color: "#0B4A7A", fontFamily: "sans-serif" }}>
@@ -742,22 +774,32 @@ function ShopApp({ uid, user }) {
 
   // ให้เมล็ดสะสมตอนออเดอร์ถึงสถานะ "เสร็จ" (done) เท่านั้น — ไม่ใช่ตอนยืนยันจ่ายเงิน เพราะกว่าจะถึงมือลูกค้าจริงๆ
   // คือตอนรับแก้วที่หน้าร้าน กันเคสยกเลิก/พลาดหลังจ่ายเงินแล้วนับแต้มไปก่อน — เมล็ด 1 แก้ว = 1 หน่วย นับตาม qty รวมในออเดอร์
-  function awardLoyaltyBeans(order) {
-    const phoneKey = (order.customerPhone || "").replace(/\D/g, "");
-    if (!phoneKey) return;
+  async function awardLoyaltyBeans(order) {
+    const phoneKey = normalizeThaiPhone(order.customerPhone);
+    if (!phoneKey) return { cups: 0, skipped: "invalid-phone" };
     const cups = (order.items || []).reduce((s, it) => s + (it.qty || 0), 0);
-    if (cups <= 0) return;
-    runTransaction(ref(db, `customers/${uid}/${phoneKey}`), (cur) => {
+    if (cups <= 0) return { cups: 0, skipped: "no-items" };
+    const awardedAt = new Date().toISOString();
+    const customerRef = ref(db, `customers/${uid}/${phoneKey}`);
+    const transaction = await runTransaction(customerRef, (cur) => {
       const prev = cur || { phone: phoneKey, name: "", beans: 0, lifetimeBeans: 0, redeemedCount: 0, createdAt: new Date().toISOString() };
+      const loyaltyAwards = prev.loyaltyAwards || {};
+      // ใช้ orderId เป็น idempotency key: transaction ถูกเรียกซ้ำได้โดยไม่เพิ่มเมล็ดซ้ำ
+      // และช่วยกู้ต่อได้หากเพิ่มเมล็ดสำเร็จแต่เขียน beansAwarded กลับเข้า order ไม่สำเร็จชั่วคราว
+      if (loyaltyAwards[order.id]) return prev;
       return {
         ...prev,
         phone: phoneKey,
         name: order.customerName && order.customerName !== "ขายหน้าร้าน" ? order.customerName : prev.name || "",
-        beans: (prev.beans || 0) + cups,
-        lifetimeBeans: (prev.lifetimeBeans || 0) + cups,
-        updatedAt: new Date().toISOString(),
+        beans: (Number(prev.beans) || 0) + cups,
+        lifetimeBeans: (Number(prev.lifetimeBeans) || 0) + cups,
+        loyaltyAwards: { ...loyaltyAwards, [order.id]: { cups, awardedAt } },
+        updatedAt: awardedAt,
       };
-    }).catch((err) => showToast("บันทึกเมล็ดสะสมไม่สำเร็จ: " + err.message));
+    });
+    if (!transaction.committed) throw new Error("transaction เพิ่มเมล็ดไม่สำเร็จ");
+    await update(ref(db, `orders/${uid}/${order.id}`), { beansAwarded: true, beansAwardedAt: awardedAt });
+    return { cups, skipped: null };
   }
 
   // แอดมินปรับเมล็ดมือ (เช่น ลูกค้าทำใบเสร็จหาย/ชดเชยกรณีพิเศษ) — บวก/ลบตรงจากค่าปัจจุบัน กันชนกันด้วย transaction เหมือนกัน
@@ -776,14 +818,15 @@ function ShopApp({ uid, user }) {
   // ให้เมล็ดย้อนหลังสำหรับออเดอร์ "เสร็จ" เก่าที่มีมาก่อนระบบสะสมเมล็ดจะเปิดใช้งาน (ยังไม่เคยติดแฟลก beansAwarded)
   // ใช้ awardLoyaltyBeans ตัวเดียวกับที่ทำงานสด กันตรรกะนับเมล็ดเพี้ยนไปคนละทางกับของจริง — กดซ้ำได้ปลอดภัย
   // เพราะออเดอร์ที่เคยติดแฟลกไปแล้วจะไม่ถูกนับซ้ำอีก
-  const backfillEligibleOrders = orders.filter((o) => o.status === "done" && !o.beansAwarded && (o.customerPhone || "").replace(/\D/g, "").length > 0);
-  function backfillLoyaltyBeans() {
+  const backfillEligibleOrders = orders.filter((o) => o.status === "done" && !o.beansAwarded && normalizeThaiPhone(o.customerPhone));
+  async function backfillLoyaltyBeans() {
     if (backfillEligibleOrders.length === 0) { showToast("ไม่มีออเดอร์เก่าที่ต้องคำนวณเพิ่มแล้ว"); return; }
-    for (const o of backfillEligibleOrders) {
-      update(ref(db, `orders/${uid}/${o.id}`), { beansAwarded: true }).catch(() => {});
-      awardLoyaltyBeans(o);
-    }
-    showToast(`คำนวณเมล็ดย้อนหลังจาก ${backfillEligibleOrders.length} ออเดอร์เก่าให้แล้ว`);
+    const results = await Promise.allSettled(backfillEligibleOrders.map((order) => awardLoyaltyBeans(order)));
+    const completed = results.filter((result) => result.status === "fulfilled" && result.value.cups > 0).length;
+    const failed = results.length - completed;
+    showToast(failed > 0
+      ? `คำนวณเมล็ดสำเร็จ ${completed} ออเดอร์ · ไม่สำเร็จ ${failed} ออเดอร์`
+      : `คำนวณเมล็ดย้อนหลังจาก ${completed} ออเดอร์เก่าให้แล้ว`);
   }
 
   const activeTabInfo = TABS.find((t) => t.id === tab);
@@ -964,7 +1007,7 @@ function ShopApp({ uid, user }) {
 
           {tab === "dashboard" && <Dashboard data={dataForDisplay} setTab={setTab} />}
           {tab === "sell" && <SellPanel data={dataForDisplay} ingredientsById={ingredientsById} recordSale={recordSale} createInstoreOrder={createInstoreOrder} />}
-          {tab === "orders" && <OrdersPanel uid={uid} orders={orders} recordSale={recordSale} cancelOrder={cancelOrder} showToast={showToast} data={data} ingredientsById={ingredientsById} />}
+          {tab === "orders" && <OrdersPanel uid={uid} orders={orders} recordSale={recordSale} cancelOrder={cancelOrder} awardLoyaltyBeans={awardLoyaltyBeans} showToast={showToast} data={data} ingredientsById={ingredientsById} />}
           {tab === "menus" && <MenusPanel data={dataForDisplay} ingredientsById={ingredientsById} updateData={updateData} showToast={showToast} />}
           {tab === "promotions" && <PromotionsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} />}
@@ -2086,7 +2129,7 @@ function LoyaltyDetailModal({ customer, orders, loyaltyBeanGoal, onClose }) {
   const exact = matches.filter((x) => x.digits === customer.phone);
   const variants = matches.filter((x) => x.digits !== customer.phone);
   const cupsOf = (o) => (o.items || []).reduce((s, it) => s + (it.qty || 0), 0);
-  const countedCups = exact.filter((x) => x.order.status === "done").reduce((s, x) => s + cupsOf(x.order), 0);
+  const countedCups = exact.filter((x) => x.order.beansAwarded === true).reduce((s, x) => s + cupsOf(x.order), 0);
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16 }} onClick={onClose}>
@@ -2120,7 +2163,7 @@ function LoyaltyDetailModal({ customer, orders, loyaltyBeanGoal, onClose }) {
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {exact.map((x) => {
-              const counted = x.order.status === "done";
+              const counted = x.order.beansAwarded === true;
               return (
                 <div key={x.order.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 10, border: `1px solid ${POS.border}`, background: counted ? "#fff" : "#FAFAFA" }}>
                   <div style={{ fontSize: 12.5, color: POS.navy }}>
@@ -2401,7 +2444,7 @@ function openOrderStickerPrint(orderOrOrders, shopName) {
 
 const KANBAN_NEXT_LABEL = { pending: "ยืนยันรับเงินแล้ว", preparing: "พร้อมเสิร์ฟ", ready: "เสร็จ / ลูกค้ารับแล้ว" };
 
-function OrdersPanel({ uid, orders, recordSale, cancelOrder, showToast, data, ingredientsById }) {
+function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, showToast, data, ingredientsById }) {
   const prevStatusRef = useRef({});
   const [justMovedIds, setJustMovedIds] = useState(new Set());
   const [dragId, setDragId] = useState(null);
@@ -2451,13 +2494,18 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, showToast, data, in
     // ให้เมล็ดสะสมแค่ครั้งเดียวตอนเข้า "done" ครั้งแรก (กันการ์ดถูกลากออกแล้วลากกลับเข้ามาใหม่นับซ้ำ)
     const awarding = status === "done" && order.status !== "done" && !order.beansAwarded;
     const completing = status === "done" && order.status !== "done";
-    const patch = awarding ? { status, beansAwarded: true } : { status };
+    const patch = { status };
     if (completing) {
       patch.completedAt = order.completedAt || new Date().toISOString();
       patch.completedBy = order.completedBy || uid;
     }
-    update(ref(db, `orders/${uid}/${order.id}`), patch).catch((err) => showToast("อัปเดตไม่สำเร็จ: " + err.message));
-    if (awarding) awardLoyaltyBeans(order);
+    update(ref(db, `orders/${uid}/${order.id}`), patch)
+      .then(async () => {
+        if (!awarding) return;
+        const result = await awardLoyaltyBeans(order);
+        if (result.cups > 0) showToast(`ส่งมอบแล้ว · เพิ่มเมล็ดสะสม +${result.cups}`);
+      })
+      .catch((err) => showToast("อัปเดตสถานะหรือเมล็ดสะสมไม่สำเร็จ: " + err.message));
   }
 
   // แก้ option ได้เฉพาะตอนออเดอร์ยังไม่ยืนยันจ่ายเงิน (ก่อนตัดสต็อก/บันทึกยอดขาย) กันไม่ให้ตัวเลขสต็อก/ต้นทุนที่บันทึกไปแล้วเพี้ยน
