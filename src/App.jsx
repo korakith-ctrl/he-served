@@ -393,7 +393,11 @@ function ingredientPickerOptions(ingredients, currentId) {
 }
 
 function todayStr(d = new Date()) {
-  return d.toISOString().slice(0, 10);
+  const date = d instanceof Date ? d : new Date(d);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function playOrderChime() {
@@ -726,7 +730,12 @@ function ShopApp({ uid, user }) {
         update(ref(db, `sales/${uid}`), patch).catch((err) => showToast("ลบยอดขายไม่สำเร็จ: " + err.message));
       }
     }
-    update(ref(db, `orders/${uid}/${order.id}`), { status: "cancelled", saleRecorded: false })
+    update(ref(db, `orders/${uid}/${order.id}`), {
+      status: "cancelled",
+      saleRecorded: false,
+      cancelledAt: order.cancelledAt || new Date().toISOString(),
+      cancelledBy: order.cancelledBy || uid,
+    })
       .catch((err) => showToast("ยกเลิกไม่สำเร็จ: " + err.message));
     showToast(order.saleRecorded ? "ยกเลิกออเดอร์แล้ว คืนสต็อกและตัดยอดขายออกให้อัตโนมัติ" : "ยกเลิกออเดอร์แล้ว");
   }
@@ -959,7 +968,7 @@ function ShopApp({ uid, user }) {
           {tab === "menus" && <MenusPanel data={dataForDisplay} ingredientsById={ingredientsById} updateData={updateData} showToast={showToast} />}
           {tab === "promotions" && <PromotionsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} />}
-          {tab === "reports" && <ReportsPanel data={dataForDisplay} />}
+          {tab === "reports" && <ReportsPanel data={dataForDisplay} orders={orders} shopName={data.settings.shopName} showToast={showToast} />}
           {tab === "loyalty" && <LoyaltyPanel customers={customers} orders={orders} loyaltyBeanGoal={data.settings.loyaltyBeanGoal} adjustCustomerBeans={adjustCustomerBeans} updateLoyaltyGoal={updateLoyaltyGoal} showToast={showToast} backfillEligibleCount={backfillEligibleOrders.length} backfillLoyaltyBeans={backfillLoyaltyBeans} />}
           {tab === "options" && <OptionGroupsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "settings" && <SettingsPanel data={data} updateData={updateData} showToast={showToast} uid={uid} />}
@@ -2441,7 +2450,12 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, showToast, data, in
   function setStatus(order, status) {
     // ให้เมล็ดสะสมแค่ครั้งเดียวตอนเข้า "done" ครั้งแรก (กันการ์ดถูกลากออกแล้วลากกลับเข้ามาใหม่นับซ้ำ)
     const awarding = status === "done" && order.status !== "done" && !order.beansAwarded;
+    const completing = status === "done" && order.status !== "done";
     const patch = awarding ? { status, beansAwarded: true } : { status };
+    if (completing) {
+      patch.completedAt = order.completedAt || new Date().toISOString();
+      patch.completedBy = order.completedBy || uid;
+    }
     update(ref(db, `orders/${uid}/${order.id}`), patch).catch((err) => showToast("อัปเดตไม่สำเร็จ: " + err.message));
     if (awarding) awardLoyaltyBeans(order);
   }
@@ -2549,21 +2563,32 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, showToast, data, in
     }
   }
 
+  const [today, setToday] = useState(() => todayStr());
+  useEffect(() => {
+    const timer = window.setInterval(() => setToday(todayStr()), 60000);
+    return () => window.clearInterval(timer);
+  }, []);
   const columns = useMemo(() => {
     const map = { pending: [], preparing: [], ready: [], done: [] };
     for (const o of orders) {
       // "paid" ไม่ใช่ 1 ใน 4 สถานะ Kanban แล้ว (รวมเข้ากับ "preparing") — กันไว้เผื่อ order ค้างที่ paid
       // ชั่วคราวจาก race condition ของสลิปยืนยันอัตโนมัติ ไม่ให้การ์ดหายไปจากบอร์ด
       const col = o.status === "paid" ? "preparing" : o.status;
+      if (col === "done" && todayStr(new Date(o.completedAt || o.createdAt)) !== today) continue;
       if (map[col]) map[col].push(o);
     }
-    for (const k of Object.keys(map)) map[k].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+    for (const k of Object.keys(map)) {
+      map[k].sort((a, b) => {
+        const aTime = k === "done" ? (a.completedAt || a.createdAt) : a.createdAt;
+        const bTime = k === "done" ? (b.completedAt || b.createdAt) : b.createdAt;
+        return new Date(bTime) - new Date(aTime);
+      });
+    }
     return map;
-  }, [orders]);
+  }, [orders, today]);
 
-  const today = todayStr();
   const cancelledToday = orders
-    .filter((o) => o.status === "cancelled" && new Date(o.createdAt).toISOString().slice(0, 10) === today)
+    .filter((o) => o.status === "cancelled" && todayStr(new Date(o.cancelledAt || o.createdAt)) === today)
     .slice(0, 20);
 
   function onCardPointerDown(e, order) {
@@ -2763,6 +2788,10 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, showToast, data, in
           );
         })}
       </div>
+
+      <p style={{ margin: "-18px 0 22px", color: "var(--espresso-2)", fontSize: 11.5 }}>
+        คอลัมน์เสร็จแสดงเฉพาะออเดอร์ของวันนี้ · รายการย้อนหลังดูได้ที่ Report → ประวัติออเดอร์
+      </p>
 
       {draggedOrder && dragPos && (
         <div style={{
@@ -5515,14 +5544,24 @@ function RepTrendChart({ days, byDay }) {
   );
 }
 
-function ReportsPanel({ data }) {
+function ReportsPanel({ data, orders, shopName, showToast }) {
   const [range, setRange] = useState("today");
   const [search, setSearch] = useState("");
   const [channelFilter, setChannelFilter] = useState("all");
   const [historyLimit, setHistoryLimit] = useState(50);
-  const now = useMemo(() => new Date(), []);
+  const [orderStatusFilter, setOrderStatusFilter] = useState("done");
+  const [orderSearch, setOrderSearch] = useState("");
+  const [orderHistoryLimit, setOrderHistoryLimit] = useState(50);
+  const [historyOrder, setHistoryOrder] = useState(null);
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 60000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => { setHistoryLimit(50); }, [range, search, channelFilter]);
+  useEffect(() => { setOrderHistoryLimit(50); }, [range, orderSearch, orderStatusFilter]);
 
   const filtered = useMemo(() => {
     return data.sales.filter((s) => {
@@ -5590,6 +5629,47 @@ function ReportsPanel({ data }) {
     if (search.trim()) { const q = search.trim().toLowerCase(); out = out.filter((s) => s.menuName.toLowerCase().includes(q)); }
     return out;
   }, [filtered, channelFilter, search]);
+
+  const orderHistoryRows = useMemo(() => {
+    const q = orderSearch.trim().toLowerCase();
+    return (orders || [])
+      .filter((order) => order.status === "done" || order.status === "cancelled")
+      .filter((order) => orderStatusFilter === "all" || order.status === orderStatusFilter)
+      .filter((order) => {
+        const timestamp = order.status === "done"
+          ? (order.completedAt || order.createdAt)
+          : (order.cancelledAt || order.createdAt);
+        const d = new Date(timestamp);
+        if (range === "today") return todayStr(d) === todayStr(now);
+        if (range === "week") { const diff = (now - d) / 86400000; return diff >= 0 && diff <= 7; }
+        if (range === "month") return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+        return true;
+      })
+      .filter((order) => {
+        if (!q) return true;
+        const haystack = [
+          order.id,
+          order.id?.slice(-6),
+          order.customerName,
+          order.customerPhone,
+          ...(order.items || []).map((item) => item.name),
+        ].filter(Boolean).join(" ").toLowerCase();
+        return haystack.includes(q);
+      })
+      .sort((a, b) => {
+        const aTime = a.status === "done" ? (a.completedAt || a.createdAt) : (a.cancelledAt || a.createdAt);
+        const bTime = b.status === "done" ? (b.completedAt || b.createdAt) : (b.cancelledAt || b.createdAt);
+        return new Date(bTime) - new Date(aTime);
+      });
+  }, [orders, orderStatusFilter, orderSearch, range, now]);
+
+  function printHistoryOrder(order) {
+    try {
+      openOrderStickerPrint(order, shopName);
+    } catch (error) {
+      showToast(error.message || "เปิดหน้าพิมพ์สติ๊กเกอร์ไม่สำเร็จ");
+    }
+  }
 
   const PERIODS = [["today", "วันนี้"], ["week", "7 วันล่าสุด"], ["month", "เดือนนี้"], ["all", "ทั้งหมด"]];
 
@@ -5729,6 +5809,174 @@ function ReportsPanel({ data }) {
             )}
           </>
         )}
+      </div>
+
+      <div className="rep-card">
+        <DashSectionHeader
+          icon="clipboard-list"
+          text="ประวัติออเดอร์"
+          hint="แยกจากประวัติการขาย: ใช้ตรวจสอบออเดอร์ที่เสร็จแล้วหรือถูกยกเลิก โดยไม่กระทบยอดรายได้และกำไร"
+        />
+        <div className="rep-toolbar" style={{ marginBottom: 14 }}>
+          <div className="rep-period-tabs" aria-label="กรองสถานะประวัติออเดอร์">
+            {[["done", "เสร็จแล้ว"], ["cancelled", "ยกเลิก"], ["all", "ทั้งหมด"]].map(([status, label]) => (
+              <button
+                key={status}
+                type="button"
+                className={"rep-period-tab" + (orderStatusFilter === status ? " active" : "")}
+                onClick={() => setOrderStatusFilter(status)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="rep-search">
+            <Icon name="search" size={14} style={{ position: "absolute", left: 12, color: DASH.gray }} />
+            <input
+              value={orderSearch}
+              onChange={(e) => setOrderSearch(e.target.value)}
+              placeholder="ค้นหาเลขออเดอร์ ชื่อ เบอร์โทร หรือเมนู..."
+              aria-label="ค้นหาประวัติออเดอร์"
+            />
+          </div>
+        </div>
+
+        {orderHistoryRows.length === 0 ? <EmptyNote text="ไม่พบออเดอร์ที่ตรงกับสถานะและช่วงเวลาที่เลือก" /> : (
+          <>
+            <div className="table-scroll">
+              <table className="rep-table rep-table-cards">
+                <thead><tr><th>เวลาสิ้นสุด</th><th>ออเดอร์</th><th>ลูกค้า</th><th>รายการ</th><th>ชำระ</th><th>ยอดรวม</th><th>สถานะ</th><th></th></tr></thead>
+                <tbody>
+                  {orderHistoryRows.slice(0, orderHistoryLimit).map((order) => {
+                    const finishedAt = order.status === "done"
+                      ? (order.completedAt || order.createdAt)
+                      : (order.cancelledAt || order.createdAt);
+                    return (
+                      <tr key={order.id}>
+                        <td data-label="เวลาสิ้นสุด" style={{ whiteSpace: "nowrap" }}>{new Date(finishedAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</td>
+                        <td data-label="ออเดอร์" style={{ whiteSpace: "nowrap", fontWeight: 700 }}>#{order.id.slice(-6).toUpperCase()}</td>
+                        <td data-label="ลูกค้า">
+                          <div style={{ fontWeight: 600 }}>{order.customerName || "ไม่ระบุชื่อ"}</div>
+                          <div style={{ color: DASH.gray, fontSize: 11 }}>{order.customerPhone || "ไม่มีเบอร์โทร"}</div>
+                        </td>
+                        <td className="rep-td-menu" data-label="รายการ">
+                          <span>{(order.items || []).map((item) => `${item.name} ×${item.qty}`).join(", ") || "-"}</span>
+                        </td>
+                        <td data-label="ชำระ" style={{ whiteSpace: "nowrap" }}>{PAYMENT_METHOD_LABEL[order.paymentMethod] || "-"}</td>
+                        <td data-label="ยอดรวม" style={{ whiteSpace: "nowrap", fontWeight: 600 }}>฿{money(order.total)}</td>
+                        <td data-label="สถานะ" style={{ whiteSpace: "nowrap" }}><StatusBadge status={order.status} /></td>
+                        <td data-label="จัดการ">
+                          <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, whiteSpace: "nowrap" }}>
+                            <button type="button" className="cbtn" style={{ padding: "6px 9px" }} onClick={() => setHistoryOrder(order)}>
+                              <Icon name="eye" size={13} /> <span style={{ marginLeft: 4 }}>รายละเอียด</span>
+                            </button>
+                            {order.status === "done" && (
+                              <button type="button" className="cbtn" style={{ padding: "6px 9px" }} onClick={() => printHistoryOrder(order)}>
+                                <Icon name="printer" size={13} /> <span style={{ marginLeft: 4 }}>พิมพ์ซ้ำ</span>
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {orderHistoryRows.length > orderHistoryLimit && (
+              <button className="rep-load-more" onClick={() => setOrderHistoryLimit((n) => n + 50)}>
+                โหลดเพิ่ม ({orderHistoryRows.length - orderHistoryLimit} ออเดอร์ที่เหลือ)
+              </button>
+            )}
+          </>
+        )}
+      </div>
+
+      {historyOrder && (
+        <OrderHistoryModal
+          order={historyOrder}
+          onClose={() => setHistoryOrder(null)}
+          onPrint={historyOrder.status === "done" ? () => printHistoryOrder(historyOrder) : null}
+        />
+      )}
+    </div>
+  );
+}
+
+function OrderHistoryModal({ order, onClose, onPrint }) {
+  useEscape(onClose);
+  const finishedAt = order.status === "done"
+    ? (order.completedAt || order.createdAt)
+    : (order.cancelledAt || order.createdAt);
+
+  return (
+    <div
+      role="presentation"
+      onClick={onClose}
+      style={{ position: "fixed", inset: 0, zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 18, background: "rgba(17,24,39,.48)" }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`รายละเอียดออเดอร์ ${order.id.slice(-6).toUpperCase()}`}
+        onClick={(e) => e.stopPropagation()}
+        style={{ width: "min(620px, 100%)", maxHeight: "min(760px, calc(100vh - 36px))", overflowY: "auto", background: "#fff", borderRadius: 18, padding: 20, boxShadow: "0 24px 70px rgba(0,0,0,.24)" }}
+      >
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
+          <div>
+            <p style={{ margin: 0, color: DASH.gray, fontSize: 11 }}>เลขออเดอร์</p>
+            <h2 style={{ margin: "2px 0 6px", color: "#111827", fontSize: 20 }}>#{order.id.slice(-6).toUpperCase()}</h2>
+            <StatusBadge status={order.status} />
+          </div>
+          <button type="button" className="cbtn" onClick={onClose} aria-label="ปิดรายละเอียด" style={{ display: "grid", width: 34, height: 34, padding: 0, placeItems: "center" }}>
+            <Icon name="x" size={16} />
+          </button>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginBottom: 16 }}>
+          {[
+            ["ลูกค้า", order.customerName || "ไม่ระบุชื่อ"],
+            ["เบอร์โทร", order.customerPhone || "ไม่มีเบอร์โทร"],
+            [order.status === "done" ? "เสร็จเมื่อ" : "ยกเลิกเมื่อ", new Date(finishedAt).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" })],
+            ["วันรับ", formatPickupDateTH(order.pickupDate) || "-"],
+            ["ชำระเงิน", PAYMENT_METHOD_LABEL[order.paymentMethod] || "-"],
+            ["ยอดรวม", `฿${money(order.total)}`],
+          ].map(([label, value]) => (
+            <div key={label} style={{ border: `1px solid ${DASH.border}`, borderRadius: 10, padding: "9px 11px" }}>
+              <div style={{ color: DASH.gray, fontSize: 10.5, marginBottom: 2 }}>{label}</div>
+              <div style={{ color: "#1F2937", fontSize: 13, fontWeight: 600 }}>{value}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ border: `1px solid ${DASH.border}`, borderRadius: 12, overflow: "hidden", marginBottom: 14 }}>
+          {(order.items || []).map((item, index) => (
+            <div key={`${item.menuId || item.name}-${index}`} style={{ padding: "11px 13px", borderBottom: index < (order.items || []).length - 1 ? `1px solid ${DASH.border}` : "none" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 13.5, fontWeight: 700 }}>
+                <span>{item.name} ×{item.qty}</span>
+                <span style={{ whiteSpace: "nowrap" }}>฿{money((item.unitPrice || 0) * (item.qty || 0))}</span>
+              </div>
+              {(item.options || []).length > 0 && (
+                <div style={{ marginTop: 3, color: DASH.gray, fontSize: 11.5 }}>{item.options.map((option) => option.label).join(" · ")}</div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {order.note && (
+          <div style={{ marginBottom: 14, borderRadius: 10, padding: "10px 12px", background: DASH.warningSoft, color: "#92400E", fontSize: 12.5 }}>
+            <b>หมายเหตุ:</b> {order.note}
+          </div>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button type="button" className="cbtn" onClick={onClose}>ปิด</button>
+          {onPrint && (
+            <button type="button" className="cbtn cbtn-accent" onClick={onPrint}>
+              <Icon name="printer" size={14} /> <span style={{ marginLeft: 5 }}>พิมพ์สติ๊กเกอร์ซ้ำ</span>
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
