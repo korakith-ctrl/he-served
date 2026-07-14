@@ -605,6 +605,7 @@ function ShopApp({ uid, user }) {
   const [accountingAccounts, setAccountingAccounts] = useState([]);
   const [accountReconciliations, setAccountReconciliations] = useState([]);
   const [ownerReimbursements, setOwnerReimbursements] = useState([]);
+  const [ownerCapitalMovements, setOwnerCapitalMovements] = useState([]);
   const [accountingSettings, setAccountingSettings] = useState({ vatRegistered:false, vatRate:7, taxId:"", vatRegistrationDate:"" });
   const [accountingPeriodClosings, setAccountingPeriodClosings] = useState({});
   // เช็คแค่ตอน mount ครั้งเดียวไม่พอ — ถ้าหน้าจอเปลี่ยนขนาดทีหลัง (resize, หมุนแท็บเล็ต) โดยไม่ reload หน้า
@@ -718,6 +719,16 @@ function ShopApp({ uid, user }) {
       const rows = Object.entries(value).map(([id, reimbursement]) => ({ id, ...reimbursement }));
       rows.sort((a, b) => `${b.reimbursementDate || ""}${b.createdAt || ""}`.localeCompare(`${a.reimbursementDate || ""}${a.createdAt || ""}`));
       setOwnerReimbursements(rows);
+    });
+    return () => unsub();
+  }, [uid]);
+
+  useEffect(() => {
+    const unsub = onValue(ref(db, `accounting/${uid}/ownerCapitalMovements`), (snap) => {
+      const value = snap.val() || {};
+      const rows = Object.entries(value).map(([id, movement]) => ({ id, ...movement }));
+      rows.sort((a, b) => `${b.movementDate || ""}${b.createdAt || ""}`.localeCompare(`${a.movementDate || ""}${a.createdAt || ""}`));
+      setOwnerCapitalMovements(rows);
     });
     return () => unsub();
   }, [uid]);
@@ -936,6 +947,29 @@ function ShopApp({ uid, user }) {
   async function deleteOwnerReimbursement(reimbursement) {
     if (accountingPeriodClosings[String(reimbursement.reimbursementDate || "").slice(0, 7)]) throw new Error("งวดบัญชีเดือนนี้ถูกปิดแล้ว");
     await set(ref(db, `accounting/${uid}/ownerReimbursements/${reimbursement.id}`), null);
+  }
+
+  async function saveOwnerCapitalMovement(movement) {
+    const now = new Date().toISOString();
+    const id = movement.id || push(ref(db, `accounting/${uid}/ownerCapitalMovements`)).key;
+    if (accountingPeriodClosings[String(movement.movementDate || "").slice(0, 7)]) throw new Error("งวดบัญชีเดือนนี้ถูกปิดแล้ว");
+    const payload = {
+      kind: movement.kind === "conversion" ? "conversion" : "contribution",
+      movementDate: movement.movementDate,
+      amount: Math.round((Number(movement.amount) || 0) * 100) / 100,
+      paymentAccount: movement.kind === "conversion" ? null : (movement.paymentAccount || "bank"),
+      ownerName: String(movement.ownerName || "เจ้าของกิจการ").trim(),
+      note: String(movement.note || "").trim(),
+      createdAt: movement.createdAt || now,
+      updatedAt: now,
+    };
+    if (!payload.movementDate || payload.amount <= 0 || (payload.kind === "contribution" && !ACCOUNTING_CASH_ACCOUNT_IDS.has(payload.paymentAccount))) throw new Error("กรุณากรอกข้อมูลเงินลงทุนให้ถูกต้อง");
+    await set(ref(db, `accounting/${uid}/ownerCapitalMovements/${id}`), payload);
+  }
+
+  async function deleteOwnerCapitalMovement(movement) {
+    if (accountingPeriodClosings[String(movement.movementDate || "").slice(0, 7)]) throw new Error("งวดบัญชีเดือนนี้ถูกปิดแล้ว");
+    await set(ref(db, `accounting/${uid}/ownerCapitalMovements/${movement.id}`), null);
   }
 
   async function saveAccountingSettings(settings) {
@@ -1438,7 +1472,7 @@ function ShopApp({ uid, user }) {
           {tab === "promotions" && <PromotionsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} onSaveAccounting={saveAccountingTransaction} isAccountingPeriodClosed={isAccountingPeriodClosed} />}
           {tab === "reports" && <ReportsPanel data={dataForDisplay} orders={orders} shopName={data.settings.shopName} showToast={showToast} />}
-          {tab === "accounting" && <AccountingPanel transactions={accountingTransactions} assets={accountingAssets} recurringExpenses={recurringExpenses} accounts={accountingAccounts} reconciliations={accountReconciliations} ownerReimbursements={ownerReimbursements} accountingSettings={accountingSettings} periodClosings={accountingPeriodClosings} sales={dataForDisplay.sales} overheadPerCup={data.settings.overheadPerCup} onSave={saveAccountingTransaction} onDelete={deleteAccountingTransaction} onSaveAsset={saveAccountingAsset} onDeleteAsset={deleteAccountingAsset} onSaveRecurring={saveRecurringExpense} onDeleteRecurring={deleteRecurringExpense} onUpdateOccurrence={updateRecurringOccurrence} onUpdateAccount={updateAccountingAccount} onSaveReconciliation={saveAccountReconciliation} onSaveOwnerReimbursement={saveOwnerReimbursement} onDeleteOwnerReimbursement={deleteOwnerReimbursement} onSaveSettings={saveAccountingSettings} onSetPeriodClosed={setAccountingPeriodClosed} showToast={showToast} />}
+          {tab === "accounting" && <AccountingPanel transactions={accountingTransactions} assets={accountingAssets} recurringExpenses={recurringExpenses} accounts={accountingAccounts} reconciliations={accountReconciliations} ownerReimbursements={ownerReimbursements} ownerCapitalMovements={ownerCapitalMovements} accountingSettings={accountingSettings} periodClosings={accountingPeriodClosings} sales={dataForDisplay.sales} overheadPerCup={data.settings.overheadPerCup} onSave={saveAccountingTransaction} onDelete={deleteAccountingTransaction} onSaveAsset={saveAccountingAsset} onDeleteAsset={deleteAccountingAsset} onSaveRecurring={saveRecurringExpense} onDeleteRecurring={deleteRecurringExpense} onUpdateOccurrence={updateRecurringOccurrence} onUpdateAccount={updateAccountingAccount} onSaveReconciliation={saveAccountReconciliation} onSaveOwnerReimbursement={saveOwnerReimbursement} onDeleteOwnerReimbursement={deleteOwnerReimbursement} onSaveOwnerCapitalMovement={saveOwnerCapitalMovement} onDeleteOwnerCapitalMovement={deleteOwnerCapitalMovement} onSaveSettings={saveAccountingSettings} onSetPeriodClosed={setAccountingPeriodClosed} showToast={showToast} />}
           {tab === "loyalty" && <LoyaltyPanel customers={customers} orders={orders} loyaltyBeanGoal={data.settings.loyaltyBeanGoal} adjustCustomerBeans={adjustCustomerBeans} createLoyaltyCustomer={createLoyaltyCustomer} updateLoyaltyGoal={updateLoyaltyGoal} showToast={showToast} backfillEligibleCount={backfillEligibleOrders.length} backfillLoyaltyBeans={backfillLoyaltyBeans} />}
           {tab === "options" && <OptionGroupsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "settings" && <SettingsPanel data={data} updateData={updateData} showToast={showToast} uid={uid} />}
@@ -6168,7 +6202,7 @@ function exportAccountingCsv(transactions, month) {
   const link=document.createElement("a");link.href=url;link.download=`accounting-${month||"all"}.csv`;document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(url);
 }
 
-function AccountingPanel({ transactions, assets, recurringExpenses, accounts, reconciliations, ownerReimbursements, accountingSettings, periodClosings, sales, overheadPerCup, onSave, onDelete, onSaveAsset, onDeleteAsset, onSaveRecurring, onDeleteRecurring, onUpdateOccurrence, onUpdateAccount, onSaveReconciliation, onSaveOwnerReimbursement, onDeleteOwnerReimbursement, onSaveSettings, onSetPeriodClosed, showToast }) {
+function AccountingPanel({ transactions, assets, recurringExpenses, accounts, reconciliations, ownerReimbursements, ownerCapitalMovements, accountingSettings, periodClosings, sales, overheadPerCup, onSave, onDelete, onSaveAsset, onDeleteAsset, onSaveRecurring, onDeleteRecurring, onUpdateOccurrence, onUpdateAccount, onSaveReconciliation, onSaveOwnerReimbursement, onDeleteOwnerReimbursement, onSaveOwnerCapitalMovement, onDeleteOwnerCapitalMovement, onSaveSettings, onSetPeriodClosed, showToast }) {
   const [section, setSection] = useState("overview");
   const [month, setMonth] = useState(todayStr().slice(0, 7));
   const [typeFilter, setTypeFilter] = useState("all");
@@ -6199,6 +6233,8 @@ function AccountingPanel({ transactions, assets, recurringExpenses, accounts, re
   const cashIncome = paidPeriodTransactions.filter((transaction) => transaction.type === "income").reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
   const periodReimbursements = ownerReimbursements.filter((item) => !month || String(item.reimbursementDate || "").startsWith(month));
   const reimbursementCash = periodReimbursements.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+  const periodCapitalContributions = ownerCapitalMovements.filter((item) => item.kind === "contribution" && (!month || String(item.movementDate || "").startsWith(month)));
+  const capitalCashIn = periodCapitalContributions.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
   const cashExpense = paidPeriodTransactions.filter((transaction) => transaction.type === "expense" && transaction.paymentAccount !== "owner_advance").reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0) + reimbursementCash;
   const refunds = paidPeriodTransactions.filter((transaction) => transaction.category === "sales_refund").reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
   const inventoryCash = paidPeriodTransactions.filter((transaction) => transaction.paymentAccount !== "owner_advance" && (transaction.category === "inventory_purchase" || transaction.category === "packaging")).reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
@@ -6212,7 +6248,7 @@ function AccountingPanel({ transactions, assets, recurringExpenses, accounts, re
   const netRevenue = cashIncome - refunds;
   const grossProfit = netRevenue - costOfGoods;
   const netProfit = grossProfit - operatingExpenses - depreciationExpense;
-  const netCash = cashIncome - cashExpense;
+  const netCash = cashIncome + capitalCashIn - cashExpense;
   const grossMargin = netRevenue > 0 ? (grossProfit / netRevenue) * 100 : 0;
   const hasEstimatedLegacyCost = periodSales.some((sale) => sale.ingredientCostTotal == null);
   const vatRate = Number(accountingSettings.vatRate) || 7;
@@ -6222,7 +6258,9 @@ function AccountingPanel({ transactions, assets, recurringExpenses, accounts, re
   const closedPeriod = month ? periodClosings[month] : null;
   const ownerAdvancedTotal = transactions.filter((transaction) => transaction.type === "expense" && transaction.paymentAccount === "owner_advance" && (!transaction.status || transaction.status === "paid")).reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
   const ownerReimbursedTotal = ownerReimbursements.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-  const ownerPayable = ownerAdvancedTotal - ownerReimbursedTotal;
+  const ownerConvertedTotal = ownerCapitalMovements.filter((item) => item.kind === "conversion").reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+  const ownerCapitalTotal = ownerCapitalMovements.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+  const ownerPayable = ownerAdvancedTotal - ownerReimbursedTotal - ownerConvertedTotal;
 
   function openNew(type) {
     setSection("transactions");
@@ -6345,6 +6383,7 @@ function AccountingPanel({ transactions, assets, recurringExpenses, accounts, re
         <section className="acc-statement">
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:7 }}><h3 style={{ margin:0, color:POS.navy, fontSize:14 }}>กระแสเงินสด</h3><span style={{ color:POS.gray, fontSize:10.5 }}>Cash movement</span></div>
           <AccountingStatementRow label="เงินรับ" value={cashIncome} />
+          {capitalCashIn>0&&<AccountingStatementRow label="เงินลงทุนจากเจ้าของ" value={capitalCashIn} />}
           <AccountingStatementRow label="ซื้อวัตถุดิบเข้าคลัง" value={-inventoryCash} />
           <AccountingStatementRow label="รายจ่ายอื่นและคืนเงินเจ้าของ" value={-(cashExpense - inventoryCash)} />
           <AccountingStatementRow label="เงินจ่ายทั้งหมด" value={-cashExpense} strong />
@@ -6387,8 +6426,8 @@ function AccountingPanel({ transactions, assets, recurringExpenses, accounts, re
 
       {section === "assets" && <AccountingAssetsSection assets={assets} onSave={onSaveAsset} onDelete={onDeleteAsset} showToast={showToast} />}
       {section === "recurring" && <AccountingRecurringSection templates={recurringExpenses} transactions={transactions} onSave={onSaveRecurring} onDelete={onDeleteRecurring} onUpdateOccurrence={onUpdateOccurrence} showToast={showToast} />}
-      {section === "owner" && <AccountingOwnerFundingSection transactions={transactions} reimbursements={ownerReimbursements} ownerAdvancedTotal={ownerAdvancedTotal} ownerReimbursedTotal={ownerReimbursedTotal} ownerPayable={ownerPayable} onSave={onSaveOwnerReimbursement} onDelete={onDeleteOwnerReimbursement} showToast={showToast} />}
-      {section === "accounts" && <AccountingAccountsSection accounts={accounts} transactions={transactions} reimbursements={ownerReimbursements} reconciliations={reconciliations} onUpdateAccount={onUpdateAccount} onSaveReconciliation={onSaveReconciliation} showToast={showToast} />}
+      {section === "owner" && <AccountingOwnerFundingSection transactions={transactions} reimbursements={ownerReimbursements} capitalMovements={ownerCapitalMovements} ownerAdvancedTotal={ownerAdvancedTotal} ownerReimbursedTotal={ownerReimbursedTotal} ownerConvertedTotal={ownerConvertedTotal} ownerCapitalTotal={ownerCapitalTotal} ownerPayable={ownerPayable} onSave={onSaveOwnerReimbursement} onDelete={onDeleteOwnerReimbursement} onSaveCapital={onSaveOwnerCapitalMovement} onDeleteCapital={onDeleteOwnerCapitalMovement} showToast={showToast} />}
+      {section === "accounts" && <AccountingAccountsSection accounts={accounts} transactions={transactions} reimbursements={ownerReimbursements} capitalMovements={ownerCapitalMovements} reconciliations={reconciliations} onUpdateAccount={onUpdateAccount} onSaveReconciliation={onSaveReconciliation} showToast={showToast} />}
       {section === "tax" && <AccountingTaxClosingSection month={month} settings={accountingSettings} outputVat={outputVat} inputVat={inputVat} closedPeriod={closedPeriod} summary={{netRevenue,costOfGoods,operatingExpenses,depreciationExpense,netProfit,netCash,outputVat,inputVat}} onSaveSettings={onSaveSettings} onSetPeriodClosed={onSetPeriodClosed} showToast={showToast}/>}
 
       {editing && <AccountingTransactionModal transaction={editing} vatRegistered={accountingSettings.vatRegistered} onClose={() => setEditing(null)} onSave={async (value) => { await onSave(value); setEditing(null); showToast(value.id ? "แก้ไขรายการบัญชีแล้ว" : "บันทึกรายการบัญชีแล้ว"); }} />}
@@ -6479,21 +6518,24 @@ function AccountingRecurringSection({ templates, transactions, onSave, onDelete,
   </section>;
 }
 
-function AccountingOwnerFundingSection({transactions,reimbursements,ownerAdvancedTotal,ownerReimbursedTotal,ownerPayable,onSave,onDelete,showToast}){
+function AccountingOwnerFundingSection({transactions,reimbursements,capitalMovements,ownerAdvancedTotal,ownerReimbursedTotal,ownerConvertedTotal,ownerCapitalTotal,ownerPayable,onSave,onDelete,onSaveCapital,onDeleteCapital,showToast}){
   const [reimbursing,setReimbursing]=useState(false);
+  const [addingCapital,setAddingCapital]=useState(false);
   const [deletingId,setDeletingId]=useState(null);
   const advances=transactions.filter((transaction)=>transaction.type==="expense"&&transaction.paymentAccount==="owner_advance"&&(!transaction.status||transaction.status==="paid"));
   const timeline=[
     ...advances.map((transaction)=>({id:`advance_${transaction.id}`,kind:"advance",date:transaction.transactionDate,description:transaction.description,amount:Number(transaction.amount)||0,account:transaction.paymentAccount})),
     ...reimbursements.map((item)=>({id:`reimbursement_${item.id}`,record:item,kind:"reimbursement",date:item.reimbursementDate,description:`คืนเงินให้ ${item.ownerName||"เจ้าของกิจการ"}`,amount:Number(item.amount)||0,account:item.paymentAccount,note:item.note})),
+    ...capitalMovements.map((item)=>({id:`capital_${item.id}`,record:item,kind:item.kind,date:item.movementDate,description:item.kind==="conversion"?`เปลี่ยนยอดค้างของ ${item.ownerName||"เจ้าของกิจการ"} เป็นทุน`:`${item.ownerName||"เจ้าของกิจการ"} ลงทุนเข้าร้าน`,amount:Number(item.amount)||0,account:item.paymentAccount,note:item.note})),
   ].sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
-  async function remove(item){setDeletingId(item.record.id);try{await onDelete(item.record);showToast("ลบรายการคืนเงินแล้ว");}catch(error){showToast("ลบไม่สำเร็จ: "+error.message);}finally{setDeletingId(null);}}
+  async function remove(item){setDeletingId(item.id);try{if(item.kind==="reimbursement")await onDelete(item.record);else await onDeleteCapital(item.record);showToast("ลบรายการเงินเจ้าของแล้ว");}catch(error){showToast("ลบไม่สำเร็จ: "+error.message);}finally{setDeletingId(null);}}
   return <section style={{marginTop:20}}>
-    <div className="acc-assets-head"><div><h3 style={{margin:"0 0 3px",color:POS.navy,fontSize:17}}>เจ้าของสำรองจ่าย</h3><p style={{margin:0,color:POS.gray,fontSize:11.5}}>ติดตามเงินส่วนตัวที่ออกแทนร้าน การคืนเงินไม่ถูกนับเป็นรายจ่ายซ้ำ</p></div><button className="cbtn cbtn-accent" disabled={ownerPayable<=0} onClick={()=>setReimbursing(true)}><Icon name="cash-banknote" size={14}/><span style={{marginLeft:5}}>คืนเงินให้เจ้าของ</span></button></div>
-    <div className="acc-asset-kpis"><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>เจ้าของออกให้ทั้งหมด</div><b style={{display:"block",marginTop:3,color:POS.navy,fontSize:18}}>฿{money(ownerAdvancedTotal)}</b></div><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>ร้านคืนแล้ว</div><b style={{display:"block",marginTop:3,color:"#15803D",fontSize:18}}>฿{money(ownerReimbursedTotal)}</b></div><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>{ownerPayable>=0?"ร้านยังค้างคืนเจ้าของ":"คืนเกินยอดสำรองจ่าย"}</div><b style={{display:"block",marginTop:3,color:ownerPayable>0?"#B45309":ownerPayable<0?"#B91C1C":"#15803D",fontSize:18}}>฿{money(Math.abs(ownerPayable))}</b></div></div>
+    <div className="acc-assets-head"><div><h3 style={{margin:"0 0 3px",color:POS.navy,fontSize:17}}>เงินเจ้าของและเงินลงทุน</h3><p style={{margin:0,color:POS.gray,fontSize:11.5}}>แยกยอดที่ร้านต้องคืนออกจากเงินทุนถาวร โดยไม่บันทึกเป็นรายได้จากการขาย</p></div><div style={{display:"flex",gap:6,flexWrap:"wrap"}}><button className="cbtn" onClick={()=>setAddingCapital(true)}><Icon name="pig-money" size={14}/><span style={{marginLeft:5}}>บันทึกเงินลงทุน</span></button><button className="cbtn cbtn-accent" disabled={ownerPayable<=0} onClick={()=>setReimbursing(true)}><Icon name="cash-banknote" size={14}/><span style={{marginLeft:5}}>คืนเงินให้เจ้าของ</span></button></div></div>
+    <div className="acc-asset-kpis" style={{gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))"}}><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>เจ้าของออกให้ทั้งหมด</div><b style={{display:"block",marginTop:3,color:POS.navy,fontSize:18}}>฿{money(ownerAdvancedTotal)}</b></div><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>ร้านคืนแล้ว</div><b style={{display:"block",marginTop:3,color:"#15803D",fontSize:18}}>฿{money(ownerReimbursedTotal)}</b></div><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>เปลี่ยนยอดค้างเป็นทุน</div><b style={{display:"block",marginTop:3,color:"#1D4ED8",fontSize:18}}>฿{money(ownerConvertedTotal)}</b></div><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>เงินลงทุนสะสม</div><b style={{display:"block",marginTop:3,color:"#1D4ED8",fontSize:18}}>฿{money(ownerCapitalTotal)}</b></div><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>{ownerPayable>=0?"ร้านยังค้างคืนเจ้าของ":"คืน/แปลงเกินยอดสำรองจ่าย"}</div><b style={{display:"block",marginTop:3,color:ownerPayable>0?"#B45309":ownerPayable<0?"#B91C1C":"#15803D",fontSize:18}}>฿{money(Math.abs(ownerPayable))}</b></div></div>
     <div style={{padding:12,border:"1px solid #F1D7AD",borderRadius:12,background:"#FFF8ED",color:"#7C4A03",fontSize:11.5,lineHeight:1.55,marginBottom:12}}><b>วิธีลงรายการ:</b> เพิ่มรายจ่าย ซื้อวัตถุดิบ หรือเพิ่มสินทรัพย์ตามปกติ แล้วเลือกช่องทางเงิน “เจ้าของสำรองจ่าย” ระบบจะเพิ่มยอดค้างคืนให้อัตโนมัติ</div>
-    {timeline.length===0?<div style={{padding:24,border:`1px dashed ${POS.border}`,borderRadius:13,textAlign:"center",color:POS.gray,fontSize:12.5}}>ยังไม่มีรายการที่เจ้าของสำรองจ่าย</div>:<div className="acc-table" style={{maxHeight:"55vh"}}><div className="acc-owner-row acc-row-head"><span>วันที่</span><span>รายละเอียด</span><span>ประเภท</span><span style={{textAlign:"right"}}>จำนวน</span><span/></div>{timeline.map((item)=><div className="acc-owner-row" key={item.id}><div style={{color:POS.gray,fontSize:11.5}}>{new Date(`${item.date}T00:00:00`).toLocaleDateString("th-TH",{day:"numeric",month:"short",year:"2-digit"})}</div><div style={{minWidth:0}}><div style={{color:POS.navy,fontSize:12.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.description}</div>{item.note&&<div style={{marginTop:2,color:POS.gray,fontSize:10.5}}>{item.note}</div>}</div><div><span className="acc-type" style={{color:item.kind==="advance"?"#92400E":"#15803D",background:item.kind==="advance"?"#FFF4E5":"#EAF7EE"}}>{item.kind==="advance"?"เจ้าของออกให้":"ร้านคืนเงิน"}</span></div><div style={{textAlign:"right",fontWeight:700,color:item.kind==="advance"?"#B45309":"#15803D",fontSize:12.5}}>{item.kind==="advance"?"+":"−"}฿{money(item.amount)}</div><div style={{textAlign:"right"}}>{item.kind==="reimbursement"&&<button className="cbtn" disabled={deletingId===item.record.id} style={{width:32,height:32,padding:0,color:"#B91C1C"}} onClick={()=>remove(item)} aria-label="ลบรายการคืนเงิน"><Icon name="trash" size={13}/></button>}</div></div>)}</div>}
+    {timeline.length===0?<div style={{padding:24,border:`1px dashed ${POS.border}`,borderRadius:13,textAlign:"center",color:POS.gray,fontSize:12.5}}>ยังไม่มีรายการเงินเจ้าของ</div>:<div className="acc-table" style={{maxHeight:"55vh"}}><div className="acc-owner-row acc-row-head"><span>วันที่</span><span>รายละเอียด</span><span>ประเภท</span><span style={{textAlign:"right"}}>จำนวน</span><span/></div>{timeline.map((item)=>{const isAdvance=item.kind==="advance";const isReimbursement=item.kind==="reimbursement";const label=isAdvance?"เจ้าของออกให้":isReimbursement?"ร้านคืนเงิน":item.kind==="conversion"?"เปลี่ยนเป็นทุน":"ลงทุนเข้าร้าน";return <div className="acc-owner-row" key={item.id}><div style={{color:POS.gray,fontSize:11.5}}>{new Date(`${item.date}T00:00:00`).toLocaleDateString("th-TH",{day:"numeric",month:"short",year:"2-digit"})}</div><div style={{minWidth:0}}><div style={{color:POS.navy,fontSize:12.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.description}</div>{item.note&&<div style={{marginTop:2,color:POS.gray,fontSize:10.5}}>{item.note}</div>}</div><div><span className="acc-type" style={{color:isAdvance?"#92400E":isReimbursement?"#15803D":"#1D4ED8",background:isAdvance?"#FFF4E5":isReimbursement?"#EAF7EE":"#E8EEFF"}}>{label}</span></div><div style={{textAlign:"right",fontWeight:700,color:isAdvance?"#B45309":isReimbursement?"#15803D":"#1D4ED8",fontSize:12.5}}>{isAdvance?"+":isReimbursement?"−":""}฿{money(item.amount)}</div><div style={{textAlign:"right"}}>{!isAdvance&&<button className="cbtn" disabled={deletingId===item.id} style={{width:32,height:32,padding:0,color:"#B91C1C"}} onClick={()=>remove(item)} aria-label="ลบรายการเงินเจ้าของ"><Icon name="trash" size={13}/></button>}</div></div>})}</div>}
     {reimbursing&&<AccountingOwnerReimbursementModal maxAmount={Math.max(0,ownerPayable)} onClose={()=>setReimbursing(false)} onSave={async(value)=>{await onSave(value);setReimbursing(false);showToast("บันทึกคืนเงินให้เจ้าของแล้ว");}}/>}
+    {addingCapital&&<AccountingOwnerCapitalModal maxConvertible={Math.max(0,ownerPayable)} onClose={()=>setAddingCapital(false)} onSave={async(value)=>{await onSaveCapital(value);setAddingCapital(false);showToast(value.kind==="conversion"?"เปลี่ยนยอดค้างเป็นเงินลงทุนแล้ว":"บันทึกเงินลงทุนเข้าร้านแล้ว");}}/>}
   </section>;
 }
 
@@ -6506,11 +6548,20 @@ function AccountingOwnerReimbursementModal({maxAmount,onClose,onSave}){
   return <div className="acc-modal-bg" onClick={onClose}><form className="acc-modal" style={{width:"min(440px,100%)"}} role="dialog" aria-modal="true" aria-label="คืนเงินให้เจ้าของ" onSubmit={submit} onClick={(event)=>event.stopPropagation()}><h3 style={{margin:"0 0 4px",color:POS.navy}}>คืนเงินให้เจ้าของ</h3><p style={{margin:"0 0 15px",fontSize:11.5,color:POS.gray}}>ยอดค้างสูงสุด ฿{money(maxAmount)} · รายการนี้ลดเงินของร้านและยอดค้าง แต่ไม่ลดกำไรซ้ำ</p><div className="acc-form-grid"><div><label className="acc-field-label">วันที่คืนเงิน *</label><input className="acc-field" type="date" value={form.reimbursementDate} onChange={(event)=>setForm({...form,reimbursementDate:event.target.value})}/></div><div><label className="acc-field-label">จำนวนเงิน *</label><input className="acc-field" type="number" min="0.01" max={maxAmount} step="0.01" value={form.amount} onChange={(event)=>setForm({...form,amount:event.target.value})} placeholder="0.00"/></div><div><label className="acc-field-label">จ่ายจากบัญชีร้าน *</label><select className="acc-field" value={form.paymentAccount} onChange={(event)=>setForm({...form,paymentAccount:event.target.value})}>{ACCOUNTING_PAYMENT_ACCOUNTS.filter((account)=>ACCOUNTING_CASH_ACCOUNT_IDS.has(account.id)).map((account)=><option key={account.id} value={account.id}>{account.label}</option>)}</select></div><div><label className="acc-field-label">ชื่อเจ้าของ</label><TextField className="acc-field" value={form.ownerName} onChange={(value)=>setForm({...form,ownerName:value})}/></div><div style={{gridColumn:"1/-1"}}><label className="acc-field-label">หมายเหตุ</label><textarea className="acc-field" value={form.note} onChange={(event)=>setForm({...form,note:event.target.value})} placeholder="เช่น คืนค่าเครื่องชงบางส่วน"/></div></div>{error&&<p style={{margin:"10px 0 0",color:"#B91C1C",fontSize:12}}>{error}</p>}<div style={{display:"flex",gap:8,marginTop:16}}><button type="button" className="cbtn" disabled={saving} style={{flex:1}} onClick={onClose}>ยกเลิก</button><button type="submit" className="cbtn cbtn-accent" disabled={saving} style={{flex:1}}>{saving?"กำลังบันทึก...":"บันทึกคืนเงิน"}</button></div></form></div>;
 }
 
-function AccountingAccountsSection({accounts,transactions,reimbursements,reconciliations,onUpdateAccount,onSaveReconciliation,showToast}){
+function AccountingOwnerCapitalModal({maxConvertible,onClose,onSave}){
+  const [form,setForm]=useState({kind:maxConvertible>0?"conversion":"contribution",movementDate:todayStr(),amount:"",paymentAccount:"bank",ownerName:"เจ้าของกิจการ",note:""});
+  const [saving,setSaving]=useState(false);
+  const [error,setError]=useState("");
+  useEscape(onClose);
+  async function submit(event){event.preventDefault();setError("");const amount=Number(form.amount)||0;if(amount<=0){setError("กรุณากรอกจำนวนเงินลงทุน");return;}if(form.kind==="conversion"&&amount>maxConvertible+.001){setError(`เปลี่ยนเป็นทุนได้ไม่เกินยอดค้าง ฿${money(maxConvertible)}`);return;}setSaving(true);try{await onSave({...form,amount});}catch(saveError){setError(saveError.message||"บันทึกไม่สำเร็จ");setSaving(false);}}
+  return <div className="acc-modal-bg" onClick={onClose}><form className="acc-modal" style={{width:"min(460px,100%)"}} role="dialog" aria-modal="true" aria-label="บันทึกเงินลงทุนของเจ้าของ" onSubmit={submit} onClick={(event)=>event.stopPropagation()}><h3 style={{margin:"0 0 4px",color:POS.navy}}>บันทึกเงินลงทุนของเจ้าของ</h3><p style={{margin:"0 0 14px",fontSize:11.5,color:POS.gray}}>เงินลงทุนไม่ใช่รายรับจากการขาย และไม่เพิ่มกำไรของร้าน</p><div style={{display:"flex",gap:6,padding:4,marginBottom:14,borderRadius:11,background:POS.chipBg}}><button type="button" className="cbtn" style={{flex:1,border:0,background:form.kind==="contribution"?"#fff":"transparent",color:form.kind==="contribution"?"#1D4ED8":POS.gray}} onClick={()=>setForm({...form,kind:"contribution"})}>นำเงินเข้าร้าน</button><button type="button" className="cbtn" disabled={maxConvertible<=0} style={{flex:1,border:0,background:form.kind==="conversion"?"#fff":"transparent",color:form.kind==="conversion"?"#1D4ED8":POS.gray}} onClick={()=>setForm({...form,kind:"conversion"})}>เปลี่ยนยอดค้างเป็นทุน</button></div><div className="acc-form-grid"><div><label className="acc-field-label">วันที่ *</label><input className="acc-field" type="date" value={form.movementDate} onChange={(event)=>setForm({...form,movementDate:event.target.value})}/></div><div><label className="acc-field-label">จำนวนเงิน *</label><input className="acc-field" type="number" min="0.01" max={form.kind==="conversion"?maxConvertible:undefined} step="0.01" value={form.amount} onChange={(event)=>setForm({...form,amount:event.target.value})} placeholder="0.00"/></div>{form.kind==="contribution"&&<div><label className="acc-field-label">เงินเข้าบัญชีร้าน *</label><select className="acc-field" value={form.paymentAccount} onChange={(event)=>setForm({...form,paymentAccount:event.target.value})}>{ACCOUNTING_PAYMENT_ACCOUNTS.filter((account)=>ACCOUNTING_CASH_ACCOUNT_IDS.has(account.id)).map((account)=><option key={account.id} value={account.id}>{account.label}</option>)}</select></div>}<div><label className="acc-field-label">ชื่อเจ้าของ</label><TextField className="acc-field" value={form.ownerName} onChange={(value)=>setForm({...form,ownerName:value})}/></div><div style={{gridColumn:"1/-1"}}><label className="acc-field-label">หมายเหตุ</label><textarea className="acc-field" value={form.note} onChange={(event)=>setForm({...form,note:event.target.value})}/></div></div>{form.kind==="conversion"&&<div style={{marginTop:10,padding:"9px 11px",borderRadius:10,background:"#E8EEFF",color:"#1D4ED8",fontSize:11.5}}>ยอดค้างปัจจุบัน ฿{money(maxConvertible)} · การเปลี่ยนเป็นทุนไม่มีเงินสดเข้าออก</div>}{error&&<p style={{margin:"10px 0 0",color:"#B91C1C",fontSize:12}}>{error}</p>}<div style={{display:"flex",gap:8,marginTop:16}}><button type="button" className="cbtn" disabled={saving} style={{flex:1}} onClick={onClose}>ยกเลิก</button><button type="submit" className="cbtn cbtn-accent" disabled={saving} style={{flex:1}}>{saving?"กำลังบันทึก...":"บันทึกเงินลงทุน"}</button></div></form></div>;
+}
+
+function AccountingAccountsSection({accounts,transactions,reimbursements,capitalMovements,reconciliations,onUpdateAccount,onSaveReconciliation,showToast}){
   const [openingFor,setOpeningFor]=useState(null);
   const [openingValue,setOpeningValue]=useState("");
   const [reconcileFor,setReconcileFor]=useState(null);
-  function expectedBalance(account){const transactionBalance=transactions.filter((transaction)=>transaction.paymentAccount===account.id&&(!transaction.status||transaction.status==="paid")).reduce((sum,transaction)=>sum+(transaction.type==="income"?1:-1)*(Number(transaction.amount)||0),0);const reimbursementTotal=reimbursements.filter((item)=>item.paymentAccount===account.id).reduce((sum,item)=>sum+(Number(item.amount)||0),0);return (Number(account.openingBalance)||0)+transactionBalance-reimbursementTotal;}
+  function expectedBalance(account){const transactionBalance=transactions.filter((transaction)=>transaction.paymentAccount===account.id&&(!transaction.status||transaction.status==="paid")).reduce((sum,transaction)=>sum+(transaction.type==="income"?1:-1)*(Number(transaction.amount)||0),0);const reimbursementTotal=reimbursements.filter((item)=>item.paymentAccount===account.id).reduce((sum,item)=>sum+(Number(item.amount)||0),0);const contributed=capitalMovements.filter((item)=>item.kind==="contribution"&&item.paymentAccount===account.id).reduce((sum,item)=>sum+(Number(item.amount)||0),0);return (Number(account.openingBalance)||0)+transactionBalance+contributed-reimbursementTotal;}
   function latestFor(accountId){return [...reconciliations].filter((item)=>item.accountId===accountId).sort((a,b)=>String(b.reconciledAt).localeCompare(String(a.reconciledAt)))[0]||null;}
   async function saveOpening(){try{await onUpdateAccount(openingFor,{openingBalance:Number(openingValue)||0});setOpeningFor(null);showToast("บันทึกยอดตั้งต้นแล้ว");}catch(error){showToast("บันทึกไม่สำเร็จ: "+error.message);}}
   return <section style={{marginTop:20}}><div className="acc-assets-head"><div><h3 style={{margin:"0 0 3px",color:POS.navy,fontSize:17}}>บัญชีเงินและกระทบยอด</h3><p style={{margin:0,color:POS.gray,fontSize:11.5}}>เปรียบเทียบยอดตามรายการในระบบกับยอดเงินจริงในเงินสดหรือบัญชีธนาคาร</p></div></div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(230px,1fr))",gap:9}}>{accounts.map((account)=>{const expected=expectedBalance(account);const latest=latestFor(account.id);return <div key={account.id} style={{padding:14,border:`1px solid ${POS.border}`,borderRadius:13,background:"#fff"}}><div style={{display:"flex",alignItems:"center",gap:9}}><div style={{width:34,height:34,borderRadius:9,display:"grid",placeItems:"center",background:"#E8EEFF",color:"#1D4ED8"}}><Icon name={account.id==="cash"?"cash":account.id==="credit_card"?"credit-card":"building-bank"} size={17}/></div><div><div style={{fontSize:12.5,fontWeight:700,color:POS.navy}}>{account.name}</div><div style={{fontSize:10,color:POS.gray}}>ยอดตามระบบ</div></div></div><div style={{marginTop:10,fontSize:21,fontWeight:700,color:expected>=0?POS.navy:"#B91C1C"}}>฿{money(expected)}</div><div style={{marginTop:5,minHeight:30,fontSize:10.5,color:latest?Math.abs(Number(latest.difference)||0)<.01?"#15803D":"#B45309":POS.gray}}>{latest?`กระทบล่าสุด ${new Date(latest.reconciledAt).toLocaleDateString("th-TH")} · ต่าง ฿${money(latest.difference)}`:"ยังไม่เคยกระทบยอด"}</div><div style={{display:"flex",gap:5,marginTop:8}}><button className="cbtn" style={{flex:1}} onClick={()=>{setOpeningFor(account);setOpeningValue(String(account.openingBalance||0));}}>ยอดตั้งต้น</button><button className="cbtn cbtn-accent" style={{flex:1}} onClick={()=>setReconcileFor({...account,expectedBalance:expected})}>กระทบยอด</button></div></div>;})}</div>
