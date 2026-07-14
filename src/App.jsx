@@ -129,6 +129,18 @@ function money(n) {
 
 function round4(n) { return Math.round(n * 10000) / 10000; }
 
+function movingWeightedAverageCost(currentQty, currentCost, addedQty, totalPaid) {
+  const oldQty = Math.max(0, Number(currentQty) || 0);
+  const oldCost = Math.max(0, Number(currentCost) || 0);
+  const newQty = Math.max(0, Number(addedQty) || 0);
+  const paid = Math.max(0, Number(totalPaid) || 0);
+  if (newQty <= 0 || paid <= 0) return null;
+  const purchaseUnitCost = paid / newQty;
+  // ถ้าสต็อกเดิมติดลบ/หมด ให้เริ่มต้นจากราคาล็อตใหม่ ไม่เอาสต็อกติดลบมาลดมูลค่าของที่ซื้อเข้ามา
+  if (oldQty <= 0) return round4(purchaseUnitCost);
+  return round4(((oldQty * oldCost) + paid) / (oldQty + newQty));
+}
+
 function seedIngredients() {
   const rows = [
     ["coffee_pacamara", "Pacamara House Blend", "coffee", "g", 0.84, "bean", 0],
@@ -5474,15 +5486,22 @@ function IngredientsPanel({ data, updateData, showToast, onSaveAccounting, isAcc
     const purchaseId = genId("purchase");
     const purchasedAt = new Date(`${purchaseForm.purchaseDate}T12:00:00`).toISOString();
     const ingredient = data.ingredients.find((item) => item.id === id);
+    if (!ingredient) { showToast("ไม่พบวัตถุดิบที่ต้องการเติมสต็อก"); return; }
+    const previousStockQty = Number(ingredient.stockQty) || 0;
+    const previousCostPerUnit = Number(ingredient.costPerUnit) || 0;
+    const purchaseUnitCost = addQty > 0 && totalPaid > 0 ? round4(totalPaid / addQty) : null;
+    const resultingCostPerUnit = movingWeightedAverageCost(previousStockQty, previousCostPerUnit, addQty, totalPaid);
     const purchaseRecord = {
       id: purchaseId, timestamp: purchasedAt, ingredientId: id, qtyAdded: addQty, totalCost: totalPaid,
       supplierName: purchaseForm.supplierName || "", paymentAccount: purchaseForm.paymentAccount || "bank", note: purchaseForm.note || "",
+      previousStockQty, previousCostPerUnit, purchaseUnitCost, resultingCostPerUnit,
+      costingMethod: resultingCostPerUnit == null ? "quantity_only" : "moving_weighted_average",
     };
     updateData((next) => {
       const ing = next.ingredients.find((i) => i.id === id);
       if (!ing) return;
       ing.stockQty = round4(ing.stockQty + addQty);
-      if (addQty > 0 && totalPaid > 0) ing.costPerUnit = round4(totalPaid / addQty);
+      if (resultingCostPerUnit != null) ing.costPerUnit = resultingCostPerUnit;
       next.purchases.push(purchaseRecord);
     });
     setRestocking(null);
@@ -5992,7 +6011,11 @@ function RestockModal({ ingredient, onClose, onConfirm }) {
   const qtyNum = Number(qty) || 0;
   const totalNum = Number(total) || 0;
   const valid = qtyNum > 0;
-  const newCost = valid && totalNum > 0 ? totalNum / qtyNum : null;
+  const purchaseUnitCost = valid && totalNum > 0 ? round4(totalNum / qtyNum) : null;
+  const averageCost = movingWeightedAverageCost(ingredient.stockQty, ingredient.costPerUnit, qtyNum, totalNum);
+  const oldStockValue = Math.max(0, Number(ingredient.stockQty) || 0) * (Number(ingredient.costPerUnit) || 0);
+  const resultingStockQty = round4((Number(ingredient.stockQty) || 0) + qtyNum);
+  const resultingStockValue = Math.max(0, resultingStockQty) * (averageCost == null ? (Number(ingredient.costPerUnit) || 0) : averageCost);
   function submit(e) {
     e.preventDefault();
     if (valid) onConfirm(ingredient.id, { qty: qtyNum, total: totalNum, purchaseDate, supplierName: supplierName.trim(), paymentAccount, note: note.trim() });
@@ -6026,12 +6049,12 @@ function RestockModal({ ingredient, onClose, onConfirm }) {
           <label style={invLabelStyle} htmlFor="rs-note">หมายเหตุ</label>
           <TextField id="rs-note" {...invFocusProps} style={invFieldStyle} value={note} onChange={setNote} placeholder="เช่น เลขที่ใบเสร็จ" />
         </div>
-        <div style={{ background: newCost != null ? INV.primarySoft : "#F7F6F3", borderRadius: 10, padding: "10px 12px", marginBottom: 18, fontSize: 12.5, lineHeight: 1.5, color: newCost != null ? INV.primaryDark : INV.gray }}>
+        <div style={{ background: averageCost != null ? INV.primarySoft : "#F7F6F3", borderRadius: 10, padding: "10px 12px", marginBottom: 18, fontSize: 12.5, lineHeight: 1.5, color: averageCost != null ? INV.primaryDark : INV.gray }}>
           {valid ? (
             <>
-              <div>สต็อกใหม่: <b>{fmtQty(ingredient.stockQty)} → {fmtQty(round4(ingredient.stockQty + qtyNum))} {UNITS[ingredient.unit]}</b></div>
-              {newCost != null
-                ? <div style={{ marginTop: 2 }}>ต้นทุน/หน่วยใหม่: <b>฿{money(newCost)}/{UNITS[ingredient.unit]}</b> (เดิม ฿{money(ingredient.costPerUnit)})</div>
+              <div>สต็อกใหม่: <b>{fmtQty(ingredient.stockQty)} → {fmtQty(resultingStockQty)} {UNITS[ingredient.unit]}</b></div>
+              {averageCost != null
+                ? <><div style={{ marginTop: 2 }}>ราคาล็อตใหม่: <b>฿{money(purchaseUnitCost)}/{UNITS[ingredient.unit]}</b></div><div style={{ marginTop: 2 }}>ต้นทุนเฉลี่ยถ่วงน้ำหนัก: <b>฿{money(ingredient.costPerUnit)} → ฿{money(averageCost)}/{UNITS[ingredient.unit]}</b></div><div style={{ marginTop: 2, fontSize: 11 }}>มูลค่าสต็อกประมาณ: ฿{money(oldStockValue)} → ฿{money(resultingStockValue)}</div></>
                 : <div style={{ marginTop: 2 }}>ไม่ระบุราคา: ระบบจะเพิ่มเฉพาะสต็อกและไม่สร้างรายจ่าย</div>}
             </>
           ) : "กรอกปริมาณที่ซื้อเพื่อดูผลลัพธ์"}
