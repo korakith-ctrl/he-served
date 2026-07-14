@@ -840,7 +840,9 @@ function ShopApp({ uid, user }) {
     const gpAmount = channel === "delivery" ? round4(grossRevenue * (gpPercent / 100)) : 0;
     const promoDiscount = opts.promoDiscount || 0;
     const netRevenue = grossRevenue - gpAmount - promoDiscount;
-    const totalCost = (ingredientCost + overhead) * qty;
+    const ingredientCostTotal = ingredientCost * qty;
+    const overheadAllocated = overhead * qty;
+    const totalCost = ingredientCostTotal + overheadAllocated;
     updateData((next) => {
       for (const line of lines) {
         const ing = next.ingredients.find((i) => i.id === line.ingredientId);
@@ -855,7 +857,7 @@ function ShopApp({ uid, user }) {
     const sale = {
       id: saleId, timestamp, menuId, menuName: menu.name,
       channel, qty, unitPrice, grossRevenue, gpAmount, gpPercent, promoDiscount, netRevenue,
-      totalCost, profit: netRevenue - totalCost,
+      ingredientCostTotal, overheadAllocated, totalCost, profit: netRevenue - totalCost,
       platformName: platform ? platform.name : null,
       milkNote: opts.milkLabel || null,
       note: opts.note || null,
@@ -1203,7 +1205,7 @@ function ShopApp({ uid, user }) {
           {tab === "promotions" && <PromotionsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} onSaveAccounting={saveAccountingTransaction} />}
           {tab === "reports" && <ReportsPanel data={dataForDisplay} orders={orders} shopName={data.settings.shopName} showToast={showToast} />}
-          {tab === "accounting" && <AccountingPanel transactions={accountingTransactions} onSave={saveAccountingTransaction} onDelete={deleteAccountingTransaction} showToast={showToast} />}
+          {tab === "accounting" && <AccountingPanel transactions={accountingTransactions} sales={dataForDisplay.sales} overheadPerCup={data.settings.overheadPerCup} onSave={saveAccountingTransaction} onDelete={deleteAccountingTransaction} showToast={showToast} />}
           {tab === "loyalty" && <LoyaltyPanel customers={customers} orders={orders} loyaltyBeanGoal={data.settings.loyaltyBeanGoal} adjustCustomerBeans={adjustCustomerBeans} createLoyaltyCustomer={createLoyaltyCustomer} updateLoyaltyGoal={updateLoyaltyGoal} showToast={showToast} backfillEligibleCount={backfillEligibleOrders.length} backfillLoyaltyBeans={backfillLoyaltyBeans} />}
           {tab === "options" && <OptionGroupsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "settings" && <SettingsPanel data={data} updateData={updateData} showToast={showToast} uid={uid} />}
@@ -5896,7 +5898,7 @@ function accountingAccountLabel(accountId) {
   return ACCOUNTING_PAYMENT_ACCOUNTS.find((account) => account.id === accountId)?.label || accountId || "—";
 }
 
-function AccountingPanel({ transactions, onSave, onDelete, showToast }) {
+function AccountingPanel({ transactions, sales, overheadPerCup, onSave, onDelete, showToast }) {
   const [month, setMonth] = useState(todayStr().slice(0, 7));
   const [typeFilter, setTypeFilter] = useState("all");
   const [query, setQuery] = useState("");
@@ -5904,19 +5906,34 @@ function AccountingPanel({ transactions, onSave, onDelete, showToast }) {
   const [deleteFor, setDeleteFor] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
+  const periodTransactions = useMemo(() => transactions.filter((transaction) => !month || String(transaction.transactionDate || "").startsWith(month)), [transactions, month]);
+  const periodSales = useMemo(() => sales.filter((sale) => !month || String(sale.timestamp || "").startsWith(month)), [sales, month]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return transactions.filter((transaction) => {
-      if (month && !String(transaction.transactionDate || "").startsWith(month)) return false;
+    return periodTransactions.filter((transaction) => {
       if (typeFilter !== "all" && transaction.type !== typeFilter) return false;
       if (q && !`${transaction.description || ""} ${transaction.vendorName || ""} ${accountingCategoryLabel(transaction.type, transaction.category)}`.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [transactions, month, typeFilter, query]);
+  }, [periodTransactions, typeFilter, query]);
 
-  const income = filtered.filter((transaction) => transaction.type === "income").reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
-  const expense = filtered.filter((transaction) => transaction.type === "expense").reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
-  const netCash = income - expense;
+  const cashIncome = periodTransactions.filter((transaction) => transaction.type === "income").reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
+  const cashExpense = periodTransactions.filter((transaction) => transaction.type === "expense").reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
+  const refunds = periodTransactions.filter((transaction) => transaction.category === "sales_refund").reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
+  const inventoryCash = periodTransactions.filter((transaction) => transaction.category === "inventory_purchase" || transaction.category === "packaging").reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
+  const excludedFromOpex = new Set(["sales_refund", "inventory_purchase", "packaging", "asset_purchase"]);
+  const operatingExpenses = periodTransactions.filter((transaction) => transaction.type === "expense" && !excludedFromOpex.has(transaction.category)).reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
+  const costOfGoods = periodSales.reduce((sum, sale) => {
+    if (sale.ingredientCostTotal != null) return sum + (Number(sale.ingredientCostTotal) || 0);
+    return sum + Math.max(0, (Number(sale.totalCost) || 0) - (Number(overheadPerCup) || 0) * (Number(sale.qty) || 0));
+  }, 0);
+  const netRevenue = cashIncome - refunds;
+  const grossProfit = netRevenue - costOfGoods;
+  const netProfit = grossProfit - operatingExpenses;
+  const netCash = cashIncome - cashExpense;
+  const grossMargin = netRevenue > 0 ? (grossProfit / netRevenue) * 100 : 0;
+  const hasEstimatedLegacyCost = periodSales.some((sale) => sale.ingredientCostTotal == null);
 
   function openNew(type) {
     setEditing({
@@ -5952,8 +5969,12 @@ function AccountingPanel({ transactions, onSave, onDelete, showToast }) {
         .acc-page { --acc-blue:#2563EB; --acc-green:#15803D; --acc-red:#B91C1C; --acc-ink:#172033; --acc-muted:#6B7280; }
         .acc-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; }
         .acc-actions { display:flex; gap:8px; flex-wrap:wrap; }
-        .acc-kpis { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:16px; }
+        .acc-kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:12px; }
         .acc-kpi { padding:16px 18px; background:#fff; border:1px solid ${POS.border}; border-radius:15px; }
+        .acc-summary-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px; }
+        .acc-statement { padding:16px 18px; border:1px solid ${POS.border}; border-radius:15px; background:#fff; }
+        .acc-statement-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:7px 0; color:var(--acc-muted); font-size:12.5px; border-bottom:1px solid #F2F0EC; }
+        .acc-statement-row:last-child { border-bottom:0; }
         .acc-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px; margin-bottom:12px; border:1px solid ${POS.border}; border-radius:14px; background:#fff; }
         .acc-search { position:relative; min-width:220px; flex:1; }
         .acc-search input,.acc-filter { width:100%; height:40px; box-sizing:border-box; border:1px solid ${POS.border}; border-radius:10px; background:#fff; color:var(--acc-ink); font:inherit; font-size:12.5px; outline:none; }
@@ -5970,16 +5991,16 @@ function AccountingPanel({ transactions, onSave, onDelete, showToast }) {
         .acc-field-label { display:block; margin-bottom:6px; color:var(--acc-muted); font-size:11.5px; font-weight:700; }
         .acc-field { width:100%; height:42px; box-sizing:border-box; padding:0 11px; border:1px solid ${POS.border}; border-radius:10px; background:#fff; color:var(--acc-ink); font:inherit; font-size:13.5px; outline:none; }
         textarea.acc-field { height:76px; padding-top:10px; resize:vertical; }
-        @media(max-width:1100px){ .acc-row{grid-template-columns:95px minmax(190px,1.5fr) 140px 115px 110px 72px;} .acc-col-account{display:none;} }
-        @media(max-width:760px){ .acc-head{flex-direction:column;} .acc-kpis{grid-template-columns:1fr;} .acc-table{border:0;background:transparent;overflow:visible;} .acc-row-head{display:none;} .acc-row{display:grid;grid-template-columns:1fr auto;gap:7px;margin-bottom:8px;padding:13px;border:1px solid ${POS.border};border-radius:13px;background:#fff;} .acc-row:last-child{border-bottom:1px solid ${POS.border};} .acc-col-date,.acc-col-category,.acc-col-account{font-size:11.5px;} .acc-col-description{grid-column:1/2;grid-row:1;} .acc-col-amount{grid-column:2;grid-row:1;text-align:right;} .acc-col-type{grid-column:1;} .acc-col-actions{grid-column:2;grid-row:2/4;} }
+        @media(max-width:1100px){ .acc-kpis{grid-template-columns:repeat(2,minmax(0,1fr));} .acc-row{grid-template-columns:95px minmax(190px,1.5fr) 140px 115px 110px 72px;} .acc-col-account{display:none;} }
+        @media(max-width:760px){ .acc-head{flex-direction:column;} .acc-kpis,.acc-summary-grid{grid-template-columns:1fr;} .acc-table{border:0;background:transparent;overflow:visible;} .acc-row-head{display:none;} .acc-row{display:grid;grid-template-columns:1fr auto;gap:7px;margin-bottom:8px;padding:13px;border:1px solid ${POS.border};border-radius:13px;background:#fff;} .acc-row:last-child{border-bottom:1px solid ${POS.border};} .acc-col-date,.acc-col-category,.acc-col-account{font-size:11.5px;} .acc-col-description{grid-column:1/2;grid-row:1;} .acc-col-amount{grid-column:2;grid-row:1;text-align:right;} .acc-col-type{grid-column:1;} .acc-col-actions{grid-column:2;grid-row:2/4;} }
         @media(max-width:520px){ .acc-actions>*{flex:1;} .acc-form-grid{grid-template-columns:1fr;} .acc-filter{width:100%;} }
       `}</style>
 
       <div className="acc-head">
         <div>
-          <p style={{ margin:0, color:POS.gray, fontSize:11.5, fontWeight:700, letterSpacing:".04em", textTransform:"uppercase" }}>Cash Book</p>
-          <h2 style={{ margin:"3px 0 4px", color:POS.navy, fontSize:22 }}>รายรับ–รายจ่าย</h2>
-          <p style={{ margin:0, color:POS.gray, fontSize:12.5 }}>บันทึกกระแสเงินสดของร้าน ขั้นนี้ยังไม่รวมยอดขายและการรับสต็อกอัตโนมัติ</p>
+          <p style={{ margin:0, color:POS.gray, fontSize:11.5, fontWeight:700, letterSpacing:".04em", textTransform:"uppercase" }}>Accounting overview</p>
+          <h2 style={{ margin:"3px 0 4px", color:POS.navy, fontSize:22 }}>บัญชีและผลประกอบการ</h2>
+          <p style={{ margin:0, color:POS.gray, fontSize:12.5 }}>แยกกำไรขาดทุนจากกระแสเงินสด เพื่อไม่นับการซื้อวัตถุดิบซ้ำกับต้นทุนที่ขายไป</p>
         </div>
         <div className="acc-actions">
           <button className="cbtn" onClick={() => openNew("expense")}><Icon name="minus" size={15} /> <span style={{ marginLeft:5 }}>เพิ่มรายจ่าย</span></button>
@@ -5988,9 +6009,31 @@ function AccountingPanel({ transactions, onSave, onDelete, showToast }) {
       </div>
 
       <div className="acc-kpis">
-        <AccountingKpi label="เงินรับ" value={income} color="#15803D" background="#EAF7EE" icon="arrow-down-left" />
-        <AccountingKpi label="เงินจ่าย" value={expense} color="#B91C1C" background="#FDECEC" icon="arrow-up-right" />
-        <AccountingKpi label="กระแสเงินสดสุทธิ" value={netCash} color={netCash >= 0 ? "#1D4ED8" : "#B91C1C"} background={netCash >= 0 ? "#E8EEFF" : "#FDECEC"} icon="arrows-exchange" />
+        <AccountingKpi label="รายได้สุทธิ" value={netRevenue} color="#15803D" background="#EAF7EE" icon="cash" />
+        <AccountingKpi label="ต้นทุนขาย" value={costOfGoods} color="#92400E" background="#FFF4E5" icon="cup" />
+        <AccountingKpi label="ค่าใช้จ่ายดำเนินงาน" value={operatingExpenses} color="#6B7280" background="#F3F4F6" icon="receipt" />
+        <AccountingKpi label="กำไรสุทธิประมาณการ" value={netProfit} color={netProfit >= 0 ? "#1D4ED8" : "#B91C1C"} background={netProfit >= 0 ? "#E8EEFF" : "#FDECEC"} icon="chart-line" />
+      </div>
+
+      <div className="acc-summary-grid">
+        <section className="acc-statement">
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:7 }}><h3 style={{ margin:0, color:POS.navy, fontSize:14 }}>งบกำไรขาดทุน</h3><span style={{ color:POS.gray, fontSize:10.5 }}>Management P&amp;L</span></div>
+          <AccountingStatementRow label="รายรับทั้งหมด" value={cashIncome} />
+          <AccountingStatementRow label="หัก คืนเงิน/ยกเลิก" value={-refunds} />
+          <AccountingStatementRow label="หัก ต้นทุนวัตถุดิบที่ขาย" value={-costOfGoods} note={hasEstimatedLegacyCost ? "ยอดเก่าบางส่วนเป็นค่าประมาณ" : ""} />
+          <AccountingStatementRow label={`กำไรขั้นต้น (${grossMargin.toFixed(1)}%)`} value={grossProfit} strong />
+          <AccountingStatementRow label="หัก ค่าใช้จ่ายดำเนินงาน" value={-operatingExpenses} />
+          <AccountingStatementRow label="กำไรสุทธิประมาณการ" value={netProfit} strong tone={netProfit >= 0 ? "positive" : "negative"} />
+        </section>
+        <section className="acc-statement">
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:7 }}><h3 style={{ margin:0, color:POS.navy, fontSize:14 }}>กระแสเงินสด</h3><span style={{ color:POS.gray, fontSize:10.5 }}>Cash movement</span></div>
+          <AccountingStatementRow label="เงินรับ" value={cashIncome} />
+          <AccountingStatementRow label="ซื้อวัตถุดิบเข้าคลัง" value={-inventoryCash} />
+          <AccountingStatementRow label="รายจ่ายอื่นและคืนเงิน" value={-(cashExpense - inventoryCash)} />
+          <AccountingStatementRow label="เงินจ่ายทั้งหมด" value={-cashExpense} strong />
+          <AccountingStatementRow label="กระแสเงินสดสุทธิ" value={netCash} strong tone={netCash >= 0 ? "positive" : "negative"} />
+          <p style={{ margin:"8px 0 0", color:POS.gray, fontSize:10.5, lineHeight:1.45 }}>เงินซื้อสต็อกแสดงในกระแสเงินสดทันที แต่จะเป็นต้นทุนใน P&amp;L เมื่อวัตถุดิบนั้นถูกขาย</p>
+        </section>
       </div>
 
       <div className="acc-toolbar">
@@ -6024,6 +6067,11 @@ function AccountingPanel({ transactions, onSave, onDelete, showToast }) {
 
 function AccountingKpi({ label, value, color, background, icon }) {
   return <div className="acc-kpi"><div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10 }}><div><div style={{ color:POS.gray, fontSize:11.5, fontWeight:600 }}>{label}</div><div style={{ marginTop:4, color, fontSize:22, fontWeight:700 }}>{value < 0 ? "−" : ""}฿{money(Math.abs(value))}</div></div><div style={{ width:40, height:40, borderRadius:11, display:"grid", placeItems:"center", color, background }}><Icon name={icon} size={20} /></div></div></div>;
+}
+
+function AccountingStatementRow({ label, value, note, strong, tone }) {
+  const color = tone === "positive" ? "#15803D" : tone === "negative" ? "#B91C1C" : strong ? POS.navy : POS.gray;
+  return <div className="acc-statement-row" style={strong ? { fontWeight:700, color } : undefined}><div><span>{label}</span>{note && <div style={{ marginTop:2, color:"#B45309", fontSize:9.5 }}>{note}</div>}</div><span style={{ color, fontWeight:strong ? 700 : 600, whiteSpace:"nowrap" }}>{value < 0 ? "−" : ""}฿{money(Math.abs(value))}</span></div>;
 }
 
 function AccountingTransactionModal({ transaction, onClose, onSave }) {
