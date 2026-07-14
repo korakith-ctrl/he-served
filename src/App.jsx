@@ -602,6 +602,8 @@ function ShopApp({ uid, user }) {
   const [recurringExpenses, setRecurringExpenses] = useState([]);
   const [accountingAccounts, setAccountingAccounts] = useState([]);
   const [accountReconciliations, setAccountReconciliations] = useState([]);
+  const [accountingSettings, setAccountingSettings] = useState({ vatRegistered:false, vatRate:7, taxId:"", vatRegistrationDate:"" });
+  const [accountingPeriodClosings, setAccountingPeriodClosings] = useState({});
   // เช็คแค่ตอน mount ครั้งเดียวไม่พอ — ถ้าหน้าจอเปลี่ยนขนาดทีหลัง (resize, หมุนแท็บเล็ต) โดยไม่ reload หน้า
   // sidebarCollapsed จะค้างค่าตอน mount ตลอด ทำให้ sidebar เต็มบีบเนื้อหาแคบเกินจนอ่านไม่ออกบนจอมือถือจริง
   useEffect(() => {
@@ -708,6 +710,18 @@ function ShopApp({ uid, user }) {
   }, [uid]);
 
   useEffect(() => {
+    const unsub = onValue(ref(db, `accounting/${uid}/settings`), (snap) => {
+      if (snap.exists()) setAccountingSettings({ vatRegistered:false, vatRate:7, taxId:"", vatRegistrationDate:"", ...snap.val() });
+    });
+    return () => unsub();
+  }, [uid]);
+
+  useEffect(() => {
+    const unsub = onValue(ref(db, `accounting/${uid}/periodClosings`), (snap) => setAccountingPeriodClosings(snap.val() || {}));
+    return () => unsub();
+  }, [uid]);
+
+  useEffect(() => {
     const unsub = onValue(shopRef, (snap) => {
       if (snap.exists()) {
         setData(normalizeData(snap.val()));
@@ -769,6 +783,7 @@ function ShopApp({ uid, user }) {
   async function saveAccountingTransaction(transaction) {
     const now = new Date().toISOString();
     const id = transaction.id || push(ref(db, `accounting/${uid}/transactions`)).key;
+    if (accountingPeriodClosings[String(transaction.transactionDate || "").slice(0,7)]) throw new Error("งวดบัญชีเดือนนี้ถูกปิดแล้ว");
     const payload = {
       type: transaction.type === "income" ? "income" : "expense",
       category: transaction.category,
@@ -782,6 +797,8 @@ function ShopApp({ uid, user }) {
       sourceId: transaction.sourceId || null,
       status: transaction.status || "paid",
       recurringMonth: transaction.recurringMonth || null,
+      vatAmount: Math.max(0, Math.round((Number(transaction.vatAmount) || 0) * 100) / 100),
+      taxInvoiceNumber: String(transaction.taxInvoiceNumber || "").trim(),
       createdAt: transaction.createdAt || now,
       updatedAt: now,
     };
@@ -791,12 +808,14 @@ function ShopApp({ uid, user }) {
 
   async function deleteAccountingTransaction(transaction) {
     if (transaction.sourceType && transaction.sourceType !== "manual") throw new Error("รายการจากระบบต้องยกเลิกจากเอกสารต้นทาง");
+    if (accountingPeriodClosings[String(transaction.transactionDate || "").slice(0,7)]) throw new Error("งวดบัญชีเดือนนี้ถูกปิดแล้ว");
     await set(ref(db, `accounting/${uid}/transactions/${transaction.id}`), null);
   }
 
   async function saveAccountingAsset(asset) {
     const now = new Date().toISOString();
     const id = asset.id || push(ref(db, `accounting/${uid}/assets`)).key;
+    if (accountingPeriodClosings[String(asset.purchaseDate || "").slice(0,7)]) throw new Error("งวดบัญชีเดือนนี้ถูกปิดแล้ว");
     const payload = {
       name: String(asset.name || "").trim(), category: asset.category || "equipment",
       purchaseDate: asset.purchaseDate, inServiceDate: asset.inServiceDate || asset.purchaseDate,
@@ -824,6 +843,7 @@ function ShopApp({ uid, user }) {
   }
 
   async function deleteAccountingAsset(asset) {
+    if (accountingPeriodClosings[String(asset.purchaseDate || "").slice(0,7)]) throw new Error("งวดบัญชีเดือนนี้ถูกปิดแล้ว");
     await update(ref(db), {
       [`accounting/${uid}/assets/${asset.id}`]: null,
       [`accounting/${uid}/transactions/asset_purchase_${asset.id}`]: null,
@@ -865,6 +885,7 @@ function ShopApp({ uid, user }) {
   }
 
   async function updateRecurringOccurrence(transaction, status) {
+    if (accountingPeriodClosings[String(transaction.transactionDate || "").slice(0,7)]) throw new Error("งวดบัญชีเดือนนี้ถูกปิดแล้ว");
     await update(ref(db, `accounting/${uid}/transactions/${transaction.id}`), {
       status, transactionDate: status === "paid" ? todayStr() : transaction.transactionDate, updatedAt: new Date().toISOString(),
     });
@@ -877,6 +898,18 @@ function ShopApp({ uid, user }) {
   async function saveAccountReconciliation(reconciliation) {
     const newRef = push(ref(db, `accounting/${uid}/reconciliations`));
     await set(newRef, { ...reconciliation, reconciledAt:new Date().toISOString(), createdAt:new Date().toISOString() });
+  }
+
+  async function saveAccountingSettings(settings) {
+    await set(ref(db, `accounting/${uid}/settings`), { ...accountingSettings, ...settings, updatedAt:new Date().toISOString() });
+  }
+
+  async function setAccountingPeriodClosed(month, summary, closed) {
+    await set(ref(db, `accounting/${uid}/periodClosings/${month}`), closed ? { month, summary, closedAt:new Date().toISOString(), closedBy:uid } : null);
+  }
+
+  function isAccountingPeriodClosed(date) {
+    return Boolean(accountingPeriodClosings[String(date || "").slice(0,7)]);
   }
 
   const ingredientsById = useMemo(() => {
@@ -1365,9 +1398,9 @@ function ShopApp({ uid, user }) {
           {tab === "orders" && <OrdersPanel uid={uid} orders={orders} recordSale={recordSale} cancelOrder={cancelOrder} awardLoyaltyBeans={awardLoyaltyBeans} showToast={showToast} data={data} ingredientsById={ingredientsById} />}
           {tab === "menus" && <MenusPanel data={dataForDisplay} ingredientsById={ingredientsById} updateData={updateData} showToast={showToast} />}
           {tab === "promotions" && <PromotionsPanel data={data} updateData={updateData} showToast={showToast} />}
-          {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} onSaveAccounting={saveAccountingTransaction} />}
+          {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} onSaveAccounting={saveAccountingTransaction} isAccountingPeriodClosed={isAccountingPeriodClosed} />}
           {tab === "reports" && <ReportsPanel data={dataForDisplay} orders={orders} shopName={data.settings.shopName} showToast={showToast} />}
-          {tab === "accounting" && <AccountingPanel transactions={accountingTransactions} assets={accountingAssets} recurringExpenses={recurringExpenses} accounts={accountingAccounts} reconciliations={accountReconciliations} sales={dataForDisplay.sales} overheadPerCup={data.settings.overheadPerCup} onSave={saveAccountingTransaction} onDelete={deleteAccountingTransaction} onSaveAsset={saveAccountingAsset} onDeleteAsset={deleteAccountingAsset} onSaveRecurring={saveRecurringExpense} onDeleteRecurring={deleteRecurringExpense} onUpdateOccurrence={updateRecurringOccurrence} onUpdateAccount={updateAccountingAccount} onSaveReconciliation={saveAccountReconciliation} showToast={showToast} />}
+          {tab === "accounting" && <AccountingPanel transactions={accountingTransactions} assets={accountingAssets} recurringExpenses={recurringExpenses} accounts={accountingAccounts} reconciliations={accountReconciliations} accountingSettings={accountingSettings} periodClosings={accountingPeriodClosings} sales={dataForDisplay.sales} overheadPerCup={data.settings.overheadPerCup} onSave={saveAccountingTransaction} onDelete={deleteAccountingTransaction} onSaveAsset={saveAccountingAsset} onDeleteAsset={deleteAccountingAsset} onSaveRecurring={saveRecurringExpense} onDeleteRecurring={deleteRecurringExpense} onUpdateOccurrence={updateRecurringOccurrence} onUpdateAccount={updateAccountingAccount} onSaveReconciliation={saveAccountReconciliation} onSaveSettings={saveAccountingSettings} onSetPeriodClosed={setAccountingPeriodClosed} showToast={showToast} />}
           {tab === "loyalty" && <LoyaltyPanel customers={customers} orders={orders} loyaltyBeanGoal={data.settings.loyaltyBeanGoal} adjustCustomerBeans={adjustCustomerBeans} createLoyaltyCustomer={createLoyaltyCustomer} updateLoyaltyGoal={updateLoyaltyGoal} showToast={showToast} backfillEligibleCount={backfillEligibleOrders.length} backfillLoyaltyBeans={backfillLoyaltyBeans} />}
           {tab === "options" && <OptionGroupsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "settings" && <SettingsPanel data={data} updateData={updateData} showToast={showToast} uid={uid} />}
@@ -5289,7 +5322,7 @@ function InvConfirmDialog({ title, message, confirmLabel, onConfirm, onCancel })
   );
 }
 
-function IngredientsPanel({ data, updateData, showToast, onSaveAccounting }) {
+function IngredientsPanel({ data, updateData, showToast, onSaveAccounting, isAccountingPeriodClosed }) {
   const [restocking, setRestocking] = useState(null);
   const [adjusting, setAdjusting] = useState(null);
   const [drawer, setDrawer] = useState(null); // null | { mode: "add" | "edit", initial }
@@ -5317,6 +5350,7 @@ function IngredientsPanel({ data, updateData, showToast, onSaveAccounting }) {
   }
 
   async function doRestock(id, purchaseForm) {
+    if (isAccountingPeriodClosed(purchaseForm.purchaseDate)) { showToast("งวดบัญชีเดือนนี้ถูกปิดแล้ว กรุณาปลดล็อกก่อนรับสต็อกย้อนหลัง"); return; }
     const addQty = Number(purchaseForm.qty) || 0;
     const totalPaid = Number(purchaseForm.total) || 0;
     const purchaseId = genId("purchase");
@@ -6082,7 +6116,21 @@ function assetDepreciationForPeriod(asset, month) {
   return Math.max(0, accumulatedAssetDepreciation(asset, end) - accumulatedAssetDepreciation(asset, previousEnd));
 }
 
-function AccountingPanel({ transactions, assets, recurringExpenses, accounts, reconciliations, sales, overheadPerCup, onSave, onDelete, onSaveAsset, onDeleteAsset, onSaveRecurring, onDeleteRecurring, onUpdateOccurrence, onUpdateAccount, onSaveReconciliation, showToast }) {
+function exportAccountingCsv(transactions, month) {
+  const escape = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  const header = ["วันที่","ประเภท","หมวด","รายละเอียด","คู่ค้า","ช่องทางเงิน","ยอดรวม","VAT","เลขใบกำกับภาษี","สถานะ","แหล่งข้อมูล"];
+  const rows = transactions.map((transaction)=>[
+    transaction.transactionDate, transaction.type === "income" ? "รายรับ" : "รายจ่าย",
+    accountingCategoryLabel(transaction.type,transaction.category), transaction.description, transaction.vendorName,
+    accountingAccountLabel(transaction.paymentAccount), Number(transaction.amount)||0, Number(transaction.vatAmount)||0,
+    transaction.taxInvoiceNumber||"", transaction.status||"paid", transaction.sourceType||"manual",
+  ]);
+  const csv="\uFEFF"+[header,...rows].map((row)=>row.map(escape).join(",")).join("\r\n");
+  const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
+  const link=document.createElement("a");link.href=url;link.download=`accounting-${month||"all"}.csv`;document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(url);
+}
+
+function AccountingPanel({ transactions, assets, recurringExpenses, accounts, reconciliations, accountingSettings, periodClosings, sales, overheadPerCup, onSave, onDelete, onSaveAsset, onDeleteAsset, onSaveRecurring, onDeleteRecurring, onUpdateOccurrence, onUpdateAccount, onSaveReconciliation, onSaveSettings, onSetPeriodClosed, showToast }) {
   const [month, setMonth] = useState(todayStr().slice(0, 7));
   const [typeFilter, setTypeFilter] = useState("all");
   const [query, setQuery] = useState("");
@@ -6120,6 +6168,11 @@ function AccountingPanel({ transactions, assets, recurringExpenses, accounts, re
   const netCash = cashIncome - cashExpense;
   const grossMargin = netRevenue > 0 ? (grossProfit / netRevenue) * 100 : 0;
   const hasEstimatedLegacyCost = periodSales.some((sale) => sale.ingredientCostTotal == null);
+  const vatRate = Number(accountingSettings.vatRate) || 7;
+  const vatApplies = (transaction) => accountingSettings.vatRegistered && (!accountingSettings.vatRegistrationDate || transaction.transactionDate >= accountingSettings.vatRegistrationDate);
+  const outputVat = paidPeriodTransactions.filter((transaction)=>transaction.type==="income"&&vatApplies(transaction)).reduce((sum,transaction)=>sum+(Number(transaction.vatAmount)||((Number(transaction.amount)||0)*vatRate/(100+vatRate))),0);
+  const inputVat = paidPeriodTransactions.filter((transaction)=>transaction.type==="expense"&&vatApplies(transaction)).reduce((sum,transaction)=>sum+(Number(transaction.vatAmount)||0),0);
+  const closedPeriod = month ? periodClosings[month] : null;
 
   function openNew(type) {
     const firstManualCategory = ACCOUNTING_CATEGORIES[type].find((category) => !ACCOUNTING_SYSTEM_CATEGORIES.has(category.id));
@@ -6228,7 +6281,9 @@ function AccountingPanel({ transactions, assets, recurringExpenses, accounts, re
         <div className="acc-search"><Icon name="search" size={15} style={{ position:"absolute", left:12, top:12, color:POS.gray }} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ค้นหารายละเอียด คู่ค้า หรือหมวด..." /></div>
         <input className="acc-filter" type="month" value={month} onChange={(event) => setMonth(event.target.value)} aria-label="เลือกเดือน" />
         <select className="acc-filter" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} aria-label="กรองประเภทรายการ"><option value="all">ทุกรายการ</option><option value="income">รายรับ</option><option value="expense">รายจ่าย</option></select>
+        <button className="cbtn" onClick={()=>exportAccountingCsv(periodTransactions,month)}><Icon name="download" size={14}/><span style={{marginLeft:4}}>Export CSV</span></button>
         {month && <button className="cbtn" onClick={() => setMonth("")}>ดูทั้งหมด</button>}
+        {closedPeriod&&<span className="acc-type" style={{color:"#7A5A00",background:"#FFF9E5"}}>ปิดงวดแล้ว</span>}
       </div>
 
       {filtered.length === 0 ? <div style={{ padding:30, border:`1px solid ${POS.border}`, borderRadius:15, background:"#fff", textAlign:"center" }}><Icon name="book-2" size={27} style={{ color:POS.gray }} /><p style={{ margin:"8px 0 2px", color:POS.navy, fontWeight:700, fontSize:13.5 }}>ยังไม่มีรายการในช่วงนี้</p><p style={{ margin:0, color:POS.gray, fontSize:12 }}>เพิ่มรายรับหรือรายจ่ายรายการแรกได้จากปุ่มด้านบน</p></div> : <div className="acc-table">
@@ -6250,8 +6305,9 @@ function AccountingPanel({ transactions, assets, recurringExpenses, accounts, re
       <AccountingAssetsSection assets={assets} onSave={onSaveAsset} onDelete={onDeleteAsset} showToast={showToast} />
       <AccountingRecurringSection templates={recurringExpenses} transactions={transactions} onSave={onSaveRecurring} onDelete={onDeleteRecurring} onUpdateOccurrence={onUpdateOccurrence} showToast={showToast} />
       <AccountingAccountsSection accounts={accounts} transactions={transactions} reconciliations={reconciliations} onUpdateAccount={onUpdateAccount} onSaveReconciliation={onSaveReconciliation} showToast={showToast} />
+      <AccountingTaxClosingSection month={month} settings={accountingSettings} outputVat={outputVat} inputVat={inputVat} closedPeriod={closedPeriod} summary={{netRevenue,costOfGoods,operatingExpenses,depreciationExpense,netProfit,netCash,outputVat,inputVat}} onSaveSettings={onSaveSettings} onSetPeriodClosed={onSetPeriodClosed} showToast={showToast}/>
 
-      {editing && <AccountingTransactionModal transaction={editing} onClose={() => setEditing(null)} onSave={async (value) => { await onSave(value); setEditing(null); showToast(value.id ? "แก้ไขรายการบัญชีแล้ว" : "บันทึกรายการบัญชีแล้ว"); }} />}
+      {editing && <AccountingTransactionModal transaction={editing} vatRegistered={accountingSettings.vatRegistered} onClose={() => setEditing(null)} onSave={async (value) => { await onSave(value); setEditing(null); showToast(value.id ? "แก้ไขรายการบัญชีแล้ว" : "บันทึกรายการบัญชีแล้ว"); }} />}
       {deleteFor && <div className="acc-modal-bg" onClick={() => !deleting && setDeleteFor(null)}><div className="acc-modal" style={{ width:"min(390px,100%)" }} role="alertdialog" aria-modal="true" onClick={(event) => event.stopPropagation()}><h3 style={{ margin:"0 0 7px", color:POS.navy }}>ลบรายการนี้?</h3><p style={{ margin:"0 0 16px", color:POS.gray, fontSize:12.5 }}>“{deleteFor.description}” จำนวน ฿{money(deleteFor.amount)} จะถูกลบออกจากสมุดบัญชี</p><div style={{ display:"flex", gap:8 }}><button className="cbtn" disabled={deleting} style={{ flex:1 }} onClick={() => setDeleteFor(null)}>ยกเลิก</button><button className="cbtn cbtn-danger" disabled={deleting} style={{ flex:1 }} onClick={confirmDelete}>{deleting ? "กำลังลบ..." : "ลบรายการ"}</button></div></div></div>}
     </div>
   );
@@ -6352,6 +6408,18 @@ function AccountingAccountsSection({accounts,transactions,reconciliations,onUpda
   </section>;
 }
 
+function AccountingTaxClosingSection({month,settings,outputVat,inputVat,closedPeriod,summary,onSaveSettings,onSetPeriodClosed,showToast}){
+  const [editing,setEditing]=useState(false);
+  const [form,setForm]=useState({...settings});
+  const [busy,setBusy]=useState(false);
+  const vatPayable=outputVat-inputVat;
+  async function saveSettings(){setBusy(true);try{await onSaveSettings({...form,vatRate:Math.max(0,Number(form.vatRate)||7),taxId:String(form.taxId||"").trim()});setEditing(false);showToast("บันทึกการตั้งค่าภาษีแล้ว");}catch(error){showToast("บันทึกไม่สำเร็จ: "+error.message);}finally{setBusy(false);}}
+  async function toggleClose(){if(!month)return;setBusy(true);try{await onSetPeriodClosed(month,summary,!closedPeriod);showToast(closedPeriod?"ปลดล็อกงวดแล้ว":"ปิดงวดบัญชีแล้ว");}catch(error){showToast("อัปเดตงวดไม่สำเร็จ: "+error.message);}finally{setBusy(false);}}
+  return <section style={{marginTop:20,marginBottom:8}}><div className="acc-assets-head"><div><h3 style={{margin:"0 0 3px",color:POS.navy,fontSize:17}}>ภาษีและปิดงวด</h3><p style={{margin:0,color:POS.gray,fontSize:11.5}}>สรุป VAT สำหรับตรวจสอบและล็อกข้อมูลรายเดือนก่อนส่งนักบัญชี</p></div><button className="cbtn" onClick={()=>{setForm({...settings});setEditing(true);}}><Icon name="settings" size={14}/><span style={{marginLeft:4}}>ตั้งค่าภาษี</span></button></div><div className="acc-summary-grid"><div className="acc-statement"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}><h3 style={{margin:0,color:POS.navy,fontSize:14}}>VAT {settings.vatRegistered?`${settings.vatRate||7}%`:"ยังไม่เปิด"}</h3>{settings.taxId&&<span style={{fontSize:10,color:POS.gray}}>เลขภาษี {settings.taxId}</span>}</div>{settings.vatRegistered?<><AccountingStatementRow label="ภาษีขายประมาณการ" value={outputVat}/><AccountingStatementRow label="ภาษีซื้อที่บันทึก" value={-inputVat}/><AccountingStatementRow label={vatPayable>=0?"VAT คาดว่าต้องชำระ":"เครดิต VAT คงเหลือ"} value={vatPayable} strong tone={vatPayable>0?"negative":"positive"}/><p style={{margin:"8px 0 0",color:POS.gray,fontSize:10,lineHeight:1.45}}>ภาษีขายคำนวณจากยอดรวม VAT; ภาษีซื้อนับเฉพาะรายการที่กรอก VAT และควรมีใบกำกับภาษีถูกต้อง</p></>:<p style={{margin:"12px 0",color:POS.gray,fontSize:12}}>เปิดการจด VAT ในการตั้งค่าเมื่อร้านจดทะเบียนแล้ว</p>}</div><div className="acc-statement"><h3 style={{margin:"0 0 7px",color:POS.navy,fontSize:14}}>งวดบัญชี {month||"ทั้งหมด"}</h3>{month?<><div style={{padding:12,borderRadius:10,background:closedPeriod?"#FFF9E5":"#EAF7EE",color:closedPeriod?"#7A5A00":"#15803D",fontSize:12.5,fontWeight:700}}>{closedPeriod?`ปิดงวดเมื่อ ${new Date(closedPeriod.closedAt).toLocaleString("th-TH")}`:"งวดยังเปิด แก้ไขรายการได้"}</div><button className={closedPeriod?"cbtn":"cbtn cbtn-accent"} disabled={busy} style={{width:"100%",marginTop:10}} onClick={toggleClose}>{closedPeriod?"ปลดล็อกงวด":"ปิดงวดเดือนนี้"}</button><p style={{margin:"8px 0 0",color:POS.gray,fontSize:10.5,lineHeight:1.45}}>เมื่อปิดงวด รายการที่บันทึกเองในเดือนนี้จะแก้ไขหรือลบไม่ได้จนกว่าจะปลดล็อก</p></>:<p style={{color:POS.gray,fontSize:12}}>เลือกเดือนด้านบนก่อนปิดงวด</p>}</div></div>
+    {editing&&<div className="acc-modal-bg" onClick={()=>setEditing(false)}><div className="acc-modal" style={{width:"min(430px,100%)"}} role="dialog" aria-modal="true" onClick={(event)=>event.stopPropagation()}><h3 style={{margin:"0 0 14px",color:POS.navy}}>ตั้งค่าภาษี</h3><label style={{display:"flex",alignItems:"center",gap:8,color:POS.navy,fontSize:13,fontWeight:700,marginBottom:14}}><input type="checkbox" checked={form.vatRegistered===true} onChange={(event)=>setForm({...form,vatRegistered:event.target.checked})}/> ร้านจดทะเบียน VAT แล้ว</label><div className="acc-form-grid"><div><label className="acc-field-label">อัตรา VAT (%)</label><input className="acc-field" type="number" min="0" step="0.01" value={form.vatRate||7} onChange={(event)=>setForm({...form,vatRate:event.target.value})}/></div><div><label className="acc-field-label">วันที่เริ่มจด VAT</label><input className="acc-field" type="date" value={form.vatRegistrationDate||""} onChange={(event)=>setForm({...form,vatRegistrationDate:event.target.value})}/></div><div style={{gridColumn:"1/-1"}}><label className="acc-field-label">เลขประจำตัวผู้เสียภาษี</label><TextField className="acc-field" value={form.taxId||""} onChange={(value)=>setForm({...form,taxId:value})}/></div></div><p style={{fontSize:10.5,color:POS.gray,lineHeight:1.5}}>รายงานนี้เป็นเครื่องมือช่วยจัดข้อมูล ไม่แทนคำแนะนำหรือการตรวจสอบของนักบัญชี</p><div style={{display:"flex",gap:8}}><button className="cbtn" style={{flex:1}} onClick={()=>setEditing(false)}>ยกเลิก</button><button className="cbtn cbtn-accent" disabled={busy} style={{flex:1}} onClick={saveSettings}>บันทึก</button></div></div></div>}
+  </section>;
+}
+
 function AccountingReconciliationModal({account,onClose,onSave}){
   const [actual,setActual]=useState(String(account.expectedBalance));
   const [date,setDate]=useState(todayStr());
@@ -6413,7 +6481,7 @@ function AccountingAssetModal({ asset, onClose, onSave }) {
   </div>{error&&<p style={{margin:"10px 0 0",color:"#B91C1C",fontSize:12}}>{error}</p>}<p style={{margin:"10px 0 0",color:POS.gray,fontSize:10.5,lineHeight:1.45}}>ค่าเสื่อมนี้ใช้สำหรับรายงานบริหารภายใน การใช้ยื่นภาษีควรให้นักบัญชีตรวจประเภทและอัตราอีกครั้ง</p><div style={{display:"flex",gap:8,marginTop:16}}><button type="button" className="cbtn" disabled={saving} style={{flex:1}} onClick={onClose}>ยกเลิก</button><button type="submit" className="cbtn cbtn-accent" disabled={saving} style={{flex:1}}>{saving?"กำลังบันทึก...":"บันทึกอุปกรณ์"}</button></div></form></div>;
 }
 
-function AccountingTransactionModal({ transaction, onClose, onSave }) {
+function AccountingTransactionModal({ transaction, vatRegistered, onClose, onSave }) {
   const [form, setForm] = useState({ ...transaction });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -6445,6 +6513,7 @@ function AccountingTransactionModal({ transaction, onClose, onSave }) {
       <div><label className="acc-field-label">หมวด *</label><select className="acc-field" value={form.category} onChange={(event) => patch("category", event.target.value)}>{categories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}</select></div>
       <div><label className="acc-field-label">ช่องทางเงิน</label><select className="acc-field" value={form.paymentAccount} onChange={(event) => patch("paymentAccount", event.target.value)}>{ACCOUNTING_PAYMENT_ACCOUNTS.map((account) => <option key={account.id} value={account.id}>{account.label}</option>)}</select></div>
       <div style={{ gridColumn:"1/-1" }}><label className="acc-field-label">คู่ค้า / ผู้รับเงิน</label><TextField className="acc-field" value={form.vendorName || ""} onChange={(value) => patch("vendorName", value)} placeholder="ไม่บังคับ" /></div>
+      {vatRegistered&&<><div><label className="acc-field-label">VAT ที่รวมในยอด</label><input className="acc-field" type="number" min="0" step="0.01" value={form.vatAmount||""} onChange={(event)=>patch("vatAmount",event.target.value)} placeholder="0.00"/></div><div><label className="acc-field-label">เลขใบกำกับภาษี</label><TextField className="acc-field" value={form.taxInvoiceNumber||""} onChange={(value)=>patch("taxInvoiceNumber",value)} placeholder="ถ้ามี"/></div></>}
       <div style={{ gridColumn:"1/-1" }}><label className="acc-field-label">หมายเหตุ</label><textarea className="acc-field" value={form.note || ""} onChange={(event) => patch("note", event.target.value)} placeholder="รายละเอียดเพิ่มเติม (ถ้ามี)" /></div>
     </div>
     {error && <p style={{ margin:"10px 0 0", color:"#B91C1C", fontSize:12 }}>{error}</p>}
