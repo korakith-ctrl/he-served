@@ -599,6 +599,7 @@ function ShopApp({ uid, user }) {
   const [salesRecords, setSalesRecords] = useState([]);
   const [accountingTransactions, setAccountingTransactions] = useState([]);
   const [accountingAssets, setAccountingAssets] = useState([]);
+  const [recurringExpenses, setRecurringExpenses] = useState([]);
   // เช็คแค่ตอน mount ครั้งเดียวไม่พอ — ถ้าหน้าจอเปลี่ยนขนาดทีหลัง (resize, หมุนแท็บเล็ต) โดยไม่ reload หน้า
   // sidebarCollapsed จะค้างค่าตอน mount ตลอด ทำให้ sidebar เต็มบีบเนื้อหาแคบเกินจนอ่านไม่ออกบนจอมือถือจริง
   useEffect(() => {
@@ -670,6 +671,14 @@ function ShopApp({ uid, user }) {
       const rows = Object.entries(value).map(([id, asset]) => ({ id, ...asset }));
       rows.sort((a, b) => String(b.purchaseDate || "").localeCompare(String(a.purchaseDate || "")));
       setAccountingAssets(rows);
+    });
+    return () => unsub();
+  }, [uid]);
+
+  useEffect(() => {
+    const unsub = onValue(ref(db, `accounting/${uid}/recurringExpenses`), (snap) => {
+      const value = snap.val() || {};
+      setRecurringExpenses(Object.entries(value).map(([id, template]) => ({ id, ...template })));
     });
     return () => unsub();
   }, [uid]);
@@ -747,6 +756,8 @@ function ShopApp({ uid, user }) {
       note: String(transaction.note || "").trim(),
       sourceType: transaction.sourceType || "manual",
       sourceId: transaction.sourceId || null,
+      status: transaction.status || "paid",
+      recurringMonth: transaction.recurringMonth || null,
       createdAt: transaction.createdAt || now,
       updatedAt: now,
     };
@@ -795,6 +806,46 @@ function ShopApp({ uid, user }) {
     });
   }
 
+  async function saveRecurringExpense(template) {
+    const now = new Date().toISOString();
+    const id = template.id || push(ref(db, `accounting/${uid}/recurringExpenses`)).key;
+    const payload = {
+      name: String(template.name || "").trim(), category: template.category || "rent",
+      amount: Math.round((Number(template.amount) || 0) * 100) / 100,
+      dayOfMonth: Math.min(28, Math.max(1, Math.round(Number(template.dayOfMonth) || 1))),
+      startMonth: template.startMonth || todayStr().slice(0, 7), endMonth: template.endMonth || null,
+      paymentAccount: template.paymentAccount || "bank", vendorName: String(template.vendorName || "").trim(),
+      active: template.active !== false, note: String(template.note || "").trim(),
+      createdAt: template.createdAt || now, updatedAt: now,
+    };
+    if (!payload.name || payload.amount <= 0) throw new Error("กรุณากรอกชื่อและจำนวนเงินให้ถูกต้อง");
+    const patch = { [`accounting/${uid}/recurringExpenses/${id}`]: payload };
+    const currentMonth = todayStr().slice(0, 7);
+    const currentOccurrence = accountingTransactions.find((transaction) => transaction.sourceType === "recurring" && transaction.sourceId === id && transaction.recurringMonth === currentMonth && transaction.status === "pending");
+    if (currentOccurrence) {
+      const day = String(payload.dayOfMonth).padStart(2, "0");
+      patch[`accounting/${uid}/transactions/${currentOccurrence.id}`] = {
+        ...currentOccurrence, description:payload.name, category:payload.category, amount:payload.amount,
+        transactionDate:`${currentMonth}-${day}`, paymentAccount:payload.paymentAccount, vendorName:payload.vendorName, note:payload.note, updatedAt:now,
+      };
+    }
+    await update(ref(db), patch);
+  }
+
+  async function deleteRecurringExpense(template) {
+    const patch = { [`accounting/${uid}/recurringExpenses/${template.id}`]: null };
+    for (const transaction of accountingTransactions) {
+      if (transaction.sourceType === "recurring" && transaction.sourceId === template.id && transaction.status === "pending") patch[`accounting/${uid}/transactions/${transaction.id}`] = null;
+    }
+    await update(ref(db), patch);
+  }
+
+  async function updateRecurringOccurrence(transaction, status) {
+    await update(ref(db, `accounting/${uid}/transactions/${transaction.id}`), {
+      status, transactionDate: status === "paid" ? todayStr() : transaction.transactionDate, updatedAt: new Date().toISOString(),
+    });
+  }
+
   const ingredientsById = useMemo(() => {
     if (!data) return {};
     const m = {};
@@ -839,6 +890,28 @@ function ShopApp({ uid, user }) {
     update(ref(db), patch).catch((error) => showToast("เชื่อมรายการซื้อเข้าบัญชีไม่สำเร็จ: " + error.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, accountingTransactions, uid]);
+
+  // สร้างรายการรอชำระของเดือนปัจจุบันด้วย key คงที่ กด reload หรือเปิดหลายอุปกรณ์ก็ไม่เกิดรายการซ้ำ
+  useEffect(() => {
+    if (recurringExpenses.length === 0) return;
+    const currentMonth = todayStr().slice(0, 7);
+    const existing = new Set(accountingTransactions.filter((transaction) => transaction.sourceType === "recurring" && transaction.recurringMonth === currentMonth).map((transaction) => transaction.sourceId));
+    const dueTemplates = recurringExpenses.filter((template) => template.active !== false && template.startMonth <= currentMonth && (!template.endMonth || template.endMonth >= currentMonth) && !existing.has(template.id));
+    if (dueTemplates.length === 0) return;
+    const patch = {};
+    for (const template of dueTemplates) {
+      const day = String(Math.min(28, Math.max(1, Number(template.dayOfMonth) || 1))).padStart(2, "0");
+      const id = `recurring_${template.id}_${currentMonth}`;
+      patch[`accounting/${uid}/transactions/${id}`] = {
+        type:"expense", category:template.category, description:template.name, amount:Number(template.amount)||0,
+        transactionDate:`${currentMonth}-${day}`, paymentAccount:template.paymentAccount||"bank", vendorName:template.vendorName||"",
+        note:template.note||"", sourceType:"recurring", sourceId:template.id, recurringMonth:currentMonth,
+        status:"pending", createdAt:new Date().toISOString(), updatedAt:new Date().toISOString(),
+      };
+    }
+    update(ref(db), patch).catch((error)=>showToast("สร้างค่าใช้จ่ายประจำไม่สำเร็จ: "+error.message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recurringExpenses, accountingTransactions, uid]);
 
   // รุ่นที่เริ่มบันทึก completedAt เคยตั้ง beansAwarded ก่อนเรียกฟังก์ชันเพิ่มเมล็ด และฟังก์ชันไม่ได้ถูกส่งเข้า OrdersPanel
   // ทำให้ order ดูเหมือนนับแล้วทั้งที่ transaction ลูกค้าไม่เคยเกิดขึ้น กู้เฉพาะออเดอร์ช่วงนั้นอัตโนมัติจาก marker ราย order
@@ -1261,7 +1334,7 @@ function ShopApp({ uid, user }) {
           {tab === "promotions" && <PromotionsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} onSaveAccounting={saveAccountingTransaction} />}
           {tab === "reports" && <ReportsPanel data={dataForDisplay} orders={orders} shopName={data.settings.shopName} showToast={showToast} />}
-          {tab === "accounting" && <AccountingPanel transactions={accountingTransactions} assets={accountingAssets} sales={dataForDisplay.sales} overheadPerCup={data.settings.overheadPerCup} onSave={saveAccountingTransaction} onDelete={deleteAccountingTransaction} onSaveAsset={saveAccountingAsset} onDeleteAsset={deleteAccountingAsset} showToast={showToast} />}
+          {tab === "accounting" && <AccountingPanel transactions={accountingTransactions} assets={accountingAssets} recurringExpenses={recurringExpenses} sales={dataForDisplay.sales} overheadPerCup={data.settings.overheadPerCup} onSave={saveAccountingTransaction} onDelete={deleteAccountingTransaction} onSaveAsset={saveAccountingAsset} onDeleteAsset={deleteAccountingAsset} onSaveRecurring={saveRecurringExpense} onDeleteRecurring={deleteRecurringExpense} onUpdateOccurrence={updateRecurringOccurrence} showToast={showToast} />}
           {tab === "loyalty" && <LoyaltyPanel customers={customers} orders={orders} loyaltyBeanGoal={data.settings.loyaltyBeanGoal} adjustCustomerBeans={adjustCustomerBeans} createLoyaltyCustomer={createLoyaltyCustomer} updateLoyaltyGoal={updateLoyaltyGoal} showToast={showToast} backfillEligibleCount={backfillEligibleOrders.length} backfillLoyaltyBeans={backfillLoyaltyBeans} />}
           {tab === "options" && <OptionGroupsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "settings" && <SettingsPanel data={data} updateData={updateData} showToast={showToast} uid={uid} />}
@@ -5976,7 +6049,7 @@ function assetDepreciationForPeriod(asset, month) {
   return Math.max(0, accumulatedAssetDepreciation(asset, end) - accumulatedAssetDepreciation(asset, previousEnd));
 }
 
-function AccountingPanel({ transactions, assets, sales, overheadPerCup, onSave, onDelete, onSaveAsset, onDeleteAsset, showToast }) {
+function AccountingPanel({ transactions, assets, recurringExpenses, sales, overheadPerCup, onSave, onDelete, onSaveAsset, onDeleteAsset, onSaveRecurring, onDeleteRecurring, onUpdateOccurrence, showToast }) {
   const [month, setMonth] = useState(todayStr().slice(0, 7));
   const [typeFilter, setTypeFilter] = useState("all");
   const [query, setQuery] = useState("");
@@ -5985,6 +6058,7 @@ function AccountingPanel({ transactions, assets, sales, overheadPerCup, onSave, 
   const [deleting, setDeleting] = useState(false);
 
   const periodTransactions = useMemo(() => transactions.filter((transaction) => !month || String(transaction.transactionDate || "").startsWith(month)), [transactions, month]);
+  const paidPeriodTransactions = useMemo(() => periodTransactions.filter((transaction) => !transaction.status || transaction.status === "paid"), [periodTransactions]);
   const periodSales = useMemo(() => sales.filter((sale) => !month || String(sale.timestamp || "").startsWith(month)), [sales, month]);
 
   const filtered = useMemo(() => {
@@ -5996,12 +6070,12 @@ function AccountingPanel({ transactions, assets, sales, overheadPerCup, onSave, 
     });
   }, [periodTransactions, typeFilter, query]);
 
-  const cashIncome = periodTransactions.filter((transaction) => transaction.type === "income").reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
-  const cashExpense = periodTransactions.filter((transaction) => transaction.type === "expense").reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
-  const refunds = periodTransactions.filter((transaction) => transaction.category === "sales_refund").reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
-  const inventoryCash = periodTransactions.filter((transaction) => transaction.category === "inventory_purchase" || transaction.category === "packaging").reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
+  const cashIncome = paidPeriodTransactions.filter((transaction) => transaction.type === "income").reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
+  const cashExpense = paidPeriodTransactions.filter((transaction) => transaction.type === "expense").reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
+  const refunds = paidPeriodTransactions.filter((transaction) => transaction.category === "sales_refund").reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
+  const inventoryCash = paidPeriodTransactions.filter((transaction) => transaction.category === "inventory_purchase" || transaction.category === "packaging").reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
   const excludedFromOpex = new Set(["sales_refund", "inventory_purchase", "packaging", "asset_purchase"]);
-  const operatingExpenses = periodTransactions.filter((transaction) => transaction.type === "expense" && !excludedFromOpex.has(transaction.category)).reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
+  const operatingExpenses = paidPeriodTransactions.filter((transaction) => transaction.type === "expense" && !excludedFromOpex.has(transaction.category)).reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
   const costOfGoods = periodSales.reduce((sum, sale) => {
     if (sale.ingredientCostTotal != null) return sum + (Number(sale.ingredientCostTotal) || 0);
     return sum + Math.max(0, (Number(sale.totalCost) || 0) - (Number(overheadPerCup) || 0) * (Number(sale.qty) || 0));
@@ -6133,7 +6207,7 @@ function AccountingPanel({ transactions, assets, sales, overheadPerCup, onSave, 
             <div className="acc-col-description" style={{ minWidth:0 }}><div style={{ color:POS.navy, fontSize:13, fontWeight:700, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{transaction.description}</div>{(transaction.vendorName || transaction.sourceType !== "manual") && <div style={{ marginTop:2, color:POS.gray, fontSize:10.5 }}>{transaction.vendorName || "รายการจากระบบอัตโนมัติ"}</div>}</div>
             <div className="acc-col-category" style={{ color:POS.gray, fontSize:11.5 }}>{accountingCategoryLabel(transaction.type, transaction.category)}</div>
             <div className="acc-col-account" style={{ color:POS.gray, fontSize:11.5 }}>{accountingAccountLabel(transaction.paymentAccount)}</div>
-            <div className="acc-col-type"><span className="acc-type" style={{ color:isIncome ? "#15803D" : "#B91C1C", background:isIncome ? "#EAF7EE" : "#FDECEC" }}>{isIncome ? "รายรับ" : "รายจ่าย"}</span></div>
+            <div className="acc-col-type"><span className="acc-type" style={{ color:transaction.status === "pending" ? "#92400E" : transaction.status === "skipped" ? POS.gray : isIncome ? "#15803D" : "#B91C1C", background:transaction.status === "pending" ? "#FFF4E5" : transaction.status === "skipped" ? "#F3F4F6" : isIncome ? "#EAF7EE" : "#FDECEC" }}>{transaction.status === "pending" ? "รอชำระ" : transaction.status === "skipped" ? "ข้ามแล้ว" : isIncome ? "รายรับ" : "รายจ่าย"}</span></div>
             <div className="acc-col-amount" style={{ color:isIncome ? "#15803D" : "#B91C1C", fontSize:13, fontWeight:700, textAlign:"right", whiteSpace:"nowrap" }}>{isIncome ? "+" : "−"}฿{money(transaction.amount)}</div>
             <div className="acc-col-actions" style={{ display:"flex", gap:4, justifyContent:"flex-end" }}><button className="cbtn" disabled={transaction.sourceType !== "manual"} style={{ width:32, height:32, padding:0, display:"grid", placeItems:"center" }} onClick={() => setEditing(transaction)} aria-label={`แก้ไข ${transaction.description}`}><Icon name="edit" size={14} /></button><button className="cbtn" disabled={transaction.sourceType !== "manual"} style={{ width:32, height:32, padding:0, display:"grid", placeItems:"center", color:"#B91C1C" }} onClick={() => setDeleteFor(transaction)} aria-label={`ลบ ${transaction.description}`}><Icon name="trash" size={14} /></button></div>
           </div>;
@@ -6141,6 +6215,7 @@ function AccountingPanel({ transactions, assets, sales, overheadPerCup, onSave, 
       </div>}
 
       <AccountingAssetsSection assets={assets} onSave={onSaveAsset} onDelete={onDeleteAsset} showToast={showToast} />
+      <AccountingRecurringSection templates={recurringExpenses} transactions={transactions} onSave={onSaveRecurring} onDelete={onDeleteRecurring} onUpdateOccurrence={onUpdateOccurrence} showToast={showToast} />
 
       {editing && <AccountingTransactionModal transaction={editing} onClose={() => setEditing(null)} onSave={async (value) => { await onSave(value); setEditing(null); showToast(value.id ? "แก้ไขรายการบัญชีแล้ว" : "บันทึกรายการบัญชีแล้ว"); }} />}
       {deleteFor && <div className="acc-modal-bg" onClick={() => !deleting && setDeleteFor(null)}><div className="acc-modal" style={{ width:"min(390px,100%)" }} role="alertdialog" aria-modal="true" onClick={(event) => event.stopPropagation()}><h3 style={{ margin:"0 0 7px", color:POS.navy }}>ลบรายการนี้?</h3><p style={{ margin:"0 0 16px", color:POS.gray, fontSize:12.5 }}>“{deleteFor.description}” จำนวน ฿{money(deleteFor.amount)} จะถูกลบออกจากสมุดบัญชี</p><div style={{ display:"flex", gap:8 }}><button className="cbtn" disabled={deleting} style={{ flex:1 }} onClick={() => setDeleteFor(null)}>ยกเลิก</button><button className="cbtn cbtn-danger" disabled={deleting} style={{ flex:1 }} onClick={confirmDelete}>{deleting ? "กำลังลบ..." : "ลบรายการ"}</button></div></div></div>}
@@ -6211,6 +6286,45 @@ function AccountingAssetsSection({ assets, onSave, onDelete, showToast }) {
     {editing && <AccountingAssetModal asset={editing} onClose={()=>setEditing(null)} onSave={async (asset) => { await onSave(asset); setEditing(null); showToast(asset.id ? "แก้ไขสินทรัพย์แล้ว" : "เพิ่มสินทรัพย์และบันทึกเงินจ่ายแล้ว"); }} />}
     {deleteFor && <div className="acc-modal-bg" onClick={()=>!deleting&&setDeleteFor(null)}><div className="acc-modal" style={{width:"min(390px,100%)"}} role="alertdialog" aria-modal="true" onClick={(event)=>event.stopPropagation()}><h3 style={{margin:"0 0 7px",color:POS.navy}}>ลบสินทรัพย์นี้?</h3><p style={{margin:"0 0 16px",color:POS.gray,fontSize:12.5}}>ทะเบียน “{deleteFor.name}” และรายการเงินจ่ายที่เชื่อมไว้จะถูกลบ</p><div style={{display:"flex",gap:8}}><button className="cbtn" style={{flex:1}} onClick={()=>setDeleteFor(null)}>ยกเลิก</button><button className="cbtn cbtn-danger" disabled={deleting} style={{flex:1}} onClick={confirmDelete}>{deleting?"กำลังลบ...":"ลบ"}</button></div></div></div>}
   </section>;
+}
+
+function AccountingRecurringSection({ templates, transactions, onSave, onDelete, onUpdateOccurrence, showToast }) {
+  const [editing, setEditing] = useState(null);
+  const currentMonth = todayStr().slice(0,7);
+  const currentOccurrences = transactions.filter((transaction)=>transaction.sourceType === "recurring" && transaction.recurringMonth === currentMonth);
+  const pending = currentOccurrences.filter((transaction)=>transaction.status === "pending");
+  const monthlyTotal = templates.filter((template)=>template.active !== false).reduce((sum,template)=>sum+(Number(template.amount)||0),0);
+  function addTemplate(){setEditing({name:"",category:"rent",amount:"",dayOfMonth:1,startMonth:currentMonth,endMonth:"",paymentAccount:"bank",vendorName:"",active:true,note:""});}
+  async function removeTemplate(template){try{await onDelete(template);showToast("ลบค่าใช้จ่ายประจำแล้ว (ประวัติเดิมยังอยู่)");}catch(error){showToast("ลบไม่สำเร็จ: "+error.message);}}
+  async function updateOccurrence(transaction,status){try{await onUpdateOccurrence(transaction,status);showToast(status === "paid" ? "บันทึกว่าชำระแล้ว" : "ข้ามรายการเดือนนี้แล้ว");}catch(error){showToast("อัปเดตไม่สำเร็จ: "+error.message);}}
+  return <section style={{marginTop:20}}><div className="acc-assets-head"><div><h3 style={{margin:"0 0 3px",color:POS.navy,fontSize:17}}>ค่าใช้จ่ายประจำ</h3><p style={{margin:0,color:POS.gray,fontSize:11.5}}>สร้างรายการรอชำระอัตโนมัติทุกเดือน และนับเข้ารายงานเมื่อยืนยันว่าจ่ายแล้วเท่านั้น</p></div><button className="cbtn cbtn-accent" onClick={addTemplate}><Icon name="plus" size={14}/><span style={{marginLeft:5}}>เพิ่มรายการประจำ</span></button></div>
+    <div className="acc-asset-kpis"><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>ประมาณการต่อเดือน</div><b style={{display:"block",marginTop:3,color:POS.navy,fontSize:17}}>฿{money(monthlyTotal)}</b></div><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>รอชำระเดือนนี้</div><b style={{display:"block",marginTop:3,color:pending.length?"#92400E":"#15803D",fontSize:17}}>{pending.length} รายการ</b></div><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>ชำระแล้วเดือนนี้</div><b style={{display:"block",marginTop:3,color:"#15803D",fontSize:17}}>{currentOccurrences.filter((transaction)=>transaction.status === "paid").length} รายการ</b></div></div>
+    {pending.length>0&&<div style={{padding:12,border:"1px solid #F1D7AD",borderRadius:13,background:"#FFF8ED",marginBottom:10}}><div style={{fontSize:11,fontWeight:700,color:"#92400E",marginBottom:7}}>รายการรอยืนยันเดือนนี้</div>{pending.map((transaction)=><div key={transaction.id} style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",padding:"7px 0",borderBottom:"1px solid #F7E7CB"}}><div style={{flex:1,minWidth:150}}><div style={{fontSize:12.5,fontWeight:700,color:POS.navy}}>{transaction.description}</div><div style={{fontSize:10.5,color:POS.gray}}>ครบกำหนด {new Date(`${transaction.transactionDate}T00:00:00`).toLocaleDateString("th-TH",{day:"numeric",month:"short"})}</div></div><b style={{color:"#92400E",fontSize:12.5}}>฿{money(transaction.amount)}</b><button className="cbtn" onClick={()=>updateOccurrence(transaction,"skipped")}>ข้ามเดือนนี้</button><button className="cbtn cbtn-accent" onClick={()=>updateOccurrence(transaction,"paid")}>ชำระแล้ว</button></div>)}</div>}
+    {templates.length===0?<div style={{padding:22,border:`1px dashed ${POS.border}`,borderRadius:13,textAlign:"center",color:POS.gray,fontSize:12.5}}>ยังไม่มีค่าใช้จ่ายประจำ</div>:<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(245px,1fr))",gap:8}}>{templates.map((template)=><div key={template.id} style={{padding:13,border:`1px solid ${POS.border}`,borderRadius:12,background:"#fff",opacity:template.active===false?.6:1}}><div style={{display:"flex",justifyContent:"space-between",gap:8}}><div><div style={{fontSize:13,fontWeight:700,color:POS.navy}}>{template.name}</div><div style={{marginTop:3,fontSize:10.5,color:POS.gray}}>{accountingCategoryLabel("expense",template.category)} · ทุกวันที่ {template.dayOfMonth}</div></div><span className="acc-type" style={{color:template.active===false?POS.gray:"#15803D",background:template.active===false?"#F3F4F6":"#EAF7EE"}}>{template.active===false?"พัก":"ใช้งาน"}</span></div><div style={{marginTop:10,fontSize:18,fontWeight:700,color:"#B91C1C"}}>฿{money(template.amount)}<span style={{fontSize:10.5,fontWeight:500,color:POS.gray}}>/เดือน</span></div><div style={{display:"flex",gap:5,marginTop:10}}><button className="cbtn" style={{flex:1}} onClick={()=>setEditing(template)}><Icon name="edit" size={13}/><span style={{marginLeft:4}}>แก้ไข</span></button><button className="cbtn" style={{width:34,padding:0,color:"#B91C1C"}} onClick={()=>removeTemplate(template)} aria-label={`ลบ ${template.name}`}><Icon name="trash" size={13}/></button></div></div>)}</div>}
+    {editing&&<AccountingRecurringModal template={editing} onClose={()=>setEditing(null)} onSave={async(template)=>{await onSave(template);setEditing(null);showToast(template.id?"แก้ไขค่าใช้จ่ายประจำแล้ว":"เพิ่มค่าใช้จ่ายประจำแล้ว");}}/>}
+  </section>;
+}
+
+function AccountingRecurringModal({template,onClose,onSave}){
+  const [form,setForm]=useState({...template});
+  const [saving,setSaving]=useState(false);
+  const [error,setError]=useState("");
+  useEscape(onClose);
+  const categories=ACCOUNTING_CATEGORIES.expense.filter((category)=>!ACCOUNTING_SYSTEM_CATEGORIES.has(category.id));
+  function patch(field,value){setForm((current)=>({...current,[field]:value}));}
+  async function submit(event){event.preventDefault();setError("");if(!form.name.trim()||Number(form.amount)<=0){setError("กรุณากรอกชื่อและจำนวนเงิน");return;}setSaving(true);try{await onSave(form);}catch(saveError){setError(saveError.message||"บันทึกไม่สำเร็จ");setSaving(false);}}
+  return <div className="acc-modal-bg" onClick={onClose}><form className="acc-modal" role="dialog" aria-modal="true" aria-label="ค่าใช้จ่ายประจำ" onSubmit={submit} onClick={(event)=>event.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}><h3 style={{margin:0,color:POS.navy}}>{form.id?"แก้ไขค่าใช้จ่ายประจำ":"เพิ่มค่าใช้จ่ายประจำ"}</h3><button type="button" className="cbtn" style={{width:34,height:34,padding:0}} onClick={onClose}><Icon name="x" size={15}/></button></div><div className="acc-form-grid">
+    <div style={{gridColumn:"1/-1"}}><label className="acc-field-label">ชื่อรายการ *</label><TextField className="acc-field" value={form.name} onChange={(value)=>patch("name",value)} placeholder="เช่น ค่าเช่าร้าน"/></div>
+    <div><label className="acc-field-label">จำนวนต่อเดือน *</label><input className="acc-field" type="number" min="0.01" step="0.01" value={form.amount} onChange={(event)=>patch("amount",event.target.value)}/></div>
+    <div><label className="acc-field-label">ครบกำหนดทุกวันที่</label><input className="acc-field" type="number" min="1" max="28" value={form.dayOfMonth} onChange={(event)=>patch("dayOfMonth",event.target.value)}/></div>
+    <div><label className="acc-field-label">หมวด</label><select className="acc-field" value={form.category} onChange={(event)=>patch("category",event.target.value)}>{categories.map((category)=><option key={category.id} value={category.id}>{category.label}</option>)}</select></div>
+    <div><label className="acc-field-label">จ่ายผ่าน</label><select className="acc-field" value={form.paymentAccount} onChange={(event)=>patch("paymentAccount",event.target.value)}>{ACCOUNTING_PAYMENT_ACCOUNTS.filter((account)=>account.id!=="unassigned").map((account)=><option key={account.id} value={account.id}>{account.label}</option>)}</select></div>
+    <div><label className="acc-field-label">เริ่มเดือน</label><input className="acc-field" type="month" value={form.startMonth} onChange={(event)=>patch("startMonth",event.target.value)}/></div>
+    <div><label className="acc-field-label">สิ้นสุดเดือน</label><input className="acc-field" type="month" value={form.endMonth||""} onChange={(event)=>patch("endMonth",event.target.value)}/></div>
+    <div style={{gridColumn:"1/-1"}}><label className="acc-field-label">ผู้รับเงิน / ผู้ให้บริการ</label><TextField className="acc-field" value={form.vendorName||""} onChange={(value)=>patch("vendorName",value)} placeholder="ไม่บังคับ"/></div>
+    <label style={{gridColumn:"1/-1",display:"flex",alignItems:"center",gap:8,fontSize:12.5,color:POS.navy}}><input type="checkbox" checked={form.active!==false} onChange={(event)=>patch("active",event.target.checked)}/> เปิดสร้างรายการอัตโนมัติทุกเดือน</label>
+    <div style={{gridColumn:"1/-1"}}><label className="acc-field-label">หมายเหตุ</label><textarea className="acc-field" value={form.note||""} onChange={(event)=>patch("note",event.target.value)}/></div>
+  </div>{error&&<p style={{color:"#B91C1C",fontSize:12}}>{error}</p>}<div style={{display:"flex",gap:8,marginTop:16}}><button type="button" className="cbtn" style={{flex:1}} onClick={onClose}>ยกเลิก</button><button type="submit" className="cbtn cbtn-accent" disabled={saving} style={{flex:1}}>{saving?"กำลังบันทึก...":"บันทึก"}</button></div></form></div>;
 }
 
 function AccountingAssetModal({ asset, onClose, onSave }) {
