@@ -804,6 +804,13 @@ function ShopApp({ uid, user }) {
     setTimeout(() => setToast(null), 2400);
   }
 
+  function ownerAllocationTotal(transactionId) {
+    return ownerReimbursements.reduce((total, reimbursement) => {
+      const allocations = Array.isArray(reimbursement.allocations) ? reimbursement.allocations : Object.values(reimbursement.allocations || {});
+      return total + allocations.filter((allocation) => allocation.transactionId === transactionId).reduce((sum, allocation) => sum + (Number(allocation.amount) || 0), 0);
+    }, 0);
+  }
+
   async function saveAccountingTransaction(transaction) {
     const now = new Date().toISOString();
     const id = transaction.id || push(ref(db, `accounting/${uid}/transactions`)).key;
@@ -830,12 +837,15 @@ function ShopApp({ uid, user }) {
     };
     if (!payload.transactionDate || !payload.category || !payload.description || payload.amount <= 0) throw new Error("กรุณากรอกข้อมูลที่จำเป็นให้ครบ");
     if (payload.type === "income" && payload.paymentAccount === "owner_advance") throw new Error("รายรับไม่สามารถเลือกเจ้าของสำรองจ่ายได้");
+    const existing = transaction.id ? accountingTransactions.find((item) => item.id === transaction.id) : null;
+    if (existing && ownerAllocationTotal(transaction.id) > 0 && (payload.paymentAccount !== existing.paymentAccount || Math.abs(payload.amount - (Number(existing.amount) || 0)) > 0.009)) throw new Error("รายการนี้ถูกผูกกับการคืนเงินแล้ว กรุณาลบรายการคืนเงินที่เกี่ยวข้องก่อนเปลี่ยนยอดหรือช่องทางเงิน");
     await set(ref(db, `accounting/${uid}/transactions/${id}`), payload);
   }
 
   async function deleteAccountingTransaction(transaction) {
     if (transaction.sourceType && transaction.sourceType !== "manual") throw new Error("รายการจากระบบต้องยกเลิกจากเอกสารต้นทาง");
     if (accountingPeriodClosings[String(transaction.transactionDate || "").slice(0,7)]) throw new Error("งวดบัญชีเดือนนี้ถูกปิดแล้ว");
+    if (ownerAllocationTotal(transaction.id) > 0) throw new Error("รายการนี้ถูกผูกกับการคืนเงินแล้ว กรุณาลบรายการคืนเงินที่เกี่ยวข้องก่อน");
     await set(ref(db, `accounting/${uid}/transactions/${transaction.id}`), null);
   }
 
@@ -857,6 +867,9 @@ function ShopApp({ uid, user }) {
       createdAt: asset.createdAt || now, updatedAt: now,
     };
     if (!payload.name || !payload.purchaseDate || payload.cost <= 0 || payload.residualValue >= payload.cost) throw new Error("กรุณากรอกชื่อ วันที่ซื้อ และมูลค่าสินทรัพย์ให้ถูกต้อง");
+    const linkedTransactionId = `asset_purchase_${id}`;
+    const existingTransaction = accountingTransactions.find((item) => item.id === linkedTransactionId);
+    if (existingTransaction && ownerAllocationTotal(linkedTransactionId) > 0 && (payload.paymentAccount !== existingTransaction.paymentAccount || Math.abs(payload.cost - (Number(existingTransaction.amount) || 0)) > 0.009)) throw new Error("สินทรัพย์นี้ถูกผูกกับการคืนเงินแล้ว กรุณาลบรายการคืนเงินที่เกี่ยวข้องก่อนเปลี่ยนราคาหรือช่องทางชำระ");
     const transaction = {
       type: "expense", category: "asset_purchase", description: `ซื้อสินทรัพย์ ${payload.name}`, amount: payload.cost,
       transactionDate: payload.purchaseDate, paymentAccount: payload.paymentAccount, vendorName: payload.vendorName,
@@ -871,6 +884,7 @@ function ShopApp({ uid, user }) {
 
   async function deleteAccountingAsset(asset) {
     if (accountingPeriodClosings[String(asset.purchaseDate || "").slice(0,7)]) throw new Error("งวดบัญชีเดือนนี้ถูกปิดแล้ว");
+    if (ownerAllocationTotal(`asset_purchase_${asset.id}`) > 0) throw new Error("สินทรัพย์นี้ถูกผูกกับการคืนเงินแล้ว กรุณาลบรายการคืนเงินที่เกี่ยวข้องก่อน");
     await update(ref(db), {
       [`accounting/${uid}/assets/${asset.id}`]: null,
       [`accounting/${uid}/transactions/asset_purchase_${asset.id}`]: null,
@@ -931,16 +945,29 @@ function ShopApp({ uid, user }) {
     const now = new Date().toISOString();
     const id = reimbursement.id || push(ref(db, `accounting/${uid}/ownerReimbursements`)).key;
     if (accountingPeriodClosings[String(reimbursement.reimbursementDate || "").slice(0, 7)]) throw new Error("งวดบัญชีเดือนนี้ถูกปิดแล้ว");
+    const allocations = (Array.isArray(reimbursement.allocations) ? reimbursement.allocations : [])
+      .map((allocation) => ({ transactionId:String(allocation.transactionId || ""), amount:Math.round((Number(allocation.amount) || 0) * 100) / 100 }))
+      .filter((allocation) => allocation.transactionId && allocation.amount > 0);
+    const allocatedTotal = allocations.reduce((sum, allocation) => sum + allocation.amount, 0);
     const payload = {
       reimbursementDate: reimbursement.reimbursementDate,
       amount: Math.round((Number(reimbursement.amount) || 0) * 100) / 100,
       paymentAccount: reimbursement.paymentAccount || "bank",
       ownerName: String(reimbursement.ownerName || "เจ้าของกิจการ").trim(),
       note: String(reimbursement.note || "").trim(),
+      allocationMode: reimbursement.allocationMode === "unallocated" ? "unallocated" : "selected",
+      allocations: reimbursement.allocationMode === "unallocated" ? null : allocations,
       createdAt: reimbursement.createdAt || now,
       updatedAt: now,
     };
     if (!payload.reimbursementDate || payload.amount <= 0 || !ACCOUNTING_CASH_ACCOUNT_IDS.has(payload.paymentAccount)) throw new Error("กรุณากรอกวันที่ จำนวนเงิน และบัญชีที่ใช้คืนเงินให้ถูกต้อง");
+    if (payload.allocationMode === "selected" && (allocations.length === 0 || Math.abs(allocatedTotal - payload.amount) > 0.009)) throw new Error("ยอดแบ่งคืนแต่ละรายการต้องรวมเท่ากับยอดคืนทั้งหมด");
+    const otherReimbursements = ownerReimbursements.filter((item) => item.id !== id);
+    const availableAdvances = calculateOwnerAdvanceBalances(accountingTransactions, otherReimbursements, ownerCapitalMovements);
+    const availableById = new Map(availableAdvances.map((advance) => [advance.id, advance.remainingAmount]));
+    const availableTotal = availableAdvances.reduce((sum, advance) => sum + advance.remainingAmount, 0);
+    if (payload.amount > availableTotal + 0.009) throw new Error(`คืนได้ไม่เกินยอดค้าง ฿${money(availableTotal)}`);
+    if (payload.allocationMode === "selected" && allocations.some((allocation) => allocation.amount > (availableById.get(allocation.transactionId) || 0) + 0.009)) throw new Error("ยอดคืนบางรายการเกินยอดคงเหลือ กรุณาตรวจสอบอีกครั้ง");
     await set(ref(db, `accounting/${uid}/ownerReimbursements/${id}`), payload);
   }
 
@@ -6166,6 +6193,37 @@ function accountingAccountLabel(accountId) {
   return ACCOUNTING_PAYMENT_ACCOUNTS.find((account) => account.id === accountId)?.label || accountId || "—";
 }
 
+function calculateOwnerAdvanceBalances(transactions, reimbursements, capitalMovements = []) {
+  const advances = transactions
+    .filter((transaction) => transaction.type === "expense" && transaction.paymentAccount === "owner_advance" && (!transaction.status || transaction.status === "paid"))
+    .map((transaction) => ({ ...transaction, advanceAmount:Number(transaction.amount) || 0, allocatedAmount:0 }))
+    .sort((a,b) => `${a.transactionDate || ""}${a.createdAt || ""}`.localeCompare(`${b.transactionDate || ""}${b.createdAt || ""}`));
+  const byId = new Map(advances.map((advance) => [advance.id, advance]));
+  let unallocated = capitalMovements.filter((item) => item.kind === "conversion").reduce((sum,item)=>sum+(Number(item.amount)||0),0);
+  for (const reimbursement of reimbursements) {
+    const amount = Number(reimbursement.amount) || 0;
+    let applied = 0;
+    const allocations = Array.isArray(reimbursement.allocations) ? reimbursement.allocations : Object.values(reimbursement.allocations || {});
+    for (const allocation of allocations) {
+      const advance = byId.get(allocation.transactionId);
+      if (!advance) continue;
+      const available = Math.max(0, advance.advanceAmount - advance.allocatedAmount);
+      const allocated = Math.min(available, Math.max(0, Number(allocation.amount) || 0));
+      advance.allocatedAmount += allocated;
+      applied += allocated;
+    }
+    unallocated += Math.max(0, amount - applied);
+  }
+  for (const advance of advances) {
+    const available = Math.max(0, advance.advanceAmount - advance.allocatedAmount);
+    const applied = Math.min(available, unallocated);
+    advance.allocatedAmount += applied;
+    unallocated -= applied;
+    advance.remainingAmount = Math.max(0, advance.advanceAmount - advance.allocatedAmount);
+  }
+  return advances;
+}
+
 function accumulatedAssetDepreciation(asset, asOfDate) {
   const serviceDate = new Date(`${asset.inServiceDate || asset.purchaseDate}T00:00:00`);
   let asOf = asOfDate instanceof Date ? asOfDate : new Date(asOfDate);
@@ -6522,10 +6580,10 @@ function AccountingOwnerFundingSection({transactions,reimbursements,capitalMovem
   const [reimbursing,setReimbursing]=useState(false);
   const [addingCapital,setAddingCapital]=useState(false);
   const [deletingId,setDeletingId]=useState(null);
-  const advances=transactions.filter((transaction)=>transaction.type==="expense"&&transaction.paymentAccount==="owner_advance"&&(!transaction.status||transaction.status==="paid"));
+  const advances=calculateOwnerAdvanceBalances(transactions,reimbursements,capitalMovements);
   const timeline=[
-    ...advances.map((transaction)=>({id:`advance_${transaction.id}`,kind:"advance",date:transaction.transactionDate,description:transaction.description,amount:Number(transaction.amount)||0,account:transaction.paymentAccount})),
-    ...reimbursements.map((item)=>({id:`reimbursement_${item.id}`,record:item,kind:"reimbursement",date:item.reimbursementDate,description:`คืนเงินให้ ${item.ownerName||"เจ้าของกิจการ"}`,amount:Number(item.amount)||0,account:item.paymentAccount,note:item.note})),
+    ...advances.map((transaction)=>({id:`advance_${transaction.id}`,kind:"advance",date:transaction.transactionDate,description:transaction.description,amount:Number(transaction.amount)||0,account:transaction.paymentAccount,note:`คืน/เปลี่ยนเป็นทุนแล้ว ฿${money(transaction.allocatedAmount)} · คงเหลือ ฿${money(transaction.remainingAmount)}`})),
+    ...reimbursements.map((item)=>{const allocations=Array.isArray(item.allocations)?item.allocations:Object.values(item.allocations||{});return {id:`reimbursement_${item.id}`,record:item,kind:"reimbursement",date:item.reimbursementDate,description:`คืนเงินให้ ${item.ownerName||"เจ้าของกิจการ"}`,amount:Number(item.amount)||0,account:item.paymentAccount,note:item.note|| (allocations.length?`ผูก ${allocations.length} รายการ`:"คืนแบบไม่ระบุรายการ")};}),
     ...capitalMovements.map((item)=>({id:`capital_${item.id}`,record:item,kind:item.kind,date:item.movementDate,description:item.kind==="conversion"?`เปลี่ยนยอดค้างของ ${item.ownerName||"เจ้าของกิจการ"} เป็นทุน`:`${item.ownerName||"เจ้าของกิจการ"} ลงทุนเข้าร้าน`,amount:Number(item.amount)||0,account:item.paymentAccount,note:item.note})),
   ].sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
   async function remove(item){setDeletingId(item.id);try{if(item.kind==="reimbursement")await onDelete(item.record);else await onDeleteCapital(item.record);showToast("ลบรายการเงินเจ้าของแล้ว");}catch(error){showToast("ลบไม่สำเร็จ: "+error.message);}finally{setDeletingId(null);}}
@@ -6534,18 +6592,22 @@ function AccountingOwnerFundingSection({transactions,reimbursements,capitalMovem
     <div className="acc-asset-kpis" style={{gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))"}}><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>เจ้าของออกให้ทั้งหมด</div><b style={{display:"block",marginTop:3,color:POS.navy,fontSize:18}}>฿{money(ownerAdvancedTotal)}</b></div><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>ร้านคืนแล้ว</div><b style={{display:"block",marginTop:3,color:"#15803D",fontSize:18}}>฿{money(ownerReimbursedTotal)}</b></div><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>เปลี่ยนยอดค้างเป็นทุน</div><b style={{display:"block",marginTop:3,color:"#1D4ED8",fontSize:18}}>฿{money(ownerConvertedTotal)}</b></div><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>เงินลงทุนสะสม</div><b style={{display:"block",marginTop:3,color:"#1D4ED8",fontSize:18}}>฿{money(ownerCapitalTotal)}</b></div><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>{ownerPayable>=0?"ร้านยังค้างคืนเจ้าของ":"คืน/แปลงเกินยอดสำรองจ่าย"}</div><b style={{display:"block",marginTop:3,color:ownerPayable>0?"#B45309":ownerPayable<0?"#B91C1C":"#15803D",fontSize:18}}>฿{money(Math.abs(ownerPayable))}</b></div></div>
     <div style={{padding:12,border:"1px solid #F1D7AD",borderRadius:12,background:"#FFF8ED",color:"#7C4A03",fontSize:11.5,lineHeight:1.55,marginBottom:12}}><b>วิธีลงรายการ:</b> เพิ่มรายจ่าย ซื้อวัตถุดิบ หรือเพิ่มสินทรัพย์ตามปกติ แล้วเลือกช่องทางเงิน “เจ้าของสำรองจ่าย” ระบบจะเพิ่มยอดค้างคืนให้อัตโนมัติ</div>
     {timeline.length===0?<div style={{padding:24,border:`1px dashed ${POS.border}`,borderRadius:13,textAlign:"center",color:POS.gray,fontSize:12.5}}>ยังไม่มีรายการเงินเจ้าของ</div>:<div className="acc-table" style={{maxHeight:"55vh"}}><div className="acc-owner-row acc-row-head"><span>วันที่</span><span>รายละเอียด</span><span>ประเภท</span><span style={{textAlign:"right"}}>จำนวน</span><span/></div>{timeline.map((item)=>{const isAdvance=item.kind==="advance";const isReimbursement=item.kind==="reimbursement";const label=isAdvance?"เจ้าของออกให้":isReimbursement?"ร้านคืนเงิน":item.kind==="conversion"?"เปลี่ยนเป็นทุน":"ลงทุนเข้าร้าน";return <div className="acc-owner-row" key={item.id}><div style={{color:POS.gray,fontSize:11.5}}>{new Date(`${item.date}T00:00:00`).toLocaleDateString("th-TH",{day:"numeric",month:"short",year:"2-digit"})}</div><div style={{minWidth:0}}><div style={{color:POS.navy,fontSize:12.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.description}</div>{item.note&&<div style={{marginTop:2,color:POS.gray,fontSize:10.5}}>{item.note}</div>}</div><div><span className="acc-type" style={{color:isAdvance?"#92400E":isReimbursement?"#15803D":"#1D4ED8",background:isAdvance?"#FFF4E5":isReimbursement?"#EAF7EE":"#E8EEFF"}}>{label}</span></div><div style={{textAlign:"right",fontWeight:700,color:isAdvance?"#B45309":isReimbursement?"#15803D":"#1D4ED8",fontSize:12.5}}>{isAdvance?"+":isReimbursement?"−":""}฿{money(item.amount)}</div><div style={{textAlign:"right"}}>{!isAdvance&&<button className="cbtn" disabled={deletingId===item.id} style={{width:32,height:32,padding:0,color:"#B91C1C"}} onClick={()=>remove(item)} aria-label="ลบรายการเงินเจ้าของ"><Icon name="trash" size={13}/></button>}</div></div>})}</div>}
-    {reimbursing&&<AccountingOwnerReimbursementModal maxAmount={Math.max(0,ownerPayable)} onClose={()=>setReimbursing(false)} onSave={async(value)=>{await onSave(value);setReimbursing(false);showToast("บันทึกคืนเงินให้เจ้าของแล้ว");}}/>}
+    {reimbursing&&<AccountingOwnerReimbursementModal maxAmount={Math.max(0,ownerPayable)} advances={advances.filter((advance)=>advance.remainingAmount>0.009)} onClose={()=>setReimbursing(false)} onSave={async(value)=>{await onSave(value);setReimbursing(false);showToast("บันทึกคืนเงินให้เจ้าของแล้ว");}}/>}
     {addingCapital&&<AccountingOwnerCapitalModal maxConvertible={Math.max(0,ownerPayable)} onClose={()=>setAddingCapital(false)} onSave={async(value)=>{await onSaveCapital(value);setAddingCapital(false);showToast(value.kind==="conversion"?"เปลี่ยนยอดค้างเป็นเงินลงทุนแล้ว":"บันทึกเงินลงทุนเข้าร้านแล้ว");}}/>}
   </section>;
 }
 
-function AccountingOwnerReimbursementModal({maxAmount,onClose,onSave}){
-  const [form,setForm]=useState({reimbursementDate:todayStr(),amount:"",paymentAccount:"bank",ownerName:"เจ้าของกิจการ",note:""});
+function AccountingOwnerReimbursementModal({maxAmount,advances,onClose,onSave}){
+  const [form,setForm]=useState({reimbursementDate:todayStr(),amount:"",paymentAccount:"bank",ownerName:"เจ้าของกิจการ",note:"",allocationMode:"selected"});
+  const [allocations,setAllocations]=useState({});
   const [saving,setSaving]=useState(false);
   const [error,setError]=useState("");
   useEscape(onClose);
-  async function submit(event){event.preventDefault();setError("");const amount=Number(form.amount)||0;if(amount<=0){setError("กรุณากรอกจำนวนเงินที่คืน");return;}if(amount>maxAmount+.001){setError(`คืนได้ไม่เกินยอดค้าง ฿${money(maxAmount)}`);return;}setSaving(true);try{await onSave({...form,amount});}catch(saveError){setError(saveError.message||"บันทึกไม่สำเร็จ");setSaving(false);}}
-  return <div className="acc-modal-bg" onClick={onClose}><form className="acc-modal" style={{width:"min(440px,100%)"}} role="dialog" aria-modal="true" aria-label="คืนเงินให้เจ้าของ" onSubmit={submit} onClick={(event)=>event.stopPropagation()}><h3 style={{margin:"0 0 4px",color:POS.navy}}>คืนเงินให้เจ้าของ</h3><p style={{margin:"0 0 15px",fontSize:11.5,color:POS.gray}}>ยอดค้างสูงสุด ฿{money(maxAmount)} · รายการนี้ลดเงินของร้านและยอดค้าง แต่ไม่ลดกำไรซ้ำ</p><div className="acc-form-grid"><div><label className="acc-field-label">วันที่คืนเงิน *</label><input className="acc-field" type="date" value={form.reimbursementDate} onChange={(event)=>setForm({...form,reimbursementDate:event.target.value})}/></div><div><label className="acc-field-label">จำนวนเงิน *</label><input className="acc-field" type="number" min="0.01" max={maxAmount} step="0.01" value={form.amount} onChange={(event)=>setForm({...form,amount:event.target.value})} placeholder="0.00"/></div><div><label className="acc-field-label">จ่ายจากบัญชีร้าน *</label><select className="acc-field" value={form.paymentAccount} onChange={(event)=>setForm({...form,paymentAccount:event.target.value})}>{ACCOUNTING_PAYMENT_ACCOUNTS.filter((account)=>ACCOUNTING_CASH_ACCOUNT_IDS.has(account.id)).map((account)=><option key={account.id} value={account.id}>{account.label}</option>)}</select></div><div><label className="acc-field-label">ชื่อเจ้าของ</label><TextField className="acc-field" value={form.ownerName} onChange={(value)=>setForm({...form,ownerName:value})}/></div><div style={{gridColumn:"1/-1"}}><label className="acc-field-label">หมายเหตุ</label><textarea className="acc-field" value={form.note} onChange={(event)=>setForm({...form,note:event.target.value})} placeholder="เช่น คืนค่าเครื่องชงบางส่วน"/></div></div>{error&&<p style={{margin:"10px 0 0",color:"#B91C1C",fontSize:12}}>{error}</p>}<div style={{display:"flex",gap:8,marginTop:16}}><button type="button" className="cbtn" disabled={saving} style={{flex:1}} onClick={onClose}>ยกเลิก</button><button type="submit" className="cbtn cbtn-accent" disabled={saving} style={{flex:1}}>{saving?"กำลังบันทึก...":"บันทึกคืนเงิน"}</button></div></form></div>;
+  const selectedTotal=Object.values(allocations).reduce((sum,value)=>sum+(Number(value)||0),0);
+  function setAllocation(advance,value){const amount=Math.min(advance.remainingAmount,Math.max(0,Number(value)||0));setAllocations((current)=>({...current,[advance.id]:amount||""}));}
+  function selectAll(){let available=maxAmount;const next={};for(const advance of advances){const amount=Math.min(advance.remainingAmount,available);if(amount>0)next[advance.id]=amount;available-=amount;}setAllocations(next);}
+  async function submit(event){event.preventDefault();setError("");const amount=form.allocationMode==="selected"?selectedTotal:(Number(form.amount)||0);if(amount<=0){setError(form.allocationMode==="selected"?"กรุณาเลือกอย่างน้อย 1 รายการและระบุยอดที่คืน":"กรุณากรอกจำนวนเงินที่คืน");return;}if(amount>maxAmount+.001){setError(`คืนได้ไม่เกินยอดค้าง ฿${money(maxAmount)}`);return;}const selectedAllocations=advances.map((advance)=>({transactionId:advance.id,amount:Number(allocations[advance.id])||0})).filter((allocation)=>allocation.amount>0);setSaving(true);try{await onSave({...form,amount,allocations:selectedAllocations});}catch(saveError){setError(saveError.message||"บันทึกไม่สำเร็จ");setSaving(false);}}
+  return <div className="acc-modal-bg" onClick={onClose}><form className="acc-modal" style={{width:"min(620px,100%)"}} role="dialog" aria-modal="true" aria-label="คืนเงินให้เจ้าของ" onSubmit={submit} onClick={(event)=>event.stopPropagation()}><h3 style={{margin:"0 0 4px",color:POS.navy}}>คืนเงินให้เจ้าของ</h3><p style={{margin:"0 0 14px",fontSize:11.5,color:POS.gray}}>ยอดค้างสูงสุด ฿{money(maxAmount)} · เลือกคืนเต็มจำนวนหรือบางส่วนได้หลายรายการ</p><div style={{display:"flex",gap:6,padding:4,marginBottom:12,borderRadius:11,background:POS.chipBg}}><button type="button" className="cbtn" style={{flex:1,border:0,background:form.allocationMode==="selected"?"#fff":"transparent",color:form.allocationMode==="selected"?"#1D4ED8":POS.gray}} onClick={()=>setForm({...form,allocationMode:"selected"})}>เลือกรายการที่จะคืน</button><button type="button" className="cbtn" style={{flex:1,border:0,background:form.allocationMode==="unallocated"?"#fff":"transparent",color:form.allocationMode==="unallocated"?"#1D4ED8":POS.gray}} onClick={()=>setForm({...form,allocationMode:"unallocated"})}>ไม่ระบุรายการ</button></div>{form.allocationMode==="selected"?<div style={{marginBottom:13,border:`1px solid ${POS.border}`,borderRadius:12,overflow:"hidden"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"9px 11px",background:"#FAFAF8",borderBottom:`1px solid ${POS.border}`}}><span style={{fontSize:11.5,fontWeight:700,color:POS.navy}}>รายการที่ยังคืนไม่ครบ ({advances.length})</span><button type="button" className="cbtn" style={{height:30,padding:"0 9px",fontSize:10.5}} onClick={selectAll}>คืนเต็มทั้งหมด</button></div><div style={{maxHeight:260,overflowY:"auto"}}>{advances.map((advance)=>{const value=allocations[advance.id]||"";return <div key={advance.id} style={{display:"grid",gridTemplateColumns:"minmax(180px,1fr) 110px 95px",gap:8,alignItems:"center",padding:"10px 11px",borderBottom:"1px solid #F0EEE9"}}><div style={{minWidth:0}}><div style={{fontSize:12.5,fontWeight:700,color:POS.navy,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{advance.description}</div><div style={{marginTop:2,fontSize:10.5,color:POS.gray}}>{new Date(`${advance.transactionDate}T00:00:00`).toLocaleDateString("th-TH",{day:"numeric",month:"short",year:"2-digit"})} · เหลือ ฿{money(advance.remainingAmount)}</div></div><input className="acc-field" aria-label={`ยอดคืน ${advance.description}`} style={{height:36,textAlign:"right"}} type="number" min="0" max={advance.remainingAmount} step="0.01" value={value} onChange={(event)=>setAllocation(advance,event.target.value)} placeholder="0.00"/><button type="button" className="cbtn" style={{height:34,padding:"0 8px",fontSize:10.5}} onClick={()=>setAllocation(advance,advance.remainingAmount)}>คืนเต็ม</button></div>})}</div><div style={{display:"flex",justifyContent:"space-between",padding:"10px 11px",background:"#F7FAFF",color:"#1D4ED8",fontSize:12.5,fontWeight:700}}><span>ยอดคืนครั้งนี้</span><span>฿{money(selectedTotal)}</span></div></div>:<div style={{marginBottom:13}}><label className="acc-field-label">ยอดคืนแบบไม่ระบุรายการ *</label><input className="acc-field" type="number" min="0.01" max={maxAmount} step="0.01" value={form.amount} onChange={(event)=>setForm({...form,amount:event.target.value})} placeholder="0.00"/><p style={{margin:"5px 0 0",fontSize:10.5,color:POS.gray}}>ระบบจะตัดยอดจากรายการเก่าสุดก่อน เหมาะสำหรับการลงยอดย้อนหลัง</p></div>}<div className="acc-form-grid"><div><label className="acc-field-label">วันที่คืนเงิน *</label><input className="acc-field" type="date" value={form.reimbursementDate} onChange={(event)=>setForm({...form,reimbursementDate:event.target.value})}/></div><div><label className="acc-field-label">จ่ายจากบัญชีร้าน *</label><select className="acc-field" value={form.paymentAccount} onChange={(event)=>setForm({...form,paymentAccount:event.target.value})}>{ACCOUNTING_PAYMENT_ACCOUNTS.filter((account)=>ACCOUNTING_CASH_ACCOUNT_IDS.has(account.id)).map((account)=><option key={account.id} value={account.id}>{account.label}</option>)}</select></div><div><label className="acc-field-label">ชื่อเจ้าของ</label><TextField className="acc-field" value={form.ownerName} onChange={(value)=>setForm({...form,ownerName:value})}/></div><div><label className="acc-field-label">หมายเหตุ</label><TextField className="acc-field" value={form.note} onChange={(value)=>setForm({...form,note:value})} placeholder="เช่น คืนค่าเครื่องชงบางส่วน"/></div></div>{error&&<p style={{margin:"10px 0 0",color:"#B91C1C",fontSize:12}}>{error}</p>}<div style={{display:"flex",gap:8,marginTop:16}}><button type="button" className="cbtn" disabled={saving} style={{flex:1}} onClick={onClose}>ยกเลิก</button><button type="submit" className="cbtn cbtn-accent" disabled={saving} style={{flex:1}}>{saving?"กำลังบันทึก...":`บันทึกคืน ฿${money(form.allocationMode==="selected"?selectedTotal:Number(form.amount)||0)}`}</button></div></form></div>;
 }
 
 function AccountingOwnerCapitalModal({maxConvertible,onClose,onSave}){
