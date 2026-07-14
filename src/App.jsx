@@ -27,6 +27,7 @@ const ACCOUNTING_CATEGORIES = {
   ],
   expense: [
     { id: "sales_refund", label: "คืนเงิน / ยกเลิกยอดขาย" },
+    { id: "asset_purchase", label: "ซื้อสินทรัพย์ / อุปกรณ์" },
     { id: "inventory_purchase", label: "ซื้อวัตถุดิบ" },
     { id: "packaging", label: "บรรจุภัณฑ์" },
     { id: "rent", label: "ค่าเช่า" },
@@ -43,12 +44,20 @@ const ACCOUNTING_CATEGORIES = {
     { id: "other_expense", label: "รายจ่ายอื่น" },
   ],
 };
+const ACCOUNTING_SYSTEM_CATEGORIES = new Set(["sales", "sales_refund", "asset_purchase"]);
 const ACCOUNTING_PAYMENT_ACCOUNTS = [
   { id: "cash", label: "เงินสด" },
   { id: "bank", label: "บัญชีธนาคาร" },
   { id: "promptpay", label: "PromptPay" },
   { id: "credit_card", label: "บัตรเครดิต" },
   { id: "unassigned", label: "ยังไม่ระบุ" },
+];
+const ACCOUNTING_ASSET_CATEGORIES = [
+  { id: "coffee_equipment", label: "เครื่องชง / เครื่องบด" },
+  { id: "refrigeration", label: "ตู้เย็น / เครื่องทำน้ำแข็ง" },
+  { id: "pos_it", label: "POS / คอมพิวเตอร์" },
+  { id: "furniture", label: "เฟอร์นิเจอร์" },
+  { id: "equipment", label: "อุปกรณ์อื่น" },
 ];
 
 function accountingPaymentAccount(paymentMethod) {
@@ -589,6 +598,7 @@ function ShopApp({ uid, user }) {
   const [customers, setCustomers] = useState([]);
   const [salesRecords, setSalesRecords] = useState([]);
   const [accountingTransactions, setAccountingTransactions] = useState([]);
+  const [accountingAssets, setAccountingAssets] = useState([]);
   // เช็คแค่ตอน mount ครั้งเดียวไม่พอ — ถ้าหน้าจอเปลี่ยนขนาดทีหลัง (resize, หมุนแท็บเล็ต) โดยไม่ reload หน้า
   // sidebarCollapsed จะค้างค่าตอน mount ตลอด ทำให้ sidebar เต็มบีบเนื้อหาแคบเกินจนอ่านไม่ออกบนจอมือถือจริง
   useEffect(() => {
@@ -650,6 +660,16 @@ function ShopApp({ uid, user }) {
       const rows = Object.entries(value).map(([id, transaction]) => ({ id, ...transaction }));
       rows.sort((a, b) => `${b.transactionDate || ""}${b.createdAt || ""}`.localeCompare(`${a.transactionDate || ""}${a.createdAt || ""}`));
       setAccountingTransactions(rows);
+    });
+    return () => unsub();
+  }, [uid]);
+
+  useEffect(() => {
+    const unsub = onValue(ref(db, `accounting/${uid}/assets`), (snap) => {
+      const value = snap.val() || {};
+      const rows = Object.entries(value).map(([id, asset]) => ({ id, ...asset }));
+      rows.sort((a, b) => String(b.purchaseDate || "").localeCompare(String(a.purchaseDate || "")));
+      setAccountingAssets(rows);
     });
     return () => unsub();
   }, [uid]);
@@ -737,6 +757,42 @@ function ShopApp({ uid, user }) {
   async function deleteAccountingTransaction(transaction) {
     if (transaction.sourceType && transaction.sourceType !== "manual") throw new Error("รายการจากระบบต้องยกเลิกจากเอกสารต้นทาง");
     await set(ref(db, `accounting/${uid}/transactions/${transaction.id}`), null);
+  }
+
+  async function saveAccountingAsset(asset) {
+    const now = new Date().toISOString();
+    const id = asset.id || push(ref(db, `accounting/${uid}/assets`)).key;
+    const payload = {
+      name: String(asset.name || "").trim(), category: asset.category || "equipment",
+      purchaseDate: asset.purchaseDate, inServiceDate: asset.inServiceDate || asset.purchaseDate,
+      cost: Math.round((Number(asset.cost) || 0) * 100) / 100,
+      residualValue: Math.max(0, Math.round((Number(asset.residualValue) || 0) * 100) / 100),
+      usefulLifeMonths: Math.max(1, Math.round(Number(asset.usefulLifeMonths) || 60)),
+      depreciationMethod: "straight_line", paymentAccount: asset.paymentAccount || "bank",
+      vendorName: String(asset.vendorName || "").trim(), serialNumber: String(asset.serialNumber || "").trim(),
+      warrantyEnd: asset.warrantyEnd || null, status: asset.status || "active",
+      disposedDate: asset.status === "disposed" ? (asset.disposedDate || now.slice(0, 10)) : null,
+      note: String(asset.note || "").trim(),
+      createdAt: asset.createdAt || now, updatedAt: now,
+    };
+    if (!payload.name || !payload.purchaseDate || payload.cost <= 0 || payload.residualValue >= payload.cost) throw new Error("กรุณากรอกชื่อ วันที่ซื้อ และมูลค่าสินทรัพย์ให้ถูกต้อง");
+    const transaction = {
+      type: "expense", category: "asset_purchase", description: `ซื้อสินทรัพย์ ${payload.name}`, amount: payload.cost,
+      transactionDate: payload.purchaseDate, paymentAccount: payload.paymentAccount, vendorName: payload.vendorName,
+      note: payload.serialNumber ? `Serial: ${payload.serialNumber}` : payload.note, sourceType: "asset_purchase", sourceId: id,
+      createdAt: payload.createdAt, updatedAt: now,
+    };
+    await update(ref(db), {
+      [`accounting/${uid}/assets/${id}`]: payload,
+      [`accounting/${uid}/transactions/asset_purchase_${id}`]: transaction,
+    });
+  }
+
+  async function deleteAccountingAsset(asset) {
+    await update(ref(db), {
+      [`accounting/${uid}/assets/${asset.id}`]: null,
+      [`accounting/${uid}/transactions/asset_purchase_${asset.id}`]: null,
+    });
   }
 
   const ingredientsById = useMemo(() => {
@@ -1205,7 +1261,7 @@ function ShopApp({ uid, user }) {
           {tab === "promotions" && <PromotionsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} onSaveAccounting={saveAccountingTransaction} />}
           {tab === "reports" && <ReportsPanel data={dataForDisplay} orders={orders} shopName={data.settings.shopName} showToast={showToast} />}
-          {tab === "accounting" && <AccountingPanel transactions={accountingTransactions} sales={dataForDisplay.sales} overheadPerCup={data.settings.overheadPerCup} onSave={saveAccountingTransaction} onDelete={deleteAccountingTransaction} showToast={showToast} />}
+          {tab === "accounting" && <AccountingPanel transactions={accountingTransactions} assets={accountingAssets} sales={dataForDisplay.sales} overheadPerCup={data.settings.overheadPerCup} onSave={saveAccountingTransaction} onDelete={deleteAccountingTransaction} onSaveAsset={saveAccountingAsset} onDeleteAsset={deleteAccountingAsset} showToast={showToast} />}
           {tab === "loyalty" && <LoyaltyPanel customers={customers} orders={orders} loyaltyBeanGoal={data.settings.loyaltyBeanGoal} adjustCustomerBeans={adjustCustomerBeans} createLoyaltyCustomer={createLoyaltyCustomer} updateLoyaltyGoal={updateLoyaltyGoal} showToast={showToast} backfillEligibleCount={backfillEligibleOrders.length} backfillLoyaltyBeans={backfillLoyaltyBeans} />}
           {tab === "options" && <OptionGroupsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "settings" && <SettingsPanel data={data} updateData={updateData} showToast={showToast} uid={uid} />}
@@ -5898,7 +5954,29 @@ function accountingAccountLabel(accountId) {
   return ACCOUNTING_PAYMENT_ACCOUNTS.find((account) => account.id === accountId)?.label || accountId || "—";
 }
 
-function AccountingPanel({ transactions, sales, overheadPerCup, onSave, onDelete, showToast }) {
+function accumulatedAssetDepreciation(asset, asOfDate) {
+  const serviceDate = new Date(`${asset.inServiceDate || asset.purchaseDate}T00:00:00`);
+  let asOf = asOfDate instanceof Date ? asOfDate : new Date(asOfDate);
+  if (asset.status === "disposed" && asset.disposedDate) {
+    const disposedAt = new Date(`${asset.disposedDate}T23:59:59`);
+    if (!Number.isNaN(disposedAt.getTime()) && disposedAt < asOf) asOf = disposedAt;
+  }
+  if (Number.isNaN(serviceDate.getTime()) || Number.isNaN(asOf.getTime()) || asOf < serviceDate) return 0;
+  const life = Math.max(1, Number(asset.usefulLifeMonths) || 60);
+  const depreciable = Math.max(0, (Number(asset.cost) || 0) - (Number(asset.residualValue) || 0));
+  const months = Math.max(0, (asOf.getFullYear() - serviceDate.getFullYear()) * 12 + asOf.getMonth() - serviceDate.getMonth() + 1);
+  return Math.min(depreciable, (depreciable / life) * months);
+}
+
+function assetDepreciationForPeriod(asset, month) {
+  if (!month) return accumulatedAssetDepreciation(asset, new Date());
+  const [year, monthNumber] = month.split("-").map(Number);
+  const end = new Date(year, monthNumber, 0, 23, 59, 59);
+  const previousEnd = new Date(year, monthNumber - 1, 0, 23, 59, 59);
+  return Math.max(0, accumulatedAssetDepreciation(asset, end) - accumulatedAssetDepreciation(asset, previousEnd));
+}
+
+function AccountingPanel({ transactions, assets, sales, overheadPerCup, onSave, onDelete, onSaveAsset, onDeleteAsset, showToast }) {
   const [month, setMonth] = useState(todayStr().slice(0, 7));
   const [typeFilter, setTypeFilter] = useState("all");
   const [query, setQuery] = useState("");
@@ -5928,17 +6006,19 @@ function AccountingPanel({ transactions, sales, overheadPerCup, onSave, onDelete
     if (sale.ingredientCostTotal != null) return sum + (Number(sale.ingredientCostTotal) || 0);
     return sum + Math.max(0, (Number(sale.totalCost) || 0) - (Number(overheadPerCup) || 0) * (Number(sale.qty) || 0));
   }, 0);
+  const depreciationExpense = assets.reduce((sum, asset) => sum + assetDepreciationForPeriod(asset, month), 0);
   const netRevenue = cashIncome - refunds;
   const grossProfit = netRevenue - costOfGoods;
-  const netProfit = grossProfit - operatingExpenses;
+  const netProfit = grossProfit - operatingExpenses - depreciationExpense;
   const netCash = cashIncome - cashExpense;
   const grossMargin = netRevenue > 0 ? (grossProfit / netRevenue) * 100 : 0;
   const hasEstimatedLegacyCost = periodSales.some((sale) => sale.ingredientCostTotal == null);
 
   function openNew(type) {
+    const firstManualCategory = ACCOUNTING_CATEGORIES[type].find((category) => !ACCOUNTING_SYSTEM_CATEGORIES.has(category.id));
     setEditing({
       type,
-      category: ACCOUNTING_CATEGORIES[type][0].id,
+      category: firstManualCategory.id,
       description: "",
       amount: "",
       transactionDate: todayStr(),
@@ -6023,6 +6103,7 @@ function AccountingPanel({ transactions, sales, overheadPerCup, onSave, onDelete
           <AccountingStatementRow label="หัก ต้นทุนวัตถุดิบที่ขาย" value={-costOfGoods} note={hasEstimatedLegacyCost ? "ยอดเก่าบางส่วนเป็นค่าประมาณ" : ""} />
           <AccountingStatementRow label={`กำไรขั้นต้น (${grossMargin.toFixed(1)}%)`} value={grossProfit} strong />
           <AccountingStatementRow label="หัก ค่าใช้จ่ายดำเนินงาน" value={-operatingExpenses} />
+          <AccountingStatementRow label="หัก ค่าเสื่อมอุปกรณ์" value={-depreciationExpense} />
           <AccountingStatementRow label="กำไรสุทธิประมาณการ" value={netProfit} strong tone={netProfit >= 0 ? "positive" : "negative"} />
         </section>
         <section className="acc-statement">
@@ -6059,6 +6140,8 @@ function AccountingPanel({ transactions, sales, overheadPerCup, onSave, onDelete
         })}
       </div>}
 
+      <AccountingAssetsSection assets={assets} onSave={onSaveAsset} onDelete={onDeleteAsset} showToast={showToast} />
+
       {editing && <AccountingTransactionModal transaction={editing} onClose={() => setEditing(null)} onSave={async (value) => { await onSave(value); setEditing(null); showToast(value.id ? "แก้ไขรายการบัญชีแล้ว" : "บันทึกรายการบัญชีแล้ว"); }} />}
       {deleteFor && <div className="acc-modal-bg" onClick={() => !deleting && setDeleteFor(null)}><div className="acc-modal" style={{ width:"min(390px,100%)" }} role="alertdialog" aria-modal="true" onClick={(event) => event.stopPropagation()}><h3 style={{ margin:"0 0 7px", color:POS.navy }}>ลบรายการนี้?</h3><p style={{ margin:"0 0 16px", color:POS.gray, fontSize:12.5 }}>“{deleteFor.description}” จำนวน ฿{money(deleteFor.amount)} จะถูกลบออกจากสมุดบัญชี</p><div style={{ display:"flex", gap:8 }}><button className="cbtn" disabled={deleting} style={{ flex:1 }} onClick={() => setDeleteFor(null)}>ยกเลิก</button><button className="cbtn cbtn-danger" disabled={deleting} style={{ flex:1 }} onClick={confirmDelete}>{deleting ? "กำลังลบ..." : "ลบรายการ"}</button></div></div></div>}
     </div>
@@ -6074,12 +6157,96 @@ function AccountingStatementRow({ label, value, note, strong, tone }) {
   return <div className="acc-statement-row" style={strong ? { fontWeight:700, color } : undefined}><div><span>{label}</span>{note && <div style={{ marginTop:2, color:"#B45309", fontSize:9.5 }}>{note}</div>}</div><span style={{ color, fontWeight:strong ? 700 : 600, whiteSpace:"nowrap" }}>{value < 0 ? "−" : ""}฿{money(Math.abs(value))}</span></div>;
 }
 
+function AccountingAssetsSection({ assets, onSave, onDelete, showToast }) {
+  const [editing, setEditing] = useState(null);
+  const [deleteFor, setDeleteFor] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const totalCost = assets.reduce((sum, asset) => sum + (Number(asset.cost) || 0), 0);
+  const accumulated = assets.reduce((sum, asset) => sum + accumulatedAssetDepreciation(asset, new Date()), 0);
+  const bookValue = Math.max(0, totalCost - accumulated);
+  const monthlyDepreciation = assets.filter((asset) => asset.status !== "disposed").reduce((sum, asset) => {
+    const depreciable = Math.max(0, (Number(asset.cost) || 0) - (Number(asset.residualValue) || 0));
+    return sum + depreciable / Math.max(1, Number(asset.usefulLifeMonths) || 60);
+  }, 0);
+
+  function addAsset() {
+    setEditing({
+      name:"", category:"coffee_equipment", purchaseDate:todayStr(), inServiceDate:todayStr(), cost:"", residualValue:0,
+      usefulLifeMonths:60, paymentAccount:"bank", vendorName:"", serialNumber:"", warrantyEnd:"", status:"active", disposedDate:"", note:"",
+    });
+  }
+
+  async function confirmDelete() {
+    setDeleting(true);
+    try {
+      await onDelete(deleteFor);
+      setDeleteFor(null);
+      showToast("ลบสินทรัพย์และรายการซื้อแล้ว");
+    } catch (error) {
+      showToast("ลบสินทรัพย์ไม่สำเร็จ: " + error.message);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  return <section style={{ marginTop:20 }}>
+    <style>{`
+      .acc-assets-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:10px; }
+      .acc-asset-kpis { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-bottom:10px; }
+      .acc-asset-kpi { padding:12px 14px; border:1px solid ${POS.border}; border-radius:12px; background:#fff; }
+      .acc-asset-row { display:grid; grid-template-columns:minmax(190px,1.5fr) 150px 110px 110px 110px 85px 72px; gap:12px; align-items:center; padding:12px 14px; border-bottom:1px solid #F0EEE9; }
+      .acc-asset-row:last-child { border-bottom:0; }
+      .acc-asset-row-head { padding-top:9px; padding-bottom:9px; color:${POS.gray}; background:#FAFAF8; font-size:10.5px; font-weight:700; text-transform:uppercase; }
+      @media(max-width:1000px){ .acc-asset-row{grid-template-columns:minmax(180px,1fr) 130px 100px 100px 85px 72px;} .acc-asset-col-date{display:none;} }
+      @media(max-width:700px){ .acc-asset-kpis{grid-template-columns:1fr;} .acc-asset-row-head{display:none;} .acc-asset-row{display:grid;grid-template-columns:1fr auto;gap:6px;margin-bottom:8px;border:1px solid ${POS.border};border-radius:12px;background:#fff;} .acc-asset-row:last-child{border-bottom:1px solid ${POS.border};} .acc-asset-col-category,.acc-asset-col-cost,.acc-asset-col-book{font-size:11.5px;} .acc-asset-actions{grid-column:2;grid-row:1/4;} }
+    `}</style>
+    <div className="acc-assets-head"><div><h3 style={{ margin:"0 0 3px", color:POS.navy, fontSize:17 }}>สินทรัพย์และอุปกรณ์</h3><p style={{ margin:0, color:POS.gray, fontSize:11.5 }}>ค่าเสื่อมแบบเส้นตรงสำหรับการบริหารร้าน ปรับอายุใช้งานของแต่ละรายการได้</p></div><button className="cbtn cbtn-accent" onClick={addAsset}><Icon name="plus" size={14} /><span style={{ marginLeft:5 }}>เพิ่มอุปกรณ์</span></button></div>
+    <div className="acc-asset-kpis"><div className="acc-asset-kpi"><div style={{ color:POS.gray, fontSize:10.5 }}>ราคาทุนทั้งหมด</div><b style={{ display:"block", marginTop:3, color:POS.navy, fontSize:17 }}>฿{money(totalCost)}</b></div><div className="acc-asset-kpi"><div style={{ color:POS.gray, fontSize:10.5 }}>มูลค่าตามบัญชีปัจจุบัน</div><b style={{ display:"block", marginTop:3, color:"#1D4ED8", fontSize:17 }}>฿{money(bookValue)}</b></div><div className="acc-asset-kpi"><div style={{ color:POS.gray, fontSize:10.5 }}>ค่าเสื่อมต่อเดือน</div><b style={{ display:"block", marginTop:3, color:"#92400E", fontSize:17 }}>฿{money(monthlyDepreciation)}</b></div></div>
+    {assets.length === 0 ? <div style={{ padding:24, border:`1px dashed ${POS.border}`, borderRadius:13, textAlign:"center", color:POS.gray, fontSize:12.5 }}>ยังไม่มีอุปกรณ์ในทะเบียน</div> : <div className="acc-table"><div className="acc-asset-row acc-asset-row-head"><span>อุปกรณ์</span><span>ประเภท</span><span>วันที่ซื้อ</span><span style={{textAlign:"right"}}>ราคาทุน</span><span style={{textAlign:"right"}}>มูลค่าคงเหลือ</span><span>สถานะ</span><span /></div>{assets.map((asset) => {
+      const assetAccumulated = accumulatedAssetDepreciation(asset, new Date());
+      const currentValue = Math.max(Number(asset.residualValue) || 0, (Number(asset.cost) || 0) - assetAccumulated);
+      const category = ACCOUNTING_ASSET_CATEGORIES.find((item) => item.id === asset.category)?.label || asset.category;
+      return <div className="acc-asset-row" key={asset.id}><div><div style={{ color:POS.navy, fontWeight:700, fontSize:13 }}>{asset.name}</div>{asset.serialNumber && <div style={{ marginTop:2, color:POS.gray, fontSize:10 }}>S/N {asset.serialNumber}</div>}</div><div className="acc-asset-col-category" style={{ color:POS.gray, fontSize:11.5 }}>{category}</div><div className="acc-asset-col-date" style={{ color:POS.gray, fontSize:11.5 }}>{new Date(`${asset.purchaseDate}T00:00:00`).toLocaleDateString("th-TH",{day:"numeric",month:"short",year:"2-digit"})}</div><div className="acc-asset-col-cost" style={{ textAlign:"right", color:POS.navy, fontSize:12.5 }}>฿{money(asset.cost)}</div><div className="acc-asset-col-book" style={{ textAlign:"right", color:"#1D4ED8", fontSize:12.5, fontWeight:700 }}>฿{money(currentValue)}</div><div><span className="acc-type" style={{ color:asset.status === "active" ? "#15803D" : "#6B7280", background:asset.status === "active" ? "#EAF7EE" : "#F3F4F6" }}>{asset.status === "active" ? "ใช้งาน" : asset.status === "maintenance" ? "ซ่อม" : "เลิกใช้"}</span></div><div className="acc-asset-actions" style={{ display:"flex", gap:4 }}><button className="cbtn" style={{width:32,height:32,padding:0}} onClick={()=>setEditing(asset)} aria-label={`แก้ไข ${asset.name}`}><Icon name="edit" size={13}/></button><button className="cbtn" style={{width:32,height:32,padding:0,color:"#B91C1C"}} onClick={()=>setDeleteFor(asset)} aria-label={`ลบ ${asset.name}`}><Icon name="trash" size={13}/></button></div></div>;
+    })}</div>}
+    {editing && <AccountingAssetModal asset={editing} onClose={()=>setEditing(null)} onSave={async (asset) => { await onSave(asset); setEditing(null); showToast(asset.id ? "แก้ไขสินทรัพย์แล้ว" : "เพิ่มสินทรัพย์และบันทึกเงินจ่ายแล้ว"); }} />}
+    {deleteFor && <div className="acc-modal-bg" onClick={()=>!deleting&&setDeleteFor(null)}><div className="acc-modal" style={{width:"min(390px,100%)"}} role="alertdialog" aria-modal="true" onClick={(event)=>event.stopPropagation()}><h3 style={{margin:"0 0 7px",color:POS.navy}}>ลบสินทรัพย์นี้?</h3><p style={{margin:"0 0 16px",color:POS.gray,fontSize:12.5}}>ทะเบียน “{deleteFor.name}” และรายการเงินจ่ายที่เชื่อมไว้จะถูกลบ</p><div style={{display:"flex",gap:8}}><button className="cbtn" style={{flex:1}} onClick={()=>setDeleteFor(null)}>ยกเลิก</button><button className="cbtn cbtn-danger" disabled={deleting} style={{flex:1}} onClick={confirmDelete}>{deleting?"กำลังลบ...":"ลบ"}</button></div></div></div>}
+  </section>;
+}
+
+function AccountingAssetModal({ asset, onClose, onSave }) {
+  const [form, setForm] = useState({...asset});
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  useEscape(onClose);
+  function patch(field,value){setForm((current)=>({...current,[field]:value}));}
+  async function submit(event){event.preventDefault();setError("");if(!form.name.trim()||!form.purchaseDate||Number(form.cost)<=0||Number(form.residualValue)>=Number(form.cost)){setError("กรุณากรอกชื่อ วันที่ซื้อ ราคาทุน และมูลค่าคงเหลือให้ถูกต้อง");return;}setSaving(true);try{await onSave(form);}catch(saveError){setError(saveError.message||"บันทึกไม่สำเร็จ");setSaving(false);}}
+  const depreciable = Math.max(0,(Number(form.cost)||0)-(Number(form.residualValue)||0));
+  const monthly = depreciable/Math.max(1,Number(form.usefulLifeMonths)||60);
+  return <div className="acc-modal-bg" onClick={onClose}><form className="acc-modal" role="dialog" aria-modal="true" aria-label={form.id?"แก้ไขสินทรัพย์":"เพิ่มสินทรัพย์"} onSubmit={submit} onClick={(event)=>event.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}><div><p style={{margin:0,color:POS.gray,fontSize:10.5,fontWeight:700,textTransform:"uppercase"}}>Fixed asset</p><h3 style={{margin:"2px 0 0",color:POS.navy}}>{form.id?"แก้ไขอุปกรณ์":"เพิ่มอุปกรณ์"}</h3></div><button type="button" className="cbtn" style={{width:34,height:34,padding:0}} onClick={onClose}><Icon name="x" size={15}/></button></div><div className="acc-form-grid">
+    <div style={{gridColumn:"1/-1"}}><label className="acc-field-label">ชื่ออุปกรณ์ *</label><TextField className="acc-field" value={form.name} onChange={(value)=>patch("name",value)} placeholder="เช่น เครื่องชงกาแฟ"/></div>
+    <div><label className="acc-field-label">ประเภท</label><select className="acc-field" value={form.category} onChange={(event)=>patch("category",event.target.value)}>{ACCOUNTING_ASSET_CATEGORIES.map((category)=><option key={category.id} value={category.id}>{category.label}</option>)}</select></div>
+    <div><label className="acc-field-label">สถานะ</label><select className="acc-field" value={form.status} onChange={(event)=>patch("status",event.target.value)}><option value="active">ใช้งาน</option><option value="maintenance">อยู่ระหว่างซ่อม</option><option value="disposed">เลิกใช้/ขายแล้ว</option></select></div>
+    <div><label className="acc-field-label">วันที่ซื้อ *</label><input className="acc-field" type="date" value={form.purchaseDate} onChange={(event)=>patch("purchaseDate",event.target.value)}/></div>
+    <div><label className="acc-field-label">วันที่เริ่มใช้งาน</label><input className="acc-field" type="date" value={form.inServiceDate} onChange={(event)=>patch("inServiceDate",event.target.value)}/></div>
+    <div><label className="acc-field-label">ราคาทุน *</label><input className="acc-field" type="number" min="0.01" step="0.01" value={form.cost} onChange={(event)=>patch("cost",event.target.value)}/></div>
+    <div><label className="acc-field-label">มูลค่าคงเหลือ</label><input className="acc-field" type="number" min="0" step="0.01" value={form.residualValue} onChange={(event)=>patch("residualValue",event.target.value)}/></div>
+    <div><label className="acc-field-label">อายุใช้งาน (เดือน)</label><input className="acc-field" type="number" min="1" value={form.usefulLifeMonths} onChange={(event)=>patch("usefulLifeMonths",event.target.value)}/></div>
+    <div><label className="acc-field-label">ชำระผ่าน</label><select className="acc-field" value={form.paymentAccount} onChange={(event)=>patch("paymentAccount",event.target.value)}>{ACCOUNTING_PAYMENT_ACCOUNTS.filter((account)=>account.id!=="unassigned").map((account)=><option key={account.id} value={account.id}>{account.label}</option>)}</select></div>
+    <div><label className="acc-field-label">ผู้ขาย</label><TextField className="acc-field" value={form.vendorName||""} onChange={(value)=>patch("vendorName",value)} placeholder="ไม่บังคับ"/></div>
+    <div><label className="acc-field-label">Serial number</label><TextField className="acc-field" value={form.serialNumber||""} onChange={(value)=>patch("serialNumber",value)} placeholder="ไม่บังคับ"/></div>
+    <div><label className="acc-field-label">หมดประกัน</label><input className="acc-field" type="date" value={form.warrantyEnd||""} onChange={(event)=>patch("warrantyEnd",event.target.value)}/></div>
+    {form.status === "disposed" && <div><label className="acc-field-label">วันที่เลิกใช้ / ขาย</label><input className="acc-field" type="date" value={form.disposedDate||todayStr()} onChange={(event)=>patch("disposedDate",event.target.value)}/></div>}
+    <div style={{display:"flex",alignItems:"center",padding:"10px 12px",borderRadius:10,background:"#FFF8ED",color:"#92400E",fontSize:12}}>ค่าเสื่อมประมาณ ฿{money(monthly)}/เดือน</div>
+    <div style={{gridColumn:"1/-1"}}><label className="acc-field-label">หมายเหตุ</label><textarea className="acc-field" value={form.note||""} onChange={(event)=>patch("note",event.target.value)}/></div>
+  </div>{error&&<p style={{margin:"10px 0 0",color:"#B91C1C",fontSize:12}}>{error}</p>}<p style={{margin:"10px 0 0",color:POS.gray,fontSize:10.5,lineHeight:1.45}}>ค่าเสื่อมนี้ใช้สำหรับรายงานบริหารภายใน การใช้ยื่นภาษีควรให้นักบัญชีตรวจประเภทและอัตราอีกครั้ง</p><div style={{display:"flex",gap:8,marginTop:16}}><button type="button" className="cbtn" disabled={saving} style={{flex:1}} onClick={onClose}>ยกเลิก</button><button type="submit" className="cbtn cbtn-accent" disabled={saving} style={{flex:1}}>{saving?"กำลังบันทึก...":"บันทึกอุปกรณ์"}</button></div></form></div>;
+}
+
 function AccountingTransactionModal({ transaction, onClose, onSave }) {
   const [form, setForm] = useState({ ...transaction });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   useEscape(onClose);
-  const categories = ACCOUNTING_CATEGORIES[form.type] || [];
+  const categories = (ACCOUNTING_CATEGORIES[form.type] || []).filter((category) => !ACCOUNTING_SYSTEM_CATEGORIES.has(category.id));
 
   function patch(field, value) { setForm((current) => ({ ...current, [field]: value })); }
 
@@ -6098,7 +6265,7 @@ function AccountingTransactionModal({ transaction, onClose, onSave }) {
 
   return <div className="acc-modal-bg" onClick={onClose}><form className="acc-modal" role="dialog" aria-modal="true" aria-label={form.id ? "แก้ไขรายการบัญชี" : "เพิ่มรายการบัญชี"} onSubmit={submit} onClick={(event) => event.stopPropagation()}>
     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, marginBottom:16 }}><div><p style={{ margin:0, color:POS.gray, fontSize:10.5, fontWeight:700, textTransform:"uppercase" }}>Manual transaction</p><h3 style={{ margin:"2px 0 0", color:POS.navy }}>{form.id ? "แก้ไขรายการ" : "เพิ่มรายการบัญชี"}</h3></div><button type="button" className="cbtn" style={{ width:34, height:34, padding:0 }} onClick={onClose}><Icon name="x" size={15} /></button></div>
-    <div style={{ display:"flex", gap:6, padding:4, marginBottom:14, borderRadius:11, background:POS.chipBg }}><button type="button" className="cbtn" style={{ flex:1, border:0, color:form.type === "income" ? "#15803D" : POS.gray, background:form.type === "income" ? "#fff" : "transparent", boxShadow:form.type === "income" ? "0 1px 4px rgba(0,0,0,.08)" : "none" }} onClick={() => setForm((current) => ({ ...current, type:"income", category:ACCOUNTING_CATEGORIES.income[0].id }))}>รายรับ</button><button type="button" className="cbtn" style={{ flex:1, border:0, color:form.type === "expense" ? "#B91C1C" : POS.gray, background:form.type === "expense" ? "#fff" : "transparent", boxShadow:form.type === "expense" ? "0 1px 4px rgba(0,0,0,.08)" : "none" }} onClick={() => setForm((current) => ({ ...current, type:"expense", category:ACCOUNTING_CATEGORIES.expense[0].id }))}>รายจ่าย</button></div>
+    <div style={{ display:"flex", gap:6, padding:4, marginBottom:14, borderRadius:11, background:POS.chipBg }}><button type="button" className="cbtn" style={{ flex:1, border:0, color:form.type === "income" ? "#15803D" : POS.gray, background:form.type === "income" ? "#fff" : "transparent", boxShadow:form.type === "income" ? "0 1px 4px rgba(0,0,0,.08)" : "none" }} onClick={() => setForm((current) => ({ ...current, type:"income", category:"manual_sales" }))}>รายรับ</button><button type="button" className="cbtn" style={{ flex:1, border:0, color:form.type === "expense" ? "#B91C1C" : POS.gray, background:form.type === "expense" ? "#fff" : "transparent", boxShadow:form.type === "expense" ? "0 1px 4px rgba(0,0,0,.08)" : "none" }} onClick={() => setForm((current) => ({ ...current, type:"expense", category:"inventory_purchase" }))}>รายจ่าย</button></div>
     <div className="acc-form-grid">
       <div><label className="acc-field-label">วันที่รายการ *</label><input className="acc-field" type="date" value={form.transactionDate} onChange={(event) => patch("transactionDate", event.target.value)} /></div>
       <div><label className="acc-field-label">จำนวนเงิน *</label><input className="acc-field" type="number" min="0.01" step="0.01" inputMode="decimal" value={form.amount} onChange={(event) => patch("amount", event.target.value)} placeholder="0.00" /></div>
