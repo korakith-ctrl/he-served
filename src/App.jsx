@@ -1269,19 +1269,63 @@ function ShopApp({ uid, user }) {
       // ใช้ orderId เป็น idempotency key: transaction ถูกเรียกซ้ำได้โดยไม่เพิ่มเมล็ดซ้ำ
       // และช่วยกู้ต่อได้หากเพิ่มเมล็ดสำเร็จแต่เขียน beansAwarded กลับเข้า order ไม่สำเร็จชั่วคราว
       if (loyaltyAwards[order.id]) return prev;
+      const loyaltyDebt = Math.max(0, Number(prev.loyaltyDebt) || 0);
+      const debtPaid = Math.min(loyaltyDebt, cups);
+      const creditedBeans = cups - debtPaid;
       return {
         ...prev,
         phone: phoneKey,
         name: order.customerName && order.customerName !== "ขายหน้าร้าน" ? order.customerName : prev.name || "",
-        beans: (Number(prev.beans) || 0) + cups,
+        beans: Math.max(0, Number(prev.beans) || 0) + creditedBeans,
         lifetimeBeans: (Number(prev.lifetimeBeans) || 0) + cups,
-        loyaltyAwards: { ...loyaltyAwards, [order.id]: { cups, awardedAt } },
+        loyaltyDebt: loyaltyDebt - debtPaid,
+        loyaltyAwards: { ...loyaltyAwards, [order.id]: { cups, creditedBeans, debtPaid, awardedAt } },
         updatedAt: awardedAt,
       };
     });
     if (!transaction.committed) throw new Error("transaction เพิ่มเมล็ดไม่สำเร็จ");
-    await update(ref(db, `orders/${uid}/${order.id}`), { beansAwarded: true, beansAwardedAt: awardedAt });
-    return { cups, skipped: null };
+    const award = transaction.snapshot.child(`loyaltyAwards/${order.id}`).val() || { cups, creditedBeans:cups, debtPaid:0 };
+    await update(ref(db, `orders/${uid}/${order.id}`), { beansAwarded: true, beansAwardedAt: awardedAt, beansRevokedAt:null });
+    return { cups:Number(award.cups)||cups, creditedBeans:Number(award.creditedBeans ?? award.cups)||0, debtPaid:Number(award.debtPaid)||0, skipped:null };
+  }
+
+  // ย้ายออเดอร์ออกจาก done ต้องย้อนเมล็ดด้วย orderId เดียวกับตอนให้ เพื่อให้ทำซ้ำได้อย่างปลอดภัย
+  // ถ้าลูกค้าใช้เมล็ดไปแล้ว จะเก็บส่วนที่ยึดคืนไม่ครบเป็น loyaltyDebt เพื่อหักจากเมล็ดที่จะได้รับครั้งถัดไป
+  async function revokeLoyaltyBeans(order) {
+    const phoneKey = normalizeThaiPhone(order.customerPhone);
+    const revokedAt = new Date().toISOString();
+    if (!phoneKey) {
+      await update(ref(db, `orders/${uid}/${order.id}`), { beansAwarded:false, beansAwardedAt:null, beansRevokedAt:revokedAt });
+      return { cups:0, deductedBeans:0, shortfall:0, skipped:"invalid-phone" };
+    }
+    const customerRef = ref(db, `customers/${uid}/${phoneKey}`);
+    const transaction = await runTransaction(customerRef, (current) => {
+      if (!current) return current;
+      const loyaltyAwards = current.loyaltyAwards || {};
+      const award = loyaltyAwards[order.id];
+      if (!award) return current;
+      const cups = Math.max(0, Number(award.cups) || 0);
+      const creditedBeans = Math.max(0, Number(award.creditedBeans ?? award.cups) || 0);
+      const restoredDebt = Math.max(0, Number(award.debtPaid) || 0);
+      const availableBeans = Math.max(0, Number(current.beans) || 0);
+      const deductedBeans = Math.min(availableBeans, creditedBeans);
+      const shortfall = creditedBeans - deductedBeans;
+      const nextAwards = { ...loyaltyAwards };
+      delete nextAwards[order.id];
+      return {
+        ...current,
+        beans: availableBeans - deductedBeans,
+        lifetimeBeans: Math.max(0, (Number(current.lifetimeBeans) || 0) - cups),
+        loyaltyDebt: Math.max(0, Number(current.loyaltyDebt) || 0) + restoredDebt + shortfall,
+        loyaltyAwards: nextAwards,
+        loyaltyReversals: { ...(current.loyaltyReversals || {}), [order.id]: { cups, creditedBeans, deductedBeans, restoredDebt, shortfall, revokedAt } },
+        updatedAt: revokedAt,
+      };
+    });
+    if (!transaction.committed) throw new Error("transaction ยึดคืนเมล็ดไม่สำเร็จ");
+    const reversal = transaction.snapshot.child(`loyaltyReversals/${order.id}`).val() || { cups:0, deductedBeans:0, shortfall:0 };
+    await update(ref(db, `orders/${uid}/${order.id}`), { beansAwarded:false, beansAwardedAt:null, beansRevokedAt:revokedAt });
+    return { cups:Number(reversal.cups)||0, deductedBeans:Number(reversal.deductedBeans)||0, shortfall:Number(reversal.shortfall)||0, skipped:null };
   }
 
   // แอดมินปรับเมล็ดมือ (เช่น ลูกค้าทำใบเสร็จหาย/ชดเชยกรณีพิเศษ) — บวก/ลบตรงจากค่าปัจจุบัน กันชนกันด้วย transaction เหมือนกัน
@@ -1506,7 +1550,7 @@ function ShopApp({ uid, user }) {
 
           {tab === "dashboard" && <Dashboard data={dataForDisplay} setTab={setTab} />}
           {tab === "sell" && <SellPanel data={dataForDisplay} ingredientsById={ingredientsById} recordSale={recordSale} createInstoreOrder={createInstoreOrder} />}
-          {tab === "orders" && <OrdersPanel uid={uid} orders={orders} recordSale={recordSale} cancelOrder={cancelOrder} awardLoyaltyBeans={awardLoyaltyBeans} showToast={showToast} data={data} ingredientsById={ingredientsById} />}
+          {tab === "orders" && <OrdersPanel uid={uid} orders={orders} recordSale={recordSale} cancelOrder={cancelOrder} awardLoyaltyBeans={awardLoyaltyBeans} revokeLoyaltyBeans={revokeLoyaltyBeans} showToast={showToast} data={data} ingredientsById={ingredientsById} />}
           {tab === "menus" && <MenusPanel data={dataForDisplay} ingredientsById={ingredientsById} updateData={updateData} showToast={showToast} />}
           {tab === "promotions" && <PromotionsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} onSaveAccounting={saveAccountingTransaction} isAccountingPeriodClosed={isAccountingPeriodClosed} />}
@@ -2714,6 +2758,7 @@ function LoyaltyDetailDrawer({ customer, orders, loyaltyBeanGoal, onClose, onAdj
   const countedCups = exact.filter((entry) => entry.order.beansAwarded === true).reduce((sum, entry) => sum + cupsOf(entry.order), 0);
   const beans = Number(customer.beans) || 0;
   const lifetimeBeans = Number(customer.lifetimeBeans) || 0;
+  const loyaltyDebt = Math.max(0, Number(customer.loyaltyDebt) || 0);
   const progress = Math.min(100, (beans / Math.max(1, loyaltyBeanGoal)) * 100);
   const redeemedCount = Number(customer.redeemedCount || customer.rewardsRedeemed) || 0;
   const nextTier = loyaltyNextTier(lifetimeBeans);
@@ -2755,6 +2800,7 @@ function LoyaltyDetailDrawer({ customer, orders, loyaltyBeanGoal, onClose, onAdj
             </div>
             <div className="loy-progress" style={{ marginTop:10 }}><span style={{ width:`${progress}%`, background:beans >= loyaltyBeanGoal ? "#16A34A" : "#2563EB" }} /></div>
             <div style={{ marginTop:9, color:POS.gray, fontSize:11.5 }}>{nextTier ? `อีก ${Math.max(0, nextTier.min - lifetimeBeans)} เมล็ด ถึงระดับ ${nextTier.label}` : "ถึงระดับสมาชิกสูงสุดแล้ว"}</div>
+            {loyaltyDebt>0&&<div style={{marginTop:9,padding:"8px 10px",borderRadius:9,background:"#FFF4E5",color:"#92400E",fontSize:11.5}}>มียอดรอหัก {loyaltyDebt} เมล็ด จากออเดอร์ที่ย้ายออกจากสถานะเสร็จหลังใช้เมล็ดไปแล้ว</div>}
           </section>
 
           <div className="loy-profile-stats">
@@ -3052,7 +3098,7 @@ function openOrderStickerPrint(orderOrOrders, shopName) {
 
 const KANBAN_NEXT_LABEL = { pending: "ยืนยันรับเงินแล้ว", preparing: "พร้อมเสิร์ฟ", ready: "เสร็จ / ลูกค้ารับแล้ว" };
 
-function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, showToast, data, ingredientsById }) {
+function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, revokeLoyaltyBeans, showToast, data, ingredientsById }) {
   const prevStatusRef = useRef({});
   const [justMovedIds, setJustMovedIds] = useState(new Set());
   const [dragId, setDragId] = useState(null);
@@ -3098,22 +3144,39 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, 
     });
   }, [orders]);
 
-  function setStatus(order, status) {
-    // ให้เมล็ดสะสมแค่ครั้งเดียวตอนเข้า "done" ครั้งแรก (กันการ์ดถูกลากออกแล้วลากกลับเข้ามาใหม่นับซ้ำ)
+  async function setStatus(order, status) {
+    // ให้/ยึดคืนเมล็ดตามการเข้า–ออก done โดยใช้ orderId เป็น idempotency key กันการเรียกซ้ำจากหลายอุปกรณ์
     const awarding = status === "done" && order.status !== "done" && !order.beansAwarded;
+    const revoking = order.status === "done" && status !== "done";
     const completing = status === "done" && order.status !== "done";
     const patch = { status };
     if (completing) {
       patch.completedAt = order.completedAt || new Date().toISOString();
       patch.completedBy = order.completedBy || uid;
     }
-    update(ref(db, `orders/${uid}/${order.id}`), patch)
-      .then(async () => {
-        if (!awarding) return;
+    if (order.status === "done" && status !== "done") {
+      patch.completedAt = null;
+      patch.completedBy = null;
+    }
+    try {
+      await update(ref(db, `orders/${uid}/${order.id}`), patch);
+      if (revoking) {
+        try {
+          const result = await revokeLoyaltyBeans(order);
+          showToast(result.cups <= 0 ? "ย้ายออเดอร์กลับแล้ว · ไม่มีเมล็ดที่ต้องยึดคืน" : result.shortfall > 0 ? `ย้ายกลับแล้ว · ยึดคืน ${result.deductedBeans} เมล็ด และพักยอด ${result.shortfall} เมล็ด` : `ย้ายกลับแล้ว · ยึดคืนเมล็ด −${result.cups}`);
+        } catch (error) {
+          // ถ้ายึดเมล็ดไม่สำเร็จ ให้คืนสถานะ done เพื่อไม่ปล่อยสถานะกับแต้มขัดกัน
+          await update(ref(db, `orders/${uid}/${order.id}`), { status:"done", completedAt:order.completedAt || new Date().toISOString(), completedBy:order.completedBy || uid });
+          throw error;
+        }
+      }
+      if (awarding) {
         const result = await awardLoyaltyBeans(order);
-        if (result.cups > 0) showToast(`ส่งมอบแล้ว · เพิ่มเมล็ดสะสม +${result.cups}`);
-      })
-      .catch((err) => showToast("อัปเดตสถานะหรือเมล็ดสะสมไม่สำเร็จ: " + err.message));
+        if (result.cups > 0) showToast(result.debtPaid > 0 ? `ส่งมอบแล้ว · เพิ่ม ${result.creditedBeans} เมล็ด และหักยอดค้าง ${result.debtPaid}` : `ส่งมอบแล้ว · เพิ่มเมล็ดสะสม +${result.cups}`);
+      }
+    } catch (err) {
+      showToast("อัปเดตสถานะหรือเมล็ดสะสมไม่สำเร็จ: " + err.message);
+    }
   }
 
   // แก้ option ได้เฉพาะตอนออเดอร์ยังไม่ยืนยันจ่ายเงิน (ก่อนตัดสต็อก/บันทึกยอดขาย) กันไม่ให้ตัวเลขสต็อก/ต้นทุนที่บันทึกไปแล้วเพี้ยน
