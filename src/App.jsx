@@ -601,7 +601,7 @@ const TABS = [
   { id: "settings", label: "Settings", icon: "settings" },
 ];
 
-function ShopApp({ uid, user }) {
+function ShopApp({ uid, user, theme, onToggleTheme }) {
   const [data, setData] = useState(null);
   const [tab, setTab] = useState("dashboard");
   const [toast, setToast] = useState(null);
@@ -1415,10 +1415,31 @@ function ShopApp({ uid, user }) {
           50% { box-shadow: 0 4px 20px rgba(178,58,46,0.6); }
         }
         .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .theme-toggle { width: 40px; height: 40px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--espresso-4); display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(0,0,0,.06); }
+        .theme-toggle:hover { background: var(--cream-2); }
+        .coffeeapp[data-theme="dark"] { color-scheme: dark; }
+        .coffeeapp[data-theme="dark"] .admin-sidebar,
+        .coffeeapp[data-theme="dark"] .admin-header { background: rgba(17,24,39,.82) !important; border-color: rgba(255,255,255,.10) !important; box-shadow: 0 10px 32px rgba(0,0,0,.28) !important; }
+        .coffeeapp[data-theme="dark"] input,
+        .coffeeapp[data-theme="dark"] select,
+        .coffeeapp[data-theme="dark"] textarea { background: var(--surface) !important; color: var(--espresso-4) !important; border-color: var(--line) !important; }
+        .coffeeapp[data-theme="dark"] [style*="background: rgb(255, 255, 255)"],
+        .coffeeapp[data-theme="dark"] [style*="background: rgba(255, 255, 255"] { background: var(--surface) !important; border-color: var(--line) !important; }
+        .coffeeapp[data-theme="dark"] [style*="color: rgb(31, 41, 55)"],
+        .coffeeapp[data-theme="dark"] [style*="color: rgb(17, 24, 39)"],
+        .coffeeapp[data-theme="dark"] [style*="color: rgb(22, 59, 115)"],
+        .coffeeapp[data-theme="dark"] [style*="color: rgb(6, 51, 96)"] { color: var(--espresso-4) !important; }
+        .coffeeapp[data-theme="dark"] .dash-card,
+        .coffeeapp[data-theme="dark"] .set-card,
+        .coffeeapp[data-theme="dark"] .set-banner-card,
+        .coffeeapp[data-theme="dark"] .promo-card,
+        .coffeeapp[data-theme="dark"] .promo-inspector,
+        .coffeeapp[data-theme="dark"] .loy-table,
+        .coffeeapp[data-theme="dark"] .acc-table { background: var(--surface) !important; border-color: var(--line) !important; }
       `}</style>
-      <div className="coffeeapp" style={{
-        "--cream": "#F4F6F4", "--cream-2": "#EBEFEA", "--surface": "#FFFFFF",
-        "--espresso-5": "#063360", "--espresso-4": "#26364A", "--espresso-3": "#5B6B7C", "--espresso-2": "#8B98A5",
+      <div className="coffeeapp" data-theme={theme} style={{
+        "--cream": theme === "dark" ? "#0B111A" : "#F4F6F4", "--cream-2": theme === "dark" ? "#1A2533" : "#EBEFEA", "--surface": theme === "dark" ? "#121B27" : "#FFFFFF",
+        "--espresso-5": theme === "dark" ? "#F4F7FB" : "#063360", "--espresso-4": theme === "dark" ? "#E5EAF1" : "#26364A", "--espresso-3": theme === "dark" ? "#B7C1CE" : "#5B6B7C", "--espresso-2": theme === "dark" ? "#8E9AAA" : "#8B98A5",
         "--sage": "#CE560D", "--sage-dark": "#A8440A", "--sage-light": "#FBEBDD",
         "--gold": "#CE560D", "--gold-dark": "#A8440A", "--gold-light": "#FBEBDD",
         "--info": "#3D6E8C", "--info-dark": "#2C5069", "--info-light": "#E4EDF2",
@@ -1426,11 +1447,11 @@ function ShopApp({ uid, user }) {
         // สถานะสำเร็จ/เปิดร้าน เพราะใช้สีส้มไม่ได้ (ดูเหมือนคำเตือน ไม่ใช่สถานะปกติ) เลขสีเดียวกับ COLORS.success ใน CustomerOrder.jsx
         "--success": "#2E9E4F", "--success-dark": "#1F7A38", "--success-light": "#DFF3E3",
         "--danger": "#B23A2E", "--danger-line": "#E7CAC5", "--danger-light": "#FAEEEC",
-        "--line": "#E4E8E5", "--line-soft": "#EEF1EF",
+        "--line": theme === "dark" ? "#2D3A4B" : "#E4E8E5", "--line-soft": theme === "dark" ? "#202C3A" : "#EEF1EF",
         "--f-display": "'Fraunces', serif", "--f-body": "'Manrope', 'Inter', sans-serif", "--f-mono": "'IBM Plex Mono', monospace",
         fontFamily: "var(--f-body)", color: "var(--espresso-4)",
         display: "flex", minHeight: "100vh",
-        background: "radial-gradient(circle at 12% 8%, #FDEBDD 0%, transparent 42%), radial-gradient(circle at 90% 12%, #DCEAE3 0%, transparent 45%), radial-gradient(circle at 50% 100%, #E4EEF5 0%, transparent 55%), var(--cream)",
+        background: theme === "dark" ? "radial-gradient(circle at 12% 8%, rgba(216,92,8,.16) 0%, transparent 42%), radial-gradient(circle at 90% 12%, rgba(37,99,235,.12) 0%, transparent 45%), var(--cream)" : "radial-gradient(circle at 12% 8%, #FDEBDD 0%, transparent 42%), radial-gradient(circle at 90% 12%, #DCEAE3 0%, transparent 45%), radial-gradient(circle at 50% 100%, #E4EEF5 0%, transparent 55%), var(--cream)",
       }}>
         <aside className="admin-sidebar" style={{
           width: sidebarCollapsed ? 68 : 236, flexShrink: 0, ...glass({ borderRadius: 0, borderRight: "1px solid rgba(255,255,255,0.7)", borderTop: "none", borderBottom: "none", borderLeft: "none" }),
@@ -1523,7 +1544,7 @@ function ShopApp({ uid, user }) {
         </aside>
 
         <main style={{ flex: 1, minWidth: 0, padding: "20px 28px 60px" }}>
-          <div style={{
+          <div className="admin-header" style={{
             display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 14, marginBottom: 22,
             ...glass({ borderRadius: 20, padding: "16px 22px" }),
           }}>
@@ -1532,6 +1553,9 @@ function ShopApp({ uid, user }) {
               <h1 style={{ margin: "2px 0 0", fontFamily: "var(--f-display)", fontWeight: 600, fontSize: "clamp(19px, 5vw, 27px)", color: "var(--espresso-5)", whiteSpace: "nowrap" }}>{activeTabInfo?.label}</h1>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <button className="theme-toggle" onClick={onToggleTheme} title={theme === "dark" ? "ใช้โหมดสว่าง" : "ใช้โหมดมืด"} aria-label={theme === "dark" ? "ใช้โหมดสว่าง" : "ใช้โหมดมืด"}>
+                <Icon name={theme === "dark" ? "sun" : "moon"} size={18} />
+              </button>
               {pendingOrderCount > 0 && (
                 <button
                   onClick={() => setTab("orders")}
@@ -1589,8 +1613,8 @@ const DASH = {
   warning: "#D97706", warningSoft: "#FFF4E5",
   danger: "#DC2626", dangerSoft: "#FDEBEB",
   caution: "#CA8A04", cautionSoft: "#FEF9E7",
-  neutral: "#374151", neutralSoft: "#F3F4F6",
-  gray: "#6B7280", border: "#ECE8E2",
+  neutral: "var(--espresso-4)", neutralSoft: "var(--cream-2)",
+  gray: "var(--espresso-3)", border: "var(--line)",
 };
 
 function DashSectionHeader({ icon, text, hint }) {
@@ -1827,8 +1851,8 @@ function EmptyNote({ text }) {
 // ดูพรีเมียมแบบ POS ร้านกาแฟระดับสูง ไม่กระทบธีมของแท็บอื่น
 const POS = {
   primary: "#D85C08", primaryDark: "#C14F06", primarySoft: "#FCE8DA",
-  navy: "#163B73", warm: "#FAF7F2", border: "#ECE8E2", gray: "#6B7280",
-  chipBg: "#F2EEE7",
+  navy: "var(--espresso-5)", warm: "var(--cream)", border: "var(--line)", gray: "var(--espresso-3)",
+  chipBg: "var(--cream-2)",
 };
 
 // ระดับสมาชิกล้อธีมคั่วกาแฟ คำนวณจาก lifetimeBeans (เมล็ดสะสมตลอดกาล ไม่ลดตอนแลกของ) — เรียงจากสูงไปต่ำ
@@ -5460,7 +5484,7 @@ const INV = {
   success: "#16A34A", successSoft: "#EAF7EE",
   warning: "#D97706", warningSoft: "#FFF4E5",
   danger: "#DC2626", dangerSoft: "#FDECEC",
-  gray: "#6B7280", ink: "#111827", border: "#ECE8E2", line: "#F1EFEA",
+  gray: "var(--espresso-3)", ink: "var(--espresso-4)", border: "var(--line)", line: "var(--line-soft)",
 };
 
 // ปิด overlay ด้วยปุ่ม Escape — ใช้ร่วมกันทุก modal/drawer ของหน้าวัตถุดิบ
@@ -7453,7 +7477,7 @@ const OPTG = {
   primary: "#2563EB", primaryDark: "#1D4ED8", primarySoft: "rgba(37,99,235,.08)",
   danger: "#DC2626", dangerSoft: "#FDEBEB",
   gold: "#D97706", goldSoft: "#FFF4E5",
-  border: "#ECE8E2", gray: "#6B7280", ink: "#1F2937", warm: "#FAF7F2",
+  border: "var(--line)", gray: "var(--espresso-3)", ink: "var(--espresso-4)", warm: "var(--cream)",
 };
 
 function OptgToggle({ checked, onChange, label, color }) {
@@ -8427,8 +8451,23 @@ function AddPlatformModal({ existingNames, onAdd, onClose }) {
 
 export default function App() {
   const [user, setUser] = useState(undefined);
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem("coffee-shop-theme");
+    if (saved === "dark" || saved === "light") return saved;
+    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
 
   const orderMatch = window.location.pathname.match(/^\/order\/([^/]+)/);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+    localStorage.setItem("coffee-shop-theme", theme);
+  }, [theme]);
+
+  function toggleTheme() {
+    setTheme((current) => current === "dark" ? "light" : "dark");
+  }
 
   useEffect(() => {
     if (orderMatch) return;
@@ -8438,7 +8477,20 @@ export default function App() {
   }, []);
 
   if (orderMatch) {
-    return <CustomerOrder shopUid={orderMatch[1]} />;
+    return (
+      <>
+        <CustomerOrder shopUid={orderMatch[1]} />
+        <button
+          type="button"
+          onClick={toggleTheme}
+          title={theme === "dark" ? "ใช้โหมดสว่าง" : "ใช้โหมดมืด"}
+          aria-label={theme === "dark" ? "ใช้โหมดสว่าง" : "ใช้โหมดมืด"}
+          style={{ position:"fixed", top:14, right:14, zIndex:120, width:42, height:42, borderRadius:13, border:theme === "dark"?"1px solid #334155":"1px solid rgba(255,255,255,.72)", background:theme === "dark"?"rgba(18,27,39,.88)":"rgba(255,255,255,.72)", color:theme === "dark"?"#F4F7FB":"#063360", backdropFilter:"blur(14px)", boxShadow:"0 8px 24px rgba(0,0,0,.14)", cursor:"pointer" }}
+        >
+          <Icon name={theme === "dark" ? "sun" : "moon"} size={19} />
+        </button>
+      </>
+    );
   }
 
   if (user === undefined) {
@@ -8451,5 +8503,5 @@ export default function App() {
 
   if (!user || user.isAnonymous) return <Login />;
 
-  return <ShopApp uid={user.uid} user={user} />;
+  return <ShopApp uid={user.uid} user={user} theme={theme} onToggleTheme={toggleTheme} />;
 }

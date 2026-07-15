@@ -130,7 +130,7 @@ const GLASS_PANEL = {
 
 function GlassBackdrop() {
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: -1, overflow: "hidden", background: "linear-gradient(160deg, #F7F1E7, #ECE1CE)" }}>
+    <div className="customer-backdrop" style={{ position: "fixed", inset: 0, zIndex: -1, overflow: "hidden", background: "linear-gradient(160deg, #F7F1E7, #ECE1CE)" }}>
       <div style={{ position: "absolute", top: "-10%", left: "-10%", width: "55%", height: "45%", borderRadius: "50%", background: "#0B4A7A", opacity: 0.35, filter: "blur(70px)", animation: "blobFloat1 16s ease-in-out infinite" }} />
       <div style={{ position: "absolute", top: "-5%", right: "-12%", width: "45%", height: "40%", borderRadius: "50%", background: "#CE560D", opacity: 0.3, filter: "blur(70px)", animation: "blobFloat2 18s ease-in-out infinite" }} />
       <div style={{ position: "absolute", bottom: "-15%", left: "20%", width: "60%", height: "50%", borderRadius: "50%", background: "#A66F42", opacity: 0.28, filter: "blur(80px)", animation: "blobFloat3 20s ease-in-out infinite" }} />
@@ -356,6 +356,20 @@ const GLOBAL_CSS = `
     50% { opacity: .4; }
   }
   .corder button:active { transform: scale(0.94); }
+  html[data-theme="dark"] .corder { color-scheme: dark; color: #E7ECF3 !important; }
+  html[data-theme="dark"] .customer-backdrop { background: linear-gradient(160deg, #08111D, #111B28) !important; }
+  html[data-theme="dark"] .customer-backdrop > div { opacity: .16 !important; }
+  html[data-theme="dark"] .corder input,
+  html[data-theme="dark"] .corder select,
+  html[data-theme="dark"] .corder textarea { background: rgba(16,26,39,.92) !important; color: #E7ECF3 !important; border-color: #344256 !important; }
+  html[data-theme="dark"] .corder [style*="background: rgb(255, 255, 255)"],
+  html[data-theme="dark"] .corder [style*="background: rgba(255, 255, 255"] { background: rgba(18,28,41,.88) !important; border-color: rgba(148,163,184,.20) !important; }
+  html[data-theme="dark"] .corder [style*="color: rgb(6, 51, 96)"],
+  html[data-theme="dark"] .corder [style*="color: rgb(11, 74, 122)"],
+  html[data-theme="dark"] .corder [style*="color: rgb(58, 85, 112)"] { color: #E7ECF3 !important; }
+  html[data-theme="dark"] .corder [style*="color: rgb(113, 137, 163)"] { color: #A9B5C5 !important; }
+  html[data-theme="dark"] .corder [style*="background: rgb(245, 240, 234)"],
+  html[data-theme="dark"] .corder [style*="background: rgb(237, 227, 210)"] { background: #111B28 !important; }
   @media (prefers-reduced-motion: reduce) {
     .banner-slide { transition-duration: 0ms; }
   }
