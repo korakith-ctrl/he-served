@@ -1552,7 +1552,7 @@ function ShopApp({ uid, user }) {
           {tab === "sell" && <SellPanel data={dataForDisplay} ingredientsById={ingredientsById} recordSale={recordSale} createInstoreOrder={createInstoreOrder} />}
           {tab === "orders" && <OrdersPanel uid={uid} orders={orders} recordSale={recordSale} cancelOrder={cancelOrder} awardLoyaltyBeans={awardLoyaltyBeans} revokeLoyaltyBeans={revokeLoyaltyBeans} showToast={showToast} data={data} ingredientsById={ingredientsById} />}
           {tab === "menus" && <MenusPanel data={dataForDisplay} ingredientsById={ingredientsById} updateData={updateData} showToast={showToast} />}
-          {tab === "promotions" && <PromotionsPanel data={data} updateData={updateData} showToast={showToast} />}
+          {tab === "promotions" && <PromotionsPanel data={data} orders={orders} updateData={updateData} showToast={showToast} />}
           {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} onSaveAccounting={saveAccountingTransaction} isAccountingPeriodClosed={isAccountingPeriodClosed} />}
           {tab === "reports" && <ReportsPanel data={dataForDisplay} orders={orders} shopName={data.settings.shopName} showToast={showToast} />}
           {tab === "accounting" && <AccountingPanel transactions={accountingTransactions} assets={accountingAssets} recurringExpenses={recurringExpenses} accounts={accountingAccounts} reconciliations={accountReconciliations} ownerReimbursements={ownerReimbursements} ownerCapitalMovements={ownerCapitalMovements} accountingSettings={accountingSettings} periodClosings={accountingPeriodClosings} sales={dataForDisplay.sales} overheadPerCup={data.settings.overheadPerCup} onSave={saveAccountingTransaction} onDelete={deleteAccountingTransaction} onSaveAsset={saveAccountingAsset} onDeleteAsset={deleteAccountingAsset} onSaveRecurring={saveRecurringExpense} onDeleteRecurring={deleteRecurringExpense} onUpdateOccurrence={updateRecurringOccurrence} onUpdateAccount={updateAccountingAccount} onSaveReconciliation={saveAccountReconciliation} onSaveOwnerReimbursement={saveOwnerReimbursement} onDeleteOwnerReimbursement={deleteOwnerReimbursement} onSaveOwnerCapitalMovement={saveOwnerCapitalMovement} onDeleteOwnerCapitalMovement={deleteOwnerCapitalMovement} onSaveSettings={saveAccountingSettings} onSetPeriodClosed={setAccountingPeriodClosed} showToast={showToast} />}
@@ -4729,7 +4729,7 @@ function PromoCard({ promo, menusById, priceNode, status, daysRemaining, moreIte
   );
 }
 
-function PromotionsPanel({ data, updateData, showToast }) {
+function PromotionsPanel({ data, orders, updateData, showToast }) {
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -5035,6 +5035,7 @@ function PromotionsPanel({ data, updateData, showToast }) {
           initialTab={inspector.tab}
           menus={data.menus}
           menusById={menusById}
+          orders={orders}
           onSave={savePromo}
           onClose={() => setInspector(null)}
           onDelete={() => setConfirmDelete(inspector.promo)}
@@ -5054,7 +5055,7 @@ function PromotionsPanel({ data, updateData, showToast }) {
   );
 }
 
-function PromoInspector({ mode, initial, initialTab, menus, menusById, onSave, onClose, onDelete }) {
+function PromoInspector({ mode, initial, initialTab, menus, menusById, orders, onSave, onClose, onDelete }) {
   const [form, setForm] = useState({
     type: "single", minQty: 2, chooseCount: 2, startAt: null, endAt: null,
     ...initial, menuIds: initial.menuIds || [],
@@ -5113,7 +5114,7 @@ function PromoInspector({ mode, initial, initialTab, menus, menusById, onSave, o
           {tab === "menus" && <PromoMenusTab form={form} menus={menus} toggleMenu={toggleMenu} />}
           {tab === "pricing" && <PromoPricingTab form={form} setForm={setForm} menusById={menusById} originalTotal={originalTotal} promoTotal={promoTotal} qtyMenu={qtyMenu} qtySetPrice={qtySetPrice} />}
           {tab === "schedule" && <PromoScheduleTab form={form} setForm={setForm} />}
-          {tab === "analytics" && <PromoAnalyticsTab />}
+          {tab === "analytics" && <PromoAnalyticsTab promo={form} orders={orders} menusById={menusById} mode={mode} />}
           {tab === "settings" && <PromoSettingsTab form={form} setForm={setForm} />}
         </div>
 
@@ -5275,14 +5276,121 @@ function PromoScheduleTab({ form, setForm }) {
   );
 }
 
-function PromoAnalyticsTab() {
+function promoAnalyticsItems(order) {
+  if (Array.isArray(order.items)) return order.items.filter(Boolean);
+  return Object.values(order.items || {}).filter(Boolean);
+}
+
+function lineBelongsToPromo(line, promoId) {
+  if (!promoId || !line) return false;
+  if (line.promoGroupId === promoId || line.promoId === promoId) return true;
+  // ออเดอร์ choice รุ่นแรกใช้ promoId เป็น `${promotionId}_${setId}` ก่อนมี promoGroupId
+  return line.promoKind === "choice" && String(line.promoId || "").startsWith(`${promoId}_`);
+}
+
+function promoUsageCount(promo, lines) {
+  const kind = promo.type || "single";
+  if (kind === "choice") return new Set(lines.map((line) => line.promoId).filter(Boolean)).size;
+  if (kind === "bundle") return Math.max(0, ...lines.map((line) => Number(line.qty) || 0));
+  const quantity = lines.reduce((sum, line) => sum + (Number(line.qty) || 0), 0);
+  return kind === "qty" ? Math.floor(quantity / Math.max(1, Number(promo.minQty) || 2)) : quantity;
+}
+
+function PromoAnalyticsTab({ promo, orders, menusById, mode }) {
+  const [range, setRange] = useState("30");
+  const analytics = useMemo(() => {
+    if (!promo.id) return { rows: [], uses: 0, revenue: 0, savings: 0, cups: 0 };
+    const cutoff = range === "all" ? 0 : Date.now() - Number(range) * 86400000;
+    const rows = [];
+    for (const order of orders || []) {
+      // นับเฉพาะออเดอร์ที่ร้านยืนยันแล้ว เพื่อไม่ให้ยอดจากรายการรอจ่ายหรือยกเลิกปนกับยอดใช้งานจริง
+      if (!["paid", "preparing", "ready", "done"].includes(order.status) && !order.saleRecorded) continue;
+      const timestamp = new Date(order.createdAt || order.completedAt || 0).getTime();
+      if (!Number.isFinite(timestamp) || timestamp < cutoff) continue;
+      const lines = promoAnalyticsItems(order).filter((line) => lineBelongsToPromo(line, promo.id));
+      if (lines.length === 0) continue;
+      const uses = promoUsageCount(promo, lines);
+      const revenue = lines.reduce((sum, line) => sum + (Number(line.unitPrice) || 0) * (Number(line.qty) || 0), 0);
+      const original = lines.reduce((sum, line) => {
+        const menu = menusById[line.menuId];
+        const optionDelta = (Array.isArray(line.options) ? line.options : Object.values(line.options || {}))
+          .reduce((optionSum, option) => optionSum + (Number(option?.priceDelta) || 0), 0);
+        const normalUnitPrice = Number(line.originalUnitPrice) || ((Number(menu?.priceStore) || 0) + optionDelta);
+        return sum + normalUnitPrice * (Number(line.qty) || 0);
+      }, 0);
+      rows.push({
+        id: order.id,
+        createdAt: order.createdAt || order.completedAt,
+        customerName: order.customerName || order.customerPhone || "ลูกค้า",
+        uses,
+        cups: lines.reduce((sum, line) => sum + (Number(line.qty) || 0), 0),
+        revenue,
+        savings: Math.max(0, original - revenue),
+      });
+    }
+    rows.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return rows.reduce((summary, row) => ({
+      rows: summary.rows,
+      uses: summary.uses + row.uses,
+      cups: summary.cups + row.cups,
+      revenue: summary.revenue + row.revenue,
+      savings: summary.savings + row.savings,
+    }), { rows, uses: 0, cups: 0, revenue: 0, savings: 0 });
+  }, [promo.id, promo.type, promo.minQty, orders, menusById, range]);
+
+  if (mode === "add" || !promo.id) {
+    return <EmptyNote text="บันทึกโปรโมชั่นก่อน แล้วระบบจะแสดงสถิติการใช้งานจากออเดอร์ที่ยืนยันแล้วในแท็บนี้" />;
+  }
+
+  const statCard = (label, value, icon, tone = POS.primary) => (
+    <div style={{ padding: 14, border: `1px solid ${POS.border}`, borderRadius: 13, background: "#fff", minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#9C9690", fontSize: 11.5, marginBottom: 7 }}><Icon name={icon} size={13} /> {label}</div>
+      <div style={{ color: tone, fontSize: 20, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis" }}>{value}</div>
+    </div>
+  );
+
   return (
-    <div style={{ textAlign: "center", padding: "32px 8px" }}>
-      <Icon name="chart-bar" size={26} style={{ color: "#9C9690" }} />
-      <p style={{ fontSize: 13.5, fontWeight: 600, color: "#1F2937", margin: "12px 0 4px" }}>ยังไม่มีข้อมูลสถิติ</p>
-      <p style={{ fontSize: 12, color: "#9C9690", margin: 0, lineHeight: 1.6, maxWidth: 320, marginLeft: "auto", marginRight: "auto" }}>
-        ระบบยังไม่ได้เก็บข้อมูลจำนวนครั้งที่ใช้/ยอดขายแยกรายโปรโมชั่น (ยอดขายที่ผ่านโปรฯ ในปัจจุบันจะรวมอยู่ในยอดขายปกติ)
-      </p>
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16 }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: POS.navy }}>ผลการใช้งานโปรโมชั่น</div>
+          <div style={{ fontSize: 11.5, color: "#9C9690", marginTop: 2 }}>นับจากออเดอร์ที่ร้านยืนยันแล้ว</div>
+        </div>
+        <select className="promo-select" style={{ height: 38, fontSize: 12.5 }} value={range} onChange={(event) => setRange(event.target.value)} aria-label="ช่วงเวลาสถิติโปรโมชั่น">
+          <option value="7">7 วันล่าสุด</option>
+          <option value="30">30 วันล่าสุด</option>
+          <option value="90">90 วันล่าสุด</option>
+          <option value="all">ทั้งหมด</option>
+        </select>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        {statCard("ใช้โปรแล้ว", `${analytics.uses} ครั้ง`, "discount")}
+        {statCard("ยอดจากโปร", `฿${money(analytics.revenue)}`, "cash", "#15803D")}
+        {statCard("สินค้าที่ขาย", `${analytics.cups} ชิ้น`, "cup", POS.navy)}
+        {statCard("ลูกค้าประหยัด", `฿${money(analytics.savings)}`, "chart-line", "#B45309")}
+      </div>
+
+      <div style={{ marginTop: 20, fontSize: 12, fontWeight: 700, color: POS.navy }}>ออเดอร์ล่าสุด ({analytics.rows.length})</div>
+      {analytics.rows.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "28px 8px", color: "#9C9690" }}>
+          <Icon name="chart-bar" size={24} />
+          <p style={{ fontSize: 12.5, margin: "9px 0 0" }}>ยังไม่มีการใช้โปรโมชั่นในช่วงเวลานี้</p>
+        </div>
+      ) : (
+        <div style={{ marginTop: 9, border: `1px solid ${POS.border}`, borderRadius: 13, overflow: "hidden" }}>
+          {analytics.rows.slice(0, 20).map((row, index) => (
+            <div key={row.id} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, padding: "11px 12px", borderBottom: index < Math.min(analytics.rows.length, 20) - 1 ? `1px solid ${POS.border}` : "none" }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ color: "#1F2937", fontSize: 12.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.customerName}</div>
+                <div style={{ color: "#9C9690", fontSize: 10.5, marginTop: 2 }}>{new Date(row.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })} · ใช้ {row.uses} ครั้ง</div>
+              </div>
+              <div style={{ color: "#15803D", fontSize: 12.5, fontWeight: 700, textAlign: "right" }}>฿{money(row.revenue)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      <p style={{ color: "#9C9690", fontSize: 10.5, lineHeight: 1.5, margin: "12px 2px 0" }}>ยอดประหยัดของออเดอร์เก่าคำนวณเทียบกับราคาปัจจุบันของเมนู ส่วนออเดอร์ใหม่จะใช้ราคาปกติที่บันทึกไว้ตอนสั่งซื้อ</p>
     </div>
   );
 }

@@ -993,9 +993,13 @@ export default function CustomerOrder({ shopUid }) {
   }
 
   function addToCart(menu, qty, options, priceOverride, promoId, promoKind) {
+    const optionDelta = options.reduce((s, o) => s + (o.priceDelta || 0), 0);
     const base = priceOverride !== undefined ? priceOverride : menu.priceStore;
-    const unitPrice = base + options.reduce((s, o) => s + (o.priceDelta || 0), 0);
-    setCart((c) => [...c, { lineId: genLineId(), menuId: menu.id, name: menu.name, unitPrice, qty, options, promoId: promoId || null, promoKind: promoKind || null }]);
+    const unitPrice = base + optionDelta;
+    setCart((c) => [...c, {
+      lineId: genLineId(), menuId: menu.id, name: menu.name, unitPrice, originalUnitPrice: menu.priceStore + optionDelta,
+      qty, options, promoId: promoId || null, promoGroupId: promoId || null, promoKind: promoKind || null,
+    }]);
   }
 
   function bundleQtyInCart(promo) {
@@ -1018,7 +1022,9 @@ export default function CustomerOrder({ shopUid }) {
         const optionDelta = opts.reduce((s, o) => s + (o.priceDelta || 0), 0);
         return {
           lineId: existing ? existing.lineId : genLineId(),
-          menuId: p.menuId, name: p.name, unitPrice: p.unitPrice + optionDelta, qty, options: opts, promoId: promo.id, promoKind: "bundle",
+          menuId: p.menuId, name: p.name, unitPrice: p.unitPrice + optionDelta,
+          originalUnitPrice: (Number(menusById[p.menuId]?.priceStore) || 0) + optionDelta,
+          qty, options: opts, promoId: promo.id, promoGroupId: promo.id, promoKind: "bundle",
         };
       });
       return [...others, ...newLines];
@@ -1080,6 +1086,7 @@ export default function CustomerOrder({ shopUid }) {
         const optionDelta = opts.reduce((s, o) => s + (o.priceDelta || 0), 0);
         return {
           lineId: genLineId(), menuId: p.menuId, name: p.name, unitPrice: p.unitPrice + optionDelta, options: opts, qty: 1,
+          originalUnitPrice: (Number(menusById[p.menuId]?.priceStore) || 0) + optionDelta,
           promoId: setId, promoKind: "choice", promoGroupId: promo.id,
         };
       }),
