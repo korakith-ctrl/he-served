@@ -1398,7 +1398,7 @@ function ShopApp({ uid, user, theme, onToggleTheme }) {
         .coffeeapp * { box-sizing: border-box; }
         .coffeeapp button { font-family: inherit; cursor: pointer; }
         .coffeeapp input, .coffeeapp select { font-family: inherit; }
-        .cbtn { border: 1px solid var(--line); background: #fff; color: var(--espresso-4); border-radius: 9px; padding: 8px 14px; font-size: 13px; font-weight: 500; transition: background .15s ease, border-color .15s ease; }
+        .cbtn { border: 1px solid var(--line); background: var(--surface); color: var(--espresso-4); border-radius: 9px; padding: 8px 14px; font-size: 13px; font-weight: 500; transition: background .15s ease, border-color .15s ease; }
         .cbtn:hover { background: var(--cream-2); }
         .cbtn:active { transform: scale(0.97); }
         .cbtn-accent { background: var(--sage); color: #fff; border-color: var(--sage); }
@@ -1407,11 +1407,11 @@ function ShopApp({ uid, user, theme, onToggleTheme }) {
         .cbtn-danger:hover { background: var(--danger-line); }
         .cbtn-edit { color: var(--info-dark); border-color: var(--info); background: var(--info-light); }
         .cbtn-edit:hover { background: var(--info); color: #fff; }
-        .cfield { border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font-size: 13px; background: #fff; color: var(--espresso-4); width: 100%; }
+        .cfield { border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font-size: 13px; background: var(--surface); color: var(--espresso-4); width: 100%; }
         .cfield:focus { outline: 2px solid var(--sage); outline-offset: 1px; }
         .navitem { border: none; border-left: 3px solid transparent; background: transparent; color: var(--espresso-3); padding: 11px 14px 11px 12px; margin: 1px 0; font-family: var(--f-body); font-size: 13.5px; font-weight: 500; border-radius: 10px; display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; transition: background .15s ease, color .15s ease, border-color .15s ease; }
-        .navitem:hover { background: rgba(37,99,235,.06); color: #1D4ED8; }
-        .navitem.active { background: rgba(37,99,235,.08); border-left-color: #2563EB; color: #1D4ED8; font-weight: 700; }
+        .navitem:hover { background: rgba(37,99,235,.06); color: var(--primary-text); }
+        .navitem.active { background: rgba(37,99,235,.08); border-left-color: #2563EB; color: var(--primary-text); font-weight: 700; }
         table.cdata { width: 100%; border-collapse: collapse; font-size: 13px; }
         table.cdata th { text-align: left; font-weight: 500; color: var(--espresso-2); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
         table.cdata td { padding: 8px; border-bottom: 1px solid var(--line-soft); }
@@ -1456,13 +1456,21 @@ function ShopApp({ uid, user, theme, onToggleTheme }) {
       <div className="coffeeapp" data-theme={theme} style={{
         "--cream": theme === "dark" ? "#0B111A" : "#F4F6F4", "--cream-2": theme === "dark" ? "#1A2533" : "#EBEFEA", "--surface": theme === "dark" ? "#121B27" : "#FFFFFF",
         "--espresso-5": theme === "dark" ? "#F4F7FB" : "#063360", "--espresso-4": theme === "dark" ? "#E5EAF1" : "#26364A", "--espresso-3": theme === "dark" ? "#B7C1CE" : "#5B6B7C", "--espresso-2": theme === "dark" ? "#8E9AAA" : "#8B98A5",
-        "--sage": "#CE560D", "--sage-dark": "#A8440A", "--sage-light": "#FBEBDD",
-        "--gold": "#CE560D", "--gold-dark": "#A8440A", "--gold-light": "#FBEBDD",
-        "--info": "#3D6E8C", "--info-dark": "#2C5069", "--info-light": "#E4EDF2",
+        "--sage": "#CE560D", "--sage-dark": theme === "dark" ? "#FF9A58" : "#A8440A", "--sage-light": theme === "dark" ? "rgba(216,92,8,.20)" : "#FBEBDD",
+        "--gold": "#CE560D", "--gold-dark": theme === "dark" ? "#FF9A58" : "#A8440A", "--gold-light": theme === "dark" ? "rgba(216,92,8,.20)" : "#FBEBDD",
+        "--info": "#3D6E8C", "--info-dark": theme === "dark" ? "#93C5FD" : "#2C5069", "--info-light": theme === "dark" ? "rgba(59,130,246,.18)" : "#E4EDF2",
         // "--sage"/"--gold" ทั้งคู่คือสีส้มแบรนด์ (ดูคอมเมนต์บรรทัดถัดไป) — ต้องมีโทนเขียวแยกต่างหากไว้ใช้กับ
         // สถานะสำเร็จ/เปิดร้าน เพราะใช้สีส้มไม่ได้ (ดูเหมือนคำเตือน ไม่ใช่สถานะปกติ) เลขสีเดียวกับ COLORS.success ใน CustomerOrder.jsx
-        "--success": "#2E9E4F", "--success-dark": "#1F7A38", "--success-light": "#DFF3E3",
-        "--danger": "#B23A2E", "--danger-line": "#E7CAC5", "--danger-light": "#FAEEEC",
+        "--success": "#2E9E4F", "--success-dark": theme === "dark" ? "#6EE7A0" : "#1F7A38", "--success-light": theme === "dark" ? "rgba(34,197,94,.16)" : "#DFF3E3",
+        "--danger": theme === "dark" ? "#F87171" : "#B23A2E", "--danger-line": theme === "dark" ? "rgba(248,113,113,.38)" : "#E7CAC5", "--danger-light": theme === "dark" ? "rgba(239,68,68,.16)" : "#FAEEEC",
+        "--warning-light": theme === "dark" ? "rgba(245,158,11,.16)" : "#FFF4E5", "--warning-text": theme === "dark" ? "#FBBF24" : "#92400E",
+        "--primary-text": theme === "dark" ? "#7DA2FF" : "#1D4ED8", "--purple-light": theme === "dark" ? "rgba(168,85,247,.18)" : "#F3E8FF",
+        "--avatar-blue-bg": theme === "dark" ? "rgba(59,130,246,.20)" : "#DBEAFE", "--avatar-blue-fg": theme === "dark" ? "#93C5FD" : "#1E3A8A",
+        "--avatar-green-bg": theme === "dark" ? "rgba(34,197,94,.18)" : "#DCFCE7", "--avatar-green-fg": theme === "dark" ? "#86EFAC" : "#14532D",
+        "--avatar-purple-bg": theme === "dark" ? "rgba(168,85,247,.20)" : "#EDE9FE", "--avatar-purple-fg": theme === "dark" ? "#D8B4FE" : "#4C1D95",
+        "--avatar-pink-bg": theme === "dark" ? "rgba(236,72,153,.18)" : "#FCE7F3", "--avatar-pink-fg": theme === "dark" ? "#F9A8D4" : "#831843",
+        "--avatar-orange-bg": theme === "dark" ? "rgba(249,115,22,.18)" : "#FFEDD5", "--avatar-orange-fg": theme === "dark" ? "#FDBA74" : "#7C2D12",
+        "--avatar-teal-bg": theme === "dark" ? "rgba(20,184,166,.18)" : "#CCFBF1", "--avatar-teal-fg": theme === "dark" ? "#5EEAD4" : "#134E4A",
         "--line": theme === "dark" ? "#2D3A4B" : "#E4E8E5", "--line-soft": theme === "dark" ? "#202C3A" : "#EEF1EF",
         "--f-display": "'Fraunces', serif", "--f-body": "'Manrope', 'Inter', sans-serif", "--f-mono": "'IBM Plex Mono', monospace",
         fontFamily: "var(--f-body)", color: "var(--espresso-4)",
@@ -1624,11 +1632,11 @@ function ChannelPill({ channel }) {
 // โทนสีเฉพาะหน้าภาพรวม (Dashboard) — ระบบสีความหมาย (semantic) แยกจาก --sage/--gold ของแท็บอื่นที่จริงๆ เป็นสีส้มล้วน
 // ตามที่ตั้งใจให้หน้านี้ลดการใช้สีส้มลง ใช้น้ำเงินเป็นสีหลักของปุ่ม/สถานะ interactive แทน
 const DASH = {
-  primary: "#2563EB", primaryDark: "#1D4ED8", primarySoft: "rgba(37,99,235,.08)",
-  success: "#16A34A", successSoft: "#EAF7EE",
-  warning: "#D97706", warningSoft: "#FFF4E5",
-  danger: "#DC2626", dangerSoft: "#FDEBEB",
-  caution: "#CA8A04", cautionSoft: "#FEF9E7",
+  primary: "#2563EB", primaryDark: "var(--primary-text)", primarySoft: "rgba(37,99,235,.12)",
+  success: "#16A34A", successSoft: "var(--success-light)",
+  warning: "#D97706", warningSoft: "var(--warning-light)",
+  danger: "#DC2626", dangerSoft: "var(--danger-light)",
+  caution: "#CA8A04", cautionSoft: "var(--warning-light)",
   neutral: "var(--espresso-4)", neutralSoft: "var(--cream-2)",
   gray: "var(--espresso-3)", border: "var(--line)",
 };
@@ -1640,7 +1648,7 @@ function DashSectionHeader({ icon, text, hint }) {
         <div style={{ width: 26, height: 26, borderRadius: 8, background: DASH.neutralSoft, color: DASH.neutral, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           <Icon name={icon} size={14} />
         </div>
-        <span style={{ fontSize: 15, fontWeight: 700, color: "#111827" }}>{text}</span>
+        <span style={{ fontSize: 15, fontWeight: 700, color: "var(--espresso-4)" }}>{text}</span>
       </div>
       {hint && <p style={{ fontSize: 12, color: DASH.gray, margin: "4px 0 0 34px", lineHeight: 1.5 }}>{hint}</p>}
     </div>
@@ -1649,11 +1657,11 @@ function DashSectionHeader({ icon, text, hint }) {
 
 function DashKpiCard({ icon, label, value, sub, tone, big }) {
   const tones = {
-    primary: { fg: DASH.primaryDark, iconBg: "#fff", iconFg: DASH.primary, bg: DASH.primarySoft, border: "rgba(37,99,235,.18)" },
-    success: { fg: DASH.success, iconBg: DASH.successSoft, iconFg: DASH.success, bg: "#fff", border: DASH.border },
-    warning: { fg: DASH.warning, iconBg: DASH.warningSoft, iconFg: DASH.warning, bg: "#fff", border: DASH.border },
-    danger: { fg: DASH.danger, iconBg: DASH.dangerSoft, iconFg: DASH.danger, bg: "#fff", border: DASH.border },
-    neutral: { fg: DASH.neutral, iconBg: DASH.neutralSoft, iconFg: DASH.neutral, bg: "#fff", border: DASH.border },
+    primary: { fg: DASH.primaryDark, iconBg: "var(--surface)", iconFg: DASH.primary, bg: DASH.primarySoft, border: "rgba(37,99,235,.18)" },
+    success: { fg: DASH.success, iconBg: DASH.successSoft, iconFg: DASH.success, bg: "var(--surface)", border: DASH.border },
+    warning: { fg: DASH.warning, iconBg: DASH.warningSoft, iconFg: DASH.warning, bg: "var(--surface)", border: DASH.border },
+    danger: { fg: DASH.danger, iconBg: DASH.dangerSoft, iconFg: DASH.danger, bg: "var(--surface)", border: DASH.border },
+    neutral: { fg: DASH.neutral, iconBg: DASH.neutralSoft, iconFg: DASH.neutral, bg: "var(--surface)", border: DASH.border },
   };
   const t = tones[tone] || tones.neutral;
   return (
@@ -1680,16 +1688,16 @@ function DashStockAlertCard({ ing }) {
   const ratio = ing.stockQty / (ing.lowStockThreshold || 1);
   const tier = ing.stockQty <= 0 ? "critical" : ratio <= 0.5 ? "low" : "normal";
   const tones = {
-    critical: { bg: DASH.dangerSoft, color: "#B91C1C", icon: "alert-octagon", label: "วิกฤต" },
-    low: { bg: DASH.warningSoft, color: "#B45309", icon: "alert-triangle", label: "ต่ำ" },
-    normal: { bg: DASH.cautionSoft, color: "#92702A", icon: "alert-circle", label: "ใกล้หมด" },
+    critical: { bg: DASH.dangerSoft, color: "var(--danger)", icon: "alert-octagon", label: "วิกฤต" },
+    low: { bg: DASH.warningSoft, color: "var(--warning-text)", icon: "alert-triangle", label: "ต่ำ" },
+    normal: { bg: DASH.cautionSoft, color: "var(--warning-text)", icon: "alert-circle", label: "ใกล้หมด" },
   };
   const t = tones[tier];
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, background: t.bg, borderRadius: 12, padding: "9px 12px" }}>
       <Icon name={t.icon} size={15} style={{ color: t.color, flexShrink: 0 }} />
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "#1F2937", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ing.name}</div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--espresso-4)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ing.name}</div>
         <div style={{ fontSize: 11.5, color: t.color, fontWeight: 600 }}>เหลือ {ing.stockQty} {UNITS[ing.unit]}</div>
       </div>
       <span style={{ fontSize: 10, fontWeight: 700, color: t.color, background: "rgba(255,255,255,.6)", borderRadius: 999, padding: "2px 8px", flexShrink: 0 }}>{t.label}</span>
@@ -1705,7 +1713,7 @@ function DashRankCard({ rank, name, qty, maxQty }) {
     <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0" }}>
       <span style={{ fontSize: 19, flexShrink: 0, width: 26, textAlign: "center" }}>{medals[rank] || rank + 1}</span>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 13.5, fontWeight: 600, color: "#1F2937", marginBottom: 5 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 13.5, fontWeight: 600, color: "var(--espresso-4)", marginBottom: 5 }}>
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
           <span style={{ color: DASH.gray, fontWeight: 500, fontSize: 12, flexShrink: 0, marginLeft: 8 }}>{qty} แก้ว</span>
         </div>
@@ -1771,7 +1779,7 @@ function Dashboard({ data, setTab }) {
         .dash-main-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 20px; align-items: start; }
         @media (max-width: 900px) { .dash-main-grid { grid-template-columns: minmax(0, 1fr); } }
         .dash-col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
-        .dash-card { background: #fff; border: 1px solid ${DASH.border}; border-radius: 16px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,.05); }
+        .dash-card { background: var(--surface); border: 1px solid ${DASH.border}; border-radius: 16px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,.05); }
         .dash-link-btn { display: inline-flex; align-items: center; gap: 4px; border: none; background: none; color: ${DASH.primary}; font-size: 12.5px; font-weight: 700; cursor: pointer; padding: 6px 0; min-height: 44px; }
         .dash-link-btn:hover { color: ${DASH.primaryDark}; }
       `}</style>
@@ -1866,7 +1874,7 @@ function EmptyNote({ text }) {
 // พาเลตสีเฉพาะหน้าขายเครื่องดื่ม (POS) — แยกจากธีม sage/espresso ของแอดมินหน้าอื่นๆ ตามที่ตั้งใจให้หน้านี้
 // ดูพรีเมียมแบบ POS ร้านกาแฟระดับสูง ไม่กระทบธีมของแท็บอื่น
 const POS = {
-  primary: "#D85C08", primaryDark: "#C14F06", primarySoft: "#FCE8DA",
+  primary: "#D85C08", primaryDark: "#C14F06", primarySoft: "var(--sage-light)",
   navy: "var(--espresso-5)", warm: "var(--cream)", border: "var(--line)", gray: "var(--espresso-3)",
   chipBg: "var(--cream-2)",
 };
@@ -1875,7 +1883,7 @@ const POS = {
 // เพื่อหาระดับปัจจุบันง่ายๆ ด้วย .find() ตัวแรกที่ min ต่ำกว่าหรือเท่ากับที่มี เป็นแค่ป้ายแสดงสถานะ ยังไม่มีสิทธิพิเศษผูกกับระดับ
 // Tier ใช้ label ขนาดเล็กและสีอ่อน เพื่อแยกชั้นข้อมูลออกจาก status badge ที่เน้นการดำเนินการ
 const LOYALTY_TIERS = [
-  { id: "reserve", label: "Reserve", shortLabel: "Reserve", min: 100, color: "#7A5A00", bg: "#FFF9E5", border: "#E8D28B" },
+  { id: "reserve", label: "Reserve", shortLabel: "Reserve", min: 100, color: "var(--warning-text)", bg: "#FFF9E5", border: "#E8D28B" },
   { id: "dark", label: "Dark Roast", shortLabel: "Dark", min: 50, color: "#5B3824", bg: "#F7F1EC", border: "#DDCBBE" },
   { id: "medium", label: "Medium Roast", shortLabel: "Medium", min: 20, color: "#9A5B13", bg: "#FFF8ED", border: "#F1D7AD" },
   { id: "light", label: "Light Roast", shortLabel: "Light", min: 0, color: "#475569", bg: "#F8FAFC", border: "#E2E8F0" },
@@ -1902,7 +1910,7 @@ function Segmented({ options, value, onChange, dense }) {
               border: "none", cursor: o.disabled ? "not-allowed" : "pointer",
               padding: dense ? "6px 11px" : "9px 16px", minHeight: dense ? 32 : 44,
               borderRadius: dense ? 8 : 11, fontSize: dense ? 12.5 : 13.5, fontWeight: 600,
-              background: active ? "#fff" : "transparent",
+              background: active ? "var(--surface)" : "transparent",
               color: active ? POS.navy : "#8B8680",
               boxShadow: active ? "0 2px 6px rgba(0,0,0,0.08)" : "none",
               opacity: o.disabled ? 0.4 : 1,
@@ -1934,7 +1942,7 @@ function PosProductThumb({ src, size = 84 }) {
 
 function PosStatPill({ icon, label, value, accent }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 9, background: "#fff", border: `1px solid ${POS.border}`, borderRadius: 14, padding: "7px 13px 7px 9px" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 9, background: "var(--surface)", border: `1px solid ${POS.border}`, borderRadius: 14, padding: "7px 13px 7px 9px" }}>
       <div style={{
         width: 30, height: 30, borderRadius: 10, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
         background: accent ? POS.primary : POS.chipBg, color: accent ? "#fff" : POS.navy,
@@ -1969,7 +1977,7 @@ function PosOptionGroup({ group, selected, onPick }) {
           onChange={(e) => { const c = group.choices.find((x) => x.id === e.target.value); if (c) onPick(group, c); }}
           style={{
             width: "100%", padding: "9px 11px", borderRadius: 12, border: `1px solid ${POS.border}`,
-            fontSize: 13.5, background: "#fff", color: POS.navy, fontWeight: 500, cursor: "pointer",
+            fontSize: 13.5, background: "var(--surface)", color: POS.navy, fontWeight: 500, cursor: "pointer",
           }}
         >
           <option value="" disabled>เลือก{group.name}</option>
@@ -2089,12 +2097,12 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
         .pos-card:hover { transform: translateY(-3px) scale(1.01); box-shadow: 0 16px 40px rgba(0,0,0,.10); }
         .pos-info-btn {
           position: absolute; top: 14px; right: 14px; width: 28px; height: 28px; border-radius: 9px;
-          border: 1px solid ${POS.border}; background: #fff; color: ${POS.gray}; display: flex; align-items: center;
+          border: 1px solid ${POS.border}; background: var(--surface); color: ${POS.gray}; display: flex; align-items: center;
           justify-content: center; cursor: pointer; transition: all 200ms ease; z-index: 3;
         }
         .pos-info-btn:hover { background: ${POS.chipBg}; color: ${POS.navy}; }
-        .pos-stepper { display: flex; align-items: center; border: 1px solid ${POS.border}; border-radius: 14px; overflow: hidden; background: #fff; }
-        .pos-stepper button { width: 38px; height: 46px; border: none; background: #fff; color: ${POS.navy}; font-size: 17px; cursor: pointer; transition: background 200ms ease; }
+        .pos-stepper { display: flex; align-items: center; border: 1px solid ${POS.border}; border-radius: 14px; overflow: hidden; background: var(--surface); }
+        .pos-stepper button { width: 38px; height: 46px; border: none; background: var(--surface); color: ${POS.navy}; font-size: 17px; cursor: pointer; transition: background 200ms ease; }
         .pos-stepper button:hover { background: ${POS.chipBg}; }
         .pos-stepper span { min-width: 26px; text-align: center; font-weight: 700; font-size: 14px; color: ${POS.navy}; }
         .pos-add-btn {
@@ -2104,16 +2112,16 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
         }
         .pos-add-btn:hover:not(:disabled) { background: ${POS.primaryDark}; transform: translateY(-1px); }
         .pos-add-btn:active:not(:disabled) { transform: scale(0.97); }
-        .pos-add-btn:disabled { background: #E6DFD3; color: #A99C8A; cursor: not-allowed; }
-        .pos-warn-btn { display: flex; align-items: center; gap: 5px; width: 100%; text-align: left; border: 1px solid #FBD5B5; background: #FFF4EA; color: #B45309; border-radius: 10px; padding: 6px 10px; font-size: 11.5px; font-weight: 600; cursor: pointer; transition: background 200ms ease; }
-        .pos-warn-btn:hover { background: #FEE9D6; }
+        .pos-add-btn:disabled { background: var(--cream-2); color: var(--espresso-2); cursor: not-allowed; }
+        .pos-warn-btn { display: flex; align-items: center; gap: 5px; width: 100%; text-align: left; border: 1px solid #FBD5B5; background: var(--warning-light); color: var(--warning-text); border-radius: 10px; padding: 6px 10px; font-size: 11.5px; font-weight: 600; cursor: pointer; transition: background 200ms ease; }
+        .pos-warn-btn:hover { background: var(--warning-light); }
         .pos-cart { position: sticky; top: 10px; background: ${POS.warm}; border: 1px solid ${POS.border}; border-radius: 24px; padding: 18px; box-shadow: 0 10px 30px rgba(0,0,0,.06); display: flex; flex-direction: column; max-height: calc(100vh - 40px); }
       `}</style>
 
       {/* หัวข้อหน้า + สถิติวันนี้ + จำนวนในตะกร้า — ข้อมูลจริงทั้งหมดจาก data.sales/ตะกร้าปัจจุบัน ไม่มีตัวเลขสมมติ */}
       <div style={{
         display: "flex", flexWrap: "wrap", gap: 14, alignItems: "center", justifyContent: "space-between",
-        background: "#fff", border: `1px solid ${POS.border}`, borderRadius: 22, padding: "16px 20px", marginBottom: 18,
+        background: "var(--surface)", border: `1px solid ${POS.border}`, borderRadius: 22, padding: "16px 20px", marginBottom: 18,
       }}>
         <div>
           <div style={{ fontSize: 13, color: POS.gray, fontWeight: 600 }}>วันนี้</div>
@@ -2139,7 +2147,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
         {channel === "delivery" && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <select value={platformId} onChange={(e) => setPlatformId(e.target.value)} style={{
-              padding: "9px 12px", borderRadius: 12, border: `1px solid ${POS.border}`, fontSize: 13.5, background: "#fff", color: POS.navy, fontWeight: 500,
+              padding: "9px 12px", borderRadius: 12, border: `1px solid ${POS.border}`, fontSize: 13.5, background: "var(--surface)", color: POS.navy, fontWeight: 500,
             }}>
               {data.settings.platforms.map((p) => <option key={p.id} value={p.id}>{p.name} (GP {p.gpPercent}%)</option>)}
             </select>
@@ -2184,7 +2192,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
                 </button>
                 {infoFor === menu.id && (
                   <div style={{
-                    position: "absolute", top: 46, right: 14, zIndex: 5, background: "#fff", border: `1px solid ${POS.border}`,
+                    position: "absolute", top: 46, right: 14, zIndex: 5, background: "var(--surface)", border: `1px solid ${POS.border}`,
                     borderRadius: 14, padding: "10px 14px", boxShadow: "0 10px 30px rgba(0,0,0,.14)", fontSize: 12,
                     color: "#374151", display: "flex", flexDirection: "column", gap: 3, minWidth: 170,
                   }}>
@@ -2226,7 +2234,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
                       <Icon name={isWarnOpen ? "chevron-up" : "chevron-down"} size={12} style={{ marginLeft: "auto" }} />
                     </button>
                     {isWarnOpen && (
-                      <div style={{ fontSize: 11, color: "#92400E", marginTop: 4, paddingLeft: 4, lineHeight: 1.5 }}>
+                      <div style={{ fontSize: 11, color: "var(--warning-text)", marginTop: 4, paddingLeft: 4, lineHeight: 1.5 }}>
                         {!ok && <div>สต็อกวัตถุดิบไม่พอ (รวมของในตะกร้าแล้ว ยังหยิบเพิ่มได้ แต่สต็อกจะติดลบ)</div>}
                         {missingRequired && <div>กรุณาเลือกตัวเลือกที่จำเป็นให้ครบก่อนหยิบใส่ตะกร้า</div>}
                       </div>
@@ -2266,7 +2274,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
           ) : (
             <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10, marginBottom: 12, paddingRight: 2 }}>
               {cart.map((line) => (
-                <div key={line.cartId} style={{ background: "#fff", border: `1px solid ${POS.border}`, borderRadius: 14, padding: 10 }}>
+                <div key={line.cartId} style={{ background: "var(--surface)", border: `1px solid ${POS.border}`, borderRadius: 14, padding: 10 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 6 }}>
                     <span style={{ fontWeight: 700, fontSize: 13.5, color: POS.navy }}>{line.menuName}</span>
                     <button onClick={() => removeFromCart(line.cartId)} style={{ border: "none", background: "none", color: "var(--danger)", cursor: "pointer", padding: 2, flexShrink: 0 }} title="เอาออกจากตะกร้า">
@@ -2485,12 +2493,12 @@ function IconMoreActions(props) {
 const ROAST_ICONS = { light: IconRoastLight, medium: IconRoastMedium, dark: IconRoastDark, reserve: IconReserve };
 
 const CUSTOMER_AVATAR_PALETTE = [
-  { background: "#DBEAFE", color: "#1E3A8A" }, // Blue
-  { background: "#DCFCE7", color: "#14532D" }, // Green
-  { background: "#EDE9FE", color: "#4C1D95" }, // Purple
-  { background: "#FCE7F3", color: "#831843" }, // Pink
-  { background: "#FFEDD5", color: "#7C2D12" }, // Orange
-  { background: "#CCFBF1", color: "#134E4A" }, // Teal
+  { background: "var(--avatar-blue-bg)", color: "var(--avatar-blue-fg)" },
+  { background: "var(--avatar-green-bg)", color: "var(--avatar-green-fg)" },
+  { background: "var(--avatar-purple-bg)", color: "var(--avatar-purple-fg)" },
+  { background: "var(--avatar-pink-bg)", color: "var(--avatar-pink-fg)" },
+  { background: "var(--avatar-orange-bg)", color: "var(--avatar-orange-fg)" },
+  { background: "var(--avatar-teal-bg)", color: "var(--avatar-teal-fg)" },
 ];
 
 function customerAvatarInitial(name, phone) {
@@ -2669,9 +2677,9 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans,
 
   const statusMeta = {
     eligible: { label: "พร้อมแลก", color: "#166534", bg: "#DCFCE7" },
-    near: { label: "ใกล้ครบ", color: "#92400E", bg: "#FEF3C7" },
+    near: { label: "ใกล้ครบ", color: "var(--warning-text)", bg: "#FEF3C7" },
     inactive: { label: "ไม่มีความเคลื่อนไหว", color: "#6B7280", bg: "#F3F4F6" },
-    collecting: { label: "กำลังสะสม", color: "#1D4ED8", bg: "#DBEAFE" },
+    collecting: { label: "กำลังสะสม", color: "var(--primary-text)", bg: "#DBEAFE" },
   };
 
   return (
@@ -2680,31 +2688,31 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans,
         .loy-crm-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; }
         .loy-head-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
         .loy-stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:18px; }
-        .loy-stat { display:flex; align-items:center; gap:12px; min-height:94px; background:#fff; border:1px solid ${POS.border}; border-radius:16px; padding:15px 16px; }
+        .loy-stat { display:flex; align-items:center; gap:12px; min-height:94px; background:var(--surface); border:1px solid ${POS.border}; border-radius:16px; padding:15px 16px; }
         .loy-stat-icon { width:42px; height:42px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
-        .loy-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; background:#fff; border:1px solid ${POS.border}; border-radius:14px; padding:10px; margin-bottom:12px; }
+        .loy-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; background:var(--surface); border:1px solid ${POS.border}; border-radius:14px; padding:10px; margin-bottom:12px; }
         .loy-search { flex:1; min-width:220px; position:relative; }
         .loy-search input { width:100%; height:40px; padding:0 12px 0 36px; border:1px solid ${POS.border}; border-radius:10px; font-family:inherit; font-size:13px; outline:none; }
-        .loy-filter { height:40px; border:1px solid ${POS.border}; border-radius:10px; background:#fff; padding:0 30px 0 11px; color:${POS.navy}; font-family:inherit; font-size:12.5px; font-weight:600; }
-        .loy-table { background:#fff; border:1px solid ${POS.border}; border-radius:16px; overflow:visible; }
+        .loy-filter { height:40px; border:1px solid ${POS.border}; border-radius:10px; background:var(--surface); padding:0 30px 0 11px; color:${POS.navy}; font-family:inherit; font-size:12.5px; font-weight:600; }
+        .loy-table { background:var(--surface); border:1px solid ${POS.border}; border-radius:16px; overflow:visible; }
         .loy-table-head,.loy-row { display:grid; grid-template-columns:minmax(220px,1.5fr) 130px minmax(170px,1fr) 100px 130px 135px 40px; gap:12px; align-items:center; }
         .loy-table-head { padding:10px 14px; color:${POS.gray}; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; border-bottom:1px solid ${POS.border}; }
         .loy-row { position:relative; padding:12px 14px; border-bottom:1px solid #F1EFEA; cursor:pointer; transition:background .15s ease; }
         .loy-row:last-child { border-bottom:none; }
-        .loy-row:hover { background:#FAFAF8; }
+        .loy-row:hover { background:var(--cream-2); }
         .loy-customer { display:flex; align-items:center; gap:12px; min-width:0; }
-        .loy-progress { height:6px; border-radius:999px; overflow:hidden; background:#E9E7E2; margin-top:6px; }
+        .loy-progress { height:6px; border-radius:999px; overflow:hidden; background:var(--cream-2); margin-top:6px; }
         .loy-progress > span { display:block; height:100%; border-radius:inherit; background:#2563EB; }
-        .loy-action-menu { position:absolute; z-index:12; right:12px; top:46px; width:160px; padding:6px; background:#fff; border:1px solid ${POS.border}; border-radius:11px; box-shadow:0 12px 30px rgba(0,0,0,.14); }
+        .loy-action-menu { position:absolute; z-index:12; right:12px; top:46px; width:160px; padding:6px; background:var(--surface); border:1px solid ${POS.border}; border-radius:11px; box-shadow:0 12px 30px rgba(0,0,0,.14); }
         .loy-action-menu button { width:100%; display:flex; align-items:center; gap:7px; border:0; border-radius:8px; background:transparent; padding:8px 9px; color:${POS.navy}; font:inherit; font-size:12.5px; text-align:left; }
         .loy-action-menu button:hover { background:${POS.chipBg}; }
         .loy-modal-backdrop { position:fixed; inset:0; z-index:80; display:flex; align-items:center; justify-content:center; padding:18px; background:rgba(17,24,39,.45); }
-        .loy-modal { width:min(420px,100%); background:#fff; border-radius:18px; padding:20px; box-shadow:0 24px 70px rgba(0,0,0,.22); }
+        .loy-modal { width:min(420px,100%); background:var(--surface); border-radius:18px; padding:20px; box-shadow:0 24px 70px rgba(0,0,0,.22); }
         .loy-field { width:100%; height:42px; box-sizing:border-box; border:1px solid ${POS.border}; border-radius:10px; padding:0 11px; font-family:inherit; font-size:14px; outline:none; }
         @media(max-width:1100px){ .loy-stats{grid-template-columns:repeat(2,minmax(0,1fr));} .loy-table-head,.loy-row{grid-template-columns:minmax(210px,1.5fr) 120px minmax(160px,1fr) 90px 120px 40px;} .loy-col-lifetime{display:none;} }
         @media(max-width:760px){
           .loy-crm-head{flex-direction:column;} .loy-head-actions{justify-content:flex-start;} .loy-stats{grid-template-columns:1fr 1fr;}
-          .loy-table{border:0;background:transparent;} .loy-table-head{display:none;} .loy-row{display:grid;grid-template-columns:1fr auto;gap:10px;background:#fff;border:1px solid ${POS.border};border-radius:14px;margin-bottom:8px;padding:13px;}
+          .loy-table{border:0;background:transparent;} .loy-table-head{display:none;} .loy-row{display:grid;grid-template-columns:1fr auto;gap:10px;background:var(--surface);border:1px solid ${POS.border};border-radius:14px;margin-bottom:8px;padding:13px;}
           .loy-row:last-child{border-bottom:1px solid ${POS.border};} .loy-customer{grid-column:1/2;} .loy-col-tier{grid-column:1/2;} .loy-col-progress{grid-column:1/-1;} .loy-col-cups,.loy-col-recent,.loy-col-status{font-size:12px;} .loy-col-action{grid-column:2;grid-row:1;}
         }
         @media(max-width:480px){ .loy-stats{grid-template-columns:1fr;} .loy-toolbar>*{width:100%;} .loy-filter{width:100%;} }
@@ -2723,7 +2731,7 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans,
       </div>
 
       {backfillEligibleCount > 0 && (
-        <div style={{ display:"flex", flexWrap:"wrap", alignItems:"center", justifyContent:"space-between", gap:10, background:"#FFF4E5", border:"1px solid #FBD5B5", borderRadius:14, padding:"11px 14px", marginBottom:16, color:"#92400E", fontSize:12.5 }}>
+        <div style={{ display:"flex", flexWrap:"wrap", alignItems:"center", justifyContent:"space-between", gap:10, background:"var(--warning-light)", border:"1px solid #FBD5B5", borderRadius:14, padding:"11px 14px", marginBottom:16, color:"var(--warning-text)", fontSize:12.5 }}>
           <span><b>พบออเดอร์เก่าที่ยังไม่นับ {backfillEligibleCount} รายการ</b> สามารถคำนวณเมล็ดย้อนหลังได้อย่างปลอดภัย</span>
           <button className="cbtn" onClick={() => setConfirmBackfill(true)}>คำนวณย้อนหลัง</button>
         </div>
@@ -2773,7 +2781,7 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans,
 
       {settingsOpen && <div className="loy-modal-backdrop" onClick={()=>setSettingsOpen(false)}><div className="loy-modal" role="dialog" aria-modal="true" aria-label="ตั้งค่ารางวัล" onClick={(e)=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><h3 style={{margin:0,color:POS.navy}}>ตั้งค่ารางวัล</h3><button className="cbtn" style={{width:32,height:32,padding:0}} onClick={()=>setSettingsOpen(false)}><Icon name="x"/></button></div><p style={{fontSize:12.5,color:POS.gray,lineHeight:1.5}}>กำหนดจำนวนเมล็ดที่ลูกค้าต้องใช้สำหรับแลกเครื่องดื่มฟรี 1 แก้ว</p><label style={{display:"block",fontSize:12,fontWeight:700,color:POS.navy,marginBottom:6}}>จำนวนเมล็ด</label><input className="loy-field" value={goalInput} onChange={(e)=>setGoalInput(e.target.value)} inputMode="numeric"/><button className="cbtn cbtn-accent" style={{width:"100%",marginTop:14}} onClick={saveGoal}>บันทึกการตั้งค่า</button></div></div>}
 
-      {addOpen && <div className="loy-modal-backdrop" onClick={()=>setAddOpen(false)}><div className="loy-modal" role="dialog" aria-modal="true" aria-label="เพิ่มลูกค้า" onClick={(e)=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><h3 style={{margin:0,color:POS.navy}}>เพิ่มลูกค้า</h3><button className="cbtn" style={{width:32,height:32,padding:0}} onClick={()=>setAddOpen(false)}><Icon name="x"/></button></div><label style={{display:"block",fontSize:12,fontWeight:700,color:POS.navy,marginBottom:6}}>ชื่อลูกค้า</label><input className="loy-field" value={newName} onChange={(e)=>setNewName(e.target.value)} placeholder="ไม่บังคับ"/><label style={{display:"block",fontSize:12,fontWeight:700,color:POS.navy,margin:"12px 0 6px"}}>เบอร์โทรศัพท์</label><input className="loy-field" value={newPhone} onChange={(e)=>setNewPhone(e.target.value)} inputMode="tel" placeholder="0xx-xxx-xxxx"/>{addError&&<p style={{fontSize:12,color:"#B91C1C",margin:"8px 0 0"}}>{addError}</p>}<button className="cbtn cbtn-accent" disabled={adding} style={{width:"100%",marginTop:14,opacity:adding?.65:1}} onClick={submitNewCustomer}>{adding?"กำลังเพิ่ม...":"เพิ่มลูกค้า"}</button></div></div>}
+      {addOpen && <div className="loy-modal-backdrop" onClick={()=>setAddOpen(false)}><div className="loy-modal" role="dialog" aria-modal="true" aria-label="เพิ่มลูกค้า" onClick={(e)=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><h3 style={{margin:0,color:POS.navy}}>เพิ่มลูกค้า</h3><button className="cbtn" style={{width:32,height:32,padding:0}} onClick={()=>setAddOpen(false)}><Icon name="x"/></button></div><label style={{display:"block",fontSize:12,fontWeight:700,color:POS.navy,marginBottom:6}}>ชื่อลูกค้า</label><input className="loy-field" value={newName} onChange={(e)=>setNewName(e.target.value)} placeholder="ไม่บังคับ"/><label style={{display:"block",fontSize:12,fontWeight:700,color:POS.navy,margin:"12px 0 6px"}}>เบอร์โทรศัพท์</label><input className="loy-field" value={newPhone} onChange={(e)=>setNewPhone(e.target.value)} inputMode="tel" placeholder="0xx-xxx-xxxx"/>{addError&&<p style={{fontSize:12,color:"var(--danger)",margin:"8px 0 0"}}>{addError}</p>}<button className="cbtn cbtn-accent" disabled={adding} style={{width:"100%",marginTop:14,opacity:adding?.65:1}} onClick={submitNewCustomer}>{adding?"กำลังเพิ่ม...":"เพิ่มลูกค้า"}</button></div></div>}
 
       {confirmBackfill && <div className="loy-modal-backdrop" onClick={()=>setConfirmBackfill(false)}><div className="loy-modal" role="alertdialog" aria-modal="true" aria-label="ยืนยันคำนวณเมล็ดย้อนหลัง" onClick={(e)=>e.stopPropagation()}><h3 style={{margin:"0 0 8px",color:POS.navy}}>คำนวณเมล็ดจากประวัติ?</h3><p style={{fontSize:12.5,color:POS.gray,lineHeight:1.5}}>จะเพิ่มเมล็ดจากออเดอร์เก่าที่ยังไม่เคยนับจำนวน {backfillEligibleCount} รายการ ระบบป้องกันการนับซ้ำด้วยรหัสออเดอร์</p><div style={{display:"flex",gap:8}}><button className="cbtn" style={{flex:1}} onClick={()=>setConfirmBackfill(false)}>ยกเลิก</button><button className="cbtn cbtn-accent" style={{flex:1}} onClick={()=>{backfillLoyaltyBeans();setConfirmBackfill(false);}}>ยืนยัน</button></div></div></div>}
     </div>
@@ -2807,14 +2815,14 @@ function LoyaltyDetailDrawer({ customer, orders, loyaltyBeanGoal, onClose, onAdj
     <div className="loy-drawer-backdrop" onClick={onClose}>
       <style>{`
         .loy-drawer-backdrop { position:fixed; inset:0; z-index:90; display:flex; justify-content:flex-end; background:rgba(17,24,39,.36); }
-        .loy-drawer { width:min(480px,100%); height:100%; display:flex; flex-direction:column; background:#fff; box-shadow:-18px 0 55px rgba(17,24,39,.16); animation:loyDrawerIn .2s ease-out; }
+        .loy-drawer { width:min(480px,100%); height:100%; display:flex; flex-direction:column; background:var(--surface); box-shadow:-18px 0 55px rgba(17,24,39,.16); animation:loyDrawerIn .2s ease-out; }
         .loy-drawer-head { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; padding:20px; border-bottom:1px solid ${POS.border}; }
         .loy-drawer-body { flex:1; overflow-y:auto; padding:18px 20px 24px; }
-        .loy-drawer-foot { display:flex; gap:8px; padding:14px 20px; border-top:1px solid ${POS.border}; background:#fff; }
+        .loy-drawer-foot { display:flex; gap:8px; padding:14px 20px; border-top:1px solid ${POS.border}; background:var(--surface); }
         .loy-profile-stats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin:12px 0 22px; }
-        .loy-profile-stat { padding:11px; border:1px solid ${POS.border}; border-radius:12px; background:#FAFAF8; }
+        .loy-profile-stat { padding:11px; border:1px solid ${POS.border}; border-radius:12px; background:var(--cream-2); }
         .loy-timeline { position:relative; display:flex; flex-direction:column; gap:10px; }
-        .loy-timeline-item { position:relative; margin-left:9px; padding:11px 12px 11px 17px; border:1px solid ${POS.border}; border-radius:12px; background:#fff; }
+        .loy-timeline-item { position:relative; margin-left:9px; padding:11px 12px 11px 17px; border:1px solid ${POS.border}; border-radius:12px; background:var(--surface); }
         .loy-timeline-item:before { content:""; position:absolute; left:-14px; top:17px; width:8px; height:8px; border-radius:50%; background:#2563EB; border:3px solid #DBEAFE; }
         @keyframes loyDrawerIn { from { transform:translateX(24px); opacity:.5; } to { transform:translateX(0); opacity:1; } }
         @media(max-width:560px){ .loy-drawer{width:100%;} .loy-drawer-head,.loy-drawer-body{padding-left:16px;padding-right:16px;} .loy-drawer-foot{padding:12px 16px;} }
@@ -2840,7 +2848,7 @@ function LoyaltyDetailDrawer({ customer, orders, loyaltyBeanGoal, onClose, onAdj
             </div>
             <div className="loy-progress" style={{ marginTop:10 }}><span style={{ width:`${progress}%`, background:beans >= loyaltyBeanGoal ? "#16A34A" : "#2563EB" }} /></div>
             <div style={{ marginTop:9, color:POS.gray, fontSize:11.5 }}>{nextTier ? `อีก ${Math.max(0, nextTier.min - lifetimeBeans)} เมล็ด ถึงระดับ ${nextTier.label}` : "ถึงระดับสมาชิกสูงสุดแล้ว"}</div>
-            {loyaltyDebt>0&&<div style={{marginTop:9,padding:"8px 10px",borderRadius:9,background:"#FFF4E5",color:"#92400E",fontSize:11.5}}>มียอดรอหัก {loyaltyDebt} เมล็ด จากออเดอร์ที่ย้ายออกจากสถานะเสร็จหลังใช้เมล็ดไปแล้ว</div>}
+            {loyaltyDebt>0&&<div style={{marginTop:9,padding:"8px 10px",borderRadius:9,background:"var(--warning-light)",color:"var(--warning-text)",fontSize:11.5}}>มียอดรอหัก {loyaltyDebt} เมล็ด จากออเดอร์ที่ย้ายออกจากสถานะเสร็จหลังใช้เมล็ดไปแล้ว</div>}
           </section>
 
           <div className="loy-profile-stats">
@@ -2849,7 +2857,7 @@ function LoyaltyDetailDrawer({ customer, orders, loyaltyBeanGoal, onClose, onAdj
             <div className="loy-profile-stat"><div style={{ fontSize:10.5, color:POS.gray }}>แลกแล้ว</div><b style={{ display:"block", marginTop:3, color:POS.navy, fontSize:17 }}>{redeemedCount} ครั้ง</b></div>
           </div>
 
-          {variants.length > 0 && <div style={{ marginBottom:16, padding:"10px 12px", borderRadius:11, background:"#FFF4E5", border:"1px solid #FBD5B5", color:"#92400E", fontSize:11.5 }}><b>พบ {variants.length} ออเดอร์ที่ใช้รูปแบบเบอร์ต่างกัน</b><div style={{ marginTop:3 }}>ตรวจสอบก่อนปรับเมล็ดด้วยตนเอง เพื่อป้องกันการนับผิดคน</div></div>}
+          {variants.length > 0 && <div style={{ marginBottom:16, padding:"10px 12px", borderRadius:11, background:"var(--warning-light)", border:"1px solid #FBD5B5", color:"var(--warning-text)", fontSize:11.5 }}><b>พบ {variants.length} ออเดอร์ที่ใช้รูปแบบเบอร์ต่างกัน</b><div style={{ marginTop:3 }}>ตรวจสอบก่อนปรับเมล็ดด้วยตนเอง เพื่อป้องกันการนับผิดคน</div></div>}
 
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:10 }}>
             <h4 style={{ margin:0, color:POS.navy, fontSize:14 }}>ประวัติออเดอร์</h4>
@@ -2891,12 +2899,12 @@ const KANBAN_COLUMNS = [
 const ORDER_STATUS_LABEL = { pending: "รอยืนยัน", paid: "จ่ายแล้ว", preparing: "กำลังดำเนินการ", ready: "พร้อมเสิร์ฟ", done: "เสร็จ", cancelled: "ยกเลิก" };
 // สีนำ ข้อความรอง — ให้บาริสต้ามองจากระยะไกลแล้วรู้สถานะทันทีจากสี ไม่ต้องเพ่งอ่านตัวหนังสือ
 const STATUS_COLORS = {
-  pending: { dot: "#F59E0B", bg: "rgba(245,158,11,0.16)", color: "#B45309" },
-  paid: { dot: "#16A34A", bg: "rgba(22,163,74,0.16)", color: "#15803D" },
-  preparing: { dot: "#2563EB", bg: "rgba(37,99,235,0.16)", color: "#1D4ED8" },
+  pending: { dot: "#F59E0B", bg: "rgba(245,158,11,0.16)", color: "var(--warning-text)" },
+  paid: { dot: "#16A34A", bg: "rgba(22,163,74,0.16)", color: "var(--success-dark)" },
+  preparing: { dot: "#2563EB", bg: "rgba(37,99,235,0.16)", color: "var(--primary-text)" },
   ready: { dot: "#7C3AED", bg: "rgba(124,58,237,0.16)", color: "#6D28D9" },
   done: { dot: "#16A34A", bg: "#16A34A", color: "#fff", solid: true },
-  cancelled: { dot: "#DC2626", bg: "rgba(220,38,38,0.16)", color: "#B91C1C" },
+  cancelled: { dot: "#DC2626", bg: "rgba(220,38,38,0.16)", color: "var(--danger)" },
 };
 const PAYMENT_METHOD_LABEL = { cash: "เงินสด", promptpay: "พร้อมเพย์", thaihelpthai: "ไทยช่วยไทย" };
 // วิธีชำระที่จ่ายหน้าร้านโดยตรง ไม่มีสลิปให้ตรวจสอบ — พฤติกรรมเหมือนเงินสดทุกอย่าง
@@ -2953,12 +2961,12 @@ function OrderMeta({ paymentMethod, pickupDate, paymentVerified, paymentVerified
         </button>
       )}
       {paymentVerified && !isTestSlip && (
-        <span className="chpill" style={{ background: "rgba(22,163,74,0.16)", color: "#15803D", fontWeight: 700, ...(compact ? { padding: "1px 6px", fontSize: 9.5 } : {}) }}>
+        <span className="chpill" style={{ background: "rgba(22,163,74,0.16)", color: "var(--success-dark)", fontWeight: 700, ...(compact ? { padding: "1px 6px", fontSize: 9.5 } : {}) }}>
           <Icon name="check" size={10} /> สลิปตรง
         </span>
       )}
       {paymentVerified && isTestSlip && (
-        <span className="chpill" style={{ background: "rgba(245,158,11,0.16)", color: "#B45309", fontWeight: 700, ...(compact ? { padding: "1px 6px", fontSize: 9.5 } : {}) }}>
+        <span className="chpill" style={{ background: "rgba(245,158,11,0.16)", color: "var(--warning-text)", fontWeight: 700, ...(compact ? { padding: "1px 6px", fontSize: 9.5 } : {}) }}>
           <Icon name="flask" size={10} /> สลิปทดสอบ
         </span>
       )}
@@ -2974,7 +2982,7 @@ function OrderItemLines({ items, note, compact, onEditItem }) {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: compact ? 5 : 10 }}>
             <span style={{ fontSize: compact ? 11.5 : 16, fontWeight: 700, color: "var(--espresso-5)", lineHeight: 1.25 }}>
               {i.name} <span style={{ color: "var(--sage-dark)" }}>x{i.qty}</span>
-              {i.freeUnit && <span style={{ marginLeft: 5, fontSize: compact ? 9.5 : 11, fontWeight: 700, color: "#B45309", background: "#FFF4E5", borderRadius: 999, padding: "1px 7px" }}>🫘 ฟรี</span>}
+              {i.freeUnit && <span style={{ marginLeft: 5, fontSize: compact ? 9.5 : 11, fontWeight: 700, color: "var(--warning-text)", background: "var(--warning-light)", borderRadius: 999, padding: "1px 7px" }}>🫘 ฟรี</span>}
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
               {onEditItem && !compact && (
@@ -2995,7 +3003,7 @@ function OrderItemLines({ items, note, compact, onEditItem }) {
         </div>
       ))}
       {note && (
-        <div style={{ marginTop: 6, background: "rgba(245,158,11,0.14)", border: "1px solid rgba(245,158,11,0.4)", borderRadius: 8, padding: compact ? "4px 6px" : "7px 10px", fontSize: compact ? 10.5 : 13, fontWeight: 600, color: "#92400E" }}>
+        <div style={{ marginTop: 6, background: "rgba(245,158,11,0.14)", border: "1px solid rgba(245,158,11,0.4)", borderRadius: 8, padding: compact ? "4px 6px" : "7px 10px", fontSize: compact ? 10.5 : 13, fontWeight: 600, color: "var(--warning-text)" }}>
           {!compact && <Icon name="message-2" size={13} style={{ marginRight: 4 }} />}{note}
         </div>
       )}
@@ -3630,7 +3638,7 @@ function EditPickupDateModal({ order, onClose, onSave }) {
   useEscape(onClose);
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60 }} onClick={onClose}>
-      <div style={{ background: "#fff", borderRadius: 16, padding: 22, width: 300 }} onClick={(e) => e.stopPropagation()}>
+      <div style={{ background: "var(--surface)", borderRadius: 16, padding: 22, width: 300 }} onClick={(e) => e.stopPropagation()}>
         <div style={{ fontWeight: 700, fontSize: 15, color: "var(--espresso-5)", marginBottom: 4 }}>แก้ไขวันที่รับ</div>
         <div style={{ fontSize: 12, color: "var(--espresso-2)", marginBottom: 12 }}>{order.customerName || order.customerPhone}</div>
         <input
@@ -3688,9 +3696,9 @@ function EditOrderItemModal({ order, itemIdx, data, onClose, onSave }) {
 // ระบบสี "มาร์จิ้น" ของหน้าเมนู & สูตร — เขียว/เหลือง/แดงเป็นสัญลักษณ์สากล (>=60% ดี, 40-60% พอใช้, <40% บาง)
 // แยกจากส้ม/กรมท่าของแบรนด์หน้านี้ที่ใช้เฉพาะปุ่มหลัก/สถานะเลือก ไม่ปนกับความหมาย "ดี/แย่" ของตัวเลข
 const MNU_MARGIN = {
-  good: { color: "#15803D", bg: "#EAF7EE" },
-  ok: { color: "#B45309", bg: "#FFF4E5" },
-  bad: { color: "#B91C1C", bg: "#FDEBEB" },
+  good: { color: "var(--success-dark)", bg: "#EAF7EE" },
+  ok: { color: "var(--warning-text)", bg: "#FFF4E5" },
+  bad: { color: "var(--danger)", bg: "#FDEBEB" },
 };
 function marginTier(pct) {
   if (pct >= 60) return "good";
@@ -3755,7 +3763,7 @@ function MnuStatCard({ icon, label, value, tone }) {
   const t = tones[tone] || tones.neutral;
   return (
     <div style={{ background: t.bg, borderRadius: 16, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12, minHeight: 76 }}>
-      <div style={{ width: 34, height: 34, borderRadius: 10, background: "#fff", color: t.icFg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 2px 6px rgba(0,0,0,.06)" }}>
+      <div style={{ width: 34, height: 34, borderRadius: 10, background: "var(--surface)", color: t.icFg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 2px 6px rgba(0,0,0,.06)" }}>
         <Icon name={icon} size={17} />
       </div>
       <div style={{ minWidth: 0 }}>
@@ -3807,7 +3815,7 @@ function MenuCard({ menu, totalCost, margin, stockFlag, selected, selectMode, on
         <div style={{ fontSize: 12, color: "#9C9690", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{menu.category}</div>
         <div style={{ fontSize: 16.5, fontWeight: 700, color: POS.navy, lineHeight: 1.25, marginBottom: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{menu.name}</div>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4, gap: 8 }}>
-          <span style={{ fontSize: 17, fontWeight: 700, color: "#1F2937" }}>฿{money(menu.priceStore)}</span>
+          <span style={{ fontSize: 17, fontWeight: 700, color: "var(--espresso-4)" }}>฿{money(menu.priceStore)}</span>
           <MnuMarginTag pct={margin} />
         </div>
         <div style={{ fontSize: 11.5, color: "#9C9690" }}>ต้นทุน ฿{money(totalCost)}/แก้ว · เดลิเวอรี่ ฿{money(menu.priceDelivery)}</div>
@@ -3858,7 +3866,7 @@ function MnuIngredientPicker({ options, value, onChange }) {
       {open && (
         <>
           <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 90 }} />
-          <div style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width, zIndex: 91, background: "#fff", borderRadius: 12, boxShadow: "0 16px 40px rgba(0,0,0,.18)", border: `1px solid ${POS.border}`, overflow: "hidden" }}>
+          <div style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width, zIndex: 91, background: "var(--surface)", borderRadius: 12, boxShadow: "0 16px 40px rgba(0,0,0,.18)", border: `1px solid ${POS.border}`, overflow: "hidden" }}>
             <div style={{ padding: 8, borderBottom: `1px solid ${POS.border}` }}>
               <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ค้นหาวัตถุดิบ..." style={{ width: "100%", height: 34, border: `1px solid ${POS.border}`, borderRadius: 8, padding: "0 10px", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
             </div>
@@ -3891,11 +3899,11 @@ function MnuCategoryReorderPopover({ categories, onMove }) {
       {open && (
         <>
           <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 60 }} />
-          <div style={{ position: "absolute", top: 42, right: 0, zIndex: 61, background: "#fff", border: `1px solid ${POS.border}`, borderRadius: 14, boxShadow: "0 16px 40px rgba(0,0,0,.16)", padding: 10, width: 240 }}>
+          <div style={{ position: "absolute", top: 42, right: 0, zIndex: 61, background: "var(--surface)", border: `1px solid ${POS.border}`, borderRadius: 14, boxShadow: "0 16px 40px rgba(0,0,0,.16)", padding: 10, width: 240 }}>
             <p style={{ fontSize: 11, fontWeight: 700, color: "#9C9690", textTransform: "uppercase", letterSpacing: ".03em", margin: "0 0 8px" }}>ลำดับหมวดหมู่หน้าลูกค้า</p>
             {categories.map((cat, idx) => (
               <div key={cat} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 2px" }}>
-                <span style={{ flex: 1, fontSize: 12.5, color: "#1F2937", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cat}</span>
+                <span style={{ flex: 1, fontSize: 12.5, color: "var(--espresso-4)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cat}</span>
                 <button type="button" className="inv-icon-btn" style={{ width: 26, height: 26 }} disabled={idx === 0} onClick={() => onMove(cat, "up")} title="ย้ายขึ้น"><Icon name="chevron-up" size={12} /></button>
                 <button type="button" className="inv-icon-btn" style={{ width: 26, height: 26 }} disabled={idx === categories.length - 1} onClick={() => onMove(cat, "down")} title="ย้ายลง"><Icon name="chevron-down" size={12} /></button>
               </div>
@@ -3922,7 +3930,7 @@ function MenuBulkBar({ count, categories, onSetAvailable, onDuplicate, onMoveCat
         {moveOpen && (
           <>
             <div onClick={() => setMoveOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 60 }} />
-            <div style={{ position: "absolute", bottom: 44, right: 0, zIndex: 61, background: "#fff", border: `1px solid ${POS.border}`, borderRadius: 12, boxShadow: "0 16px 40px rgba(0,0,0,.16)", padding: 6, minWidth: 180, maxHeight: 240, overflowY: "auto" }}>
+            <div style={{ position: "absolute", bottom: 44, right: 0, zIndex: 61, background: "var(--surface)", border: `1px solid ${POS.border}`, borderRadius: 12, boxShadow: "0 16px 40px rgba(0,0,0,.16)", padding: 6, minWidth: 180, maxHeight: 240, overflowY: "auto" }}>
               {categories.length === 0 ? (
                 <div style={{ padding: "8px 10px", fontSize: 12, color: "#9CA3AF" }}>ยังไม่มีหมวดหมู่</div>
               ) : categories.map((c) => (
@@ -3947,11 +3955,11 @@ function MenuSidebarWidgets({ topSelling, topMax, lowStockIngredients, recentlyE
           <div key={name} className="mnu-side-rank-row">
             <span className="mnu-side-rank-num">{i + 1}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, fontWeight: 600, color: "#1F2937", marginBottom: 4, gap: 6 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, fontWeight: 600, color: "var(--espresso-4)", marginBottom: 4, gap: 6 }}>
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
                 <span style={{ color: "#9C9690", fontWeight: 500, flexShrink: 0 }}>{qty} แก้ว</span>
               </div>
-              <div style={{ height: 5, borderRadius: 999, background: "#F3F2EF", overflow: "hidden" }}>
+              <div style={{ height: 5, borderRadius: 999, background: "var(--cream-2)", overflow: "hidden" }}>
                 <div style={{ height: "100%", width: `${topMax > 0 ? Math.max(8, (qty / topMax) * 100) : 0}%`, background: POS.primary, borderRadius: 999 }} />
               </div>
             </div>
@@ -4173,30 +4181,30 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
         @media (max-width: 720px) { .mnu-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         .mnu-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
         .mnu-search { flex: 1; min-width: 200px; position: relative; display: flex; align-items: center; }
-        .mnu-search input { width: 100%; height: 44px; border: 1px solid ${POS.border}; border-radius: 12px; background: #fff; padding: 0 14px 0 38px; font-size: 14px; color: #1F2937; box-sizing: border-box; outline: none; transition: border 160ms, box-shadow 160ms; }
+        .mnu-search input { width: 100%; height: 44px; border: 1px solid ${POS.border}; border-radius: 12px; background: var(--surface); padding: 0 14px 0 38px; font-size: 14px; color: var(--espresso-4); box-sizing: border-box; outline: none; transition: border 160ms, box-shadow 160ms; }
         .mnu-search input:focus { border-color: ${POS.primary}; box-shadow: 0 0 0 3px ${POS.primarySoft}; }
-        .mnu-select { height: 44px; border: 1px solid ${POS.border}; border-radius: 12px; background: #fff; padding: 0 32px 0 14px; font-size: 13.5px; font-weight: 600; color: #1F2937; cursor: pointer; outline: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; }
+        .mnu-select { height: 44px; border: 1px solid ${POS.border}; border-radius: 12px; background: var(--surface); padding: 0 32px 0 14px; font-size: 13.5px; font-weight: 600; color: var(--espresso-4); cursor: pointer; outline: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; }
         .mnu-select:focus { border-color: ${POS.primary}; box-shadow: 0 0 0 3px ${POS.primarySoft}; }
         .mnu-btn-primary { display: inline-flex; align-items: center; gap: 7px; height: 44px; padding: 0 18px; border: none; border-radius: 12px; background: ${POS.primary}; color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 6px 18px rgba(216,92,8,.28); transition: background 160ms; }
         .mnu-btn-primary:hover { background: ${POS.primaryDark}; }
         .mnu-btn-primary:disabled { opacity: .55; cursor: not-allowed; }
-        .mnu-btn-ghost-sel { height: 44px; padding: 0 16px; border: 1px solid ${POS.border}; border-radius: 12px; background: #fff; color: #1F2937; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+        .mnu-btn-ghost-sel { height: 44px; padding: 0 16px; border: 1px solid ${POS.border}; border-radius: 12px; background: var(--surface); color: var(--espresso-4); font-size: 13.5px; font-weight: 600; cursor: pointer; }
         .mnu-btn-ghost-sel.active { background: ${POS.primarySoft}; border-color: ${POS.primary}; color: ${POS.primaryDark}; }
         .mnu-cat-nav { margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
         .mnu-cat-scroll { flex: 1; min-width: 0; overflow-x: auto; }
-        .mnu-bulk-bar { position: sticky; top: 0; z-index: 15; display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid ${POS.border}; border-radius: 16px; padding: 10px 14px; margin-bottom: 16px; box-shadow: 0 8px 24px rgba(0,0,0,.08); flex-wrap: wrap; }
-        .mnu-bulk-btn { display: inline-flex; align-items: center; gap: 5px; height: 38px; padding: 0 12px; border: 1px solid ${POS.border}; border-radius: 9px; background: #fff; color: ${POS.navy}; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+        .mnu-bulk-bar { position: sticky; top: 0; z-index: 15; display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid ${POS.border}; border-radius: 16px; padding: 10px 14px; margin-bottom: 16px; box-shadow: 0 8px 24px rgba(0,0,0,.08); flex-wrap: wrap; }
+        .mnu-bulk-btn { display: inline-flex; align-items: center; gap: 5px; height: 38px; padding: 0 12px; border: 1px solid ${POS.border}; border-radius: 9px; background: var(--surface); color: ${POS.navy}; font-size: 12.5px; font-weight: 700; cursor: pointer; }
         .mnu-bulk-btn:hover { background: ${POS.chipBg}; }
         .mnu-bulk-btn.danger { color: #DC2626; border-color: #F3D5D2; }
-        .mnu-bulk-btn.danger:hover { background: #FDEBEB; }
-        .mnu-menu-item { display: block; width: 100%; text-align: left; border: none; background: none; padding: 8px 10px; border-radius: 8px; font-size: 12.5px; font-weight: 600; color: #1F2937; cursor: pointer; min-height: 36px; }
-        .mnu-menu-item:hover { background: #F5F5F3; }
+        .mnu-bulk-btn.danger:hover { background: var(--danger-light); }
+        .mnu-menu-item { display: block; width: 100%; text-align: left; border: none; background: none; padding: 8px 10px; border-radius: 8px; font-size: 12.5px; font-weight: 600; color: var(--espresso-4); cursor: pointer; min-height: 36px; }
+        .mnu-menu-item:hover { background: var(--cream-2); }
         .mnu-shell { display: grid; grid-template-columns: 1fr 300px; gap: 24px; align-items: start; }
         @media (max-width: 1180px) { .mnu-shell { grid-template-columns: minmax(0, 1fr); } }
         .mnu-cat-section { margin-bottom: 26px; }
         .mnu-cat-heading { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: ${POS.navy}; margin: 0 0 12px; }
         .mnu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 18px; }
-        .mnu-card { background: #fff; border-radius: 20px; box-shadow: 0 8px 24px rgba(0,0,0,.06); overflow: hidden; display: flex; flex-direction: column; }
+        .mnu-card { background: var(--surface); border-radius: 20px; box-shadow: 0 8px 24px rgba(0,0,0,.06); overflow: hidden; display: flex; flex-direction: column; }
         .mnu-card-media { transition: transform 200ms ease; }
         .mnu-card:hover { box-shadow: 0 16px 36px rgba(0,0,0,.12); transition: box-shadow 200ms ease; }
         .mnu-card:hover .mnu-card-media { transform: translateY(-3px); }
@@ -4205,26 +4213,26 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
         .mnu-select-chk.checked { opacity: 1; background: ${POS.primary}; border-color: ${POS.primary}; }
         .mnu-stock-flag { position: absolute; bottom: 10px; left: 10px; display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700; padding: 3px 8px; border-radius: 999px; }
         .mnu-card-actions { display: flex; gap: 6px; margin-top: 12px; }
-        .mnu-act-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 38px; border: 1px solid ${POS.border}; border-radius: 10px; background: #fff; color: ${POS.navy}; font-size: 12px; font-weight: 700; cursor: pointer; transition: background 140ms ease, border-color 140ms ease; }
+        .mnu-act-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 38px; border: 1px solid ${POS.border}; border-radius: 10px; background: var(--surface); color: ${POS.navy}; font-size: 12px; font-weight: 700; cursor: pointer; transition: background 140ms ease, border-color 140ms ease; }
         .mnu-act-btn:hover { background: ${POS.chipBg}; }
-        .mnu-side-card { background: #fff; border-radius: 20px; box-shadow: 0 8px 24px rgba(0,0,0,.06); padding: 16px; }
+        .mnu-side-card { background: var(--surface); border-radius: 20px; box-shadow: 0 8px 24px rgba(0,0,0,.06); padding: 16px; }
         .mnu-side-title { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: ${POS.navy}; margin-bottom: 12px; }
         .mnu-side-rank-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
         .mnu-side-rank-num { width: 16px; font-size: 11.5px; font-weight: 700; color: #9C9690; flex-shrink: 0; }
-        .mnu-side-stock-row { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; color: #1F2937; padding: 6px 0; border-bottom: 1px solid #F5F3EF; }
+        .mnu-side-stock-row { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; color: var(--espresso-4); padding: 6px 0; border-bottom: 1px solid #F5F3EF; }
         .mnu-side-stock-row:last-child { border-bottom: none; }
-        .mnu-combo-btn { display: flex; align-items: center; justify-content: space-between; gap: 6px; width: 100%; height: 40px; border: 1px solid ${POS.border}; border-radius: 10px; background: #fff; padding: 0 10px; font-size: 13px; font-weight: 500; color: #1F2937; cursor: pointer; box-sizing: border-box; }
+        .mnu-combo-btn { display: flex; align-items: center; justify-content: space-between; gap: 6px; width: 100%; height: 40px; border: 1px solid ${POS.border}; border-radius: 10px; background: var(--surface); padding: 0 10px; font-size: 13px; font-weight: 500; color: var(--espresso-4); cursor: pointer; box-sizing: border-box; }
         .mnu-combo-btn:hover { border-color: ${POS.primary}; }
         .mnu-inspector-overlay { position: fixed; inset: 0; background: rgba(22,20,17,.4); z-index: 70; display: flex; justify-content: flex-end; animation: mnuFade 160ms ease; }
-        .mnu-inspector { width: min(560px, 100%); height: 100%; background: #fff; box-shadow: -8px 0 40px rgba(0,0,0,.18); display: flex; flex-direction: column; animation: mnuSlide 240ms cubic-bezier(.2,.8,.2,1); }
+        .mnu-inspector { width: min(560px, 100%); height: 100%; background: var(--surface); box-shadow: -8px 0 40px rgba(0,0,0,.18); display: flex; flex-direction: column; animation: mnuSlide 240ms cubic-bezier(.2,.8,.2,1); }
         .mnu-insp-head { padding: 18px 22px; border-bottom: 1px solid ${POS.border}; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-shrink: 0; }
         .mnu-insp-tabs { display: flex; gap: 4px; padding: 10px 18px 0; border-bottom: 1px solid ${POS.border}; flex-shrink: 0; overflow-x: auto; }
         .mnu-insp-tab { display: inline-flex; align-items: center; gap: 6px; border: none; background: none; padding: 10px 12px; font-size: 12.5px; font-weight: 700; color: #9C9690; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; min-height: 40px; }
         .mnu-insp-tab.active { color: ${POS.primary}; border-bottom-color: ${POS.primary}; }
         .mnu-insp-body { padding: 20px 22px; overflow-y: auto; flex: 1; }
         .mnu-insp-footer { padding: 16px 22px; border-top: 1px solid ${POS.border}; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-        .mnu-btn-danger-ghost { display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 14px; border: 1px solid #F3D5D2; border-radius: 10px; background: #fff; color: #DC2626; font-size: 13px; font-weight: 700; cursor: pointer; }
-        .mnu-btn-danger-ghost:hover { background: #FDEBEB; }
+        .mnu-btn-danger-ghost { display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 14px; border: 1px solid #F3D5D2; border-radius: 10px; background: var(--surface); color: #DC2626; font-size: 13px; font-weight: 700; cursor: pointer; }
+        .mnu-btn-danger-ghost:hover { background: var(--danger-light); }
         @keyframes mnuFade { from { opacity: 0; } to { opacity: 1; } }
         @keyframes mnuSlide { from { transform: translateX(100%); } to { transform: translateX(0); } }
         @media (max-width: 760px) {
@@ -4238,23 +4246,23 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
         .mnu-qty-field { height: 40px; border: 1px solid ${POS.border}; border-radius: 10px; padding: 0 8px; font-size: 13px; box-sizing: border-box; outline: none; }
         .mnu-qty-field:focus { border-color: ${POS.primary}; box-shadow: 0 0 0 3px ${POS.primarySoft}; }
         .mnu-unit-cell { font-size: 12px; color: #9C9690; }
-        .mnu-cost-cell { font-size: 12.5px; font-weight: 600; color: #1F2937; text-align: right; }
+        .mnu-cost-cell { font-size: 12.5px; font-weight: 600; color: var(--espresso-4); text-align: right; }
         @media (max-width: 480px) {
           .mnu-recipe-row { grid-template-columns: 1fr; gap: 4px; padding: 8px 0; border-bottom: 1px solid #F5F3EF; }
           .mnu-recipe-head { display: none; }
         }
-        .mnu-price-card { background: #fff; border: 1px solid ${POS.border}; border-radius: 16px; padding: 16px; }
+        .mnu-price-card { background: var(--surface); border: 1px solid ${POS.border}; border-radius: 16px; padding: 16px; }
         .mnu-price-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 700; color: ${POS.navy}; margin-bottom: 12px; }
         .mnu-price-card-head span:first-child { display: flex; align-items: center; gap: 6px; }
         .mnu-price-breakdown { display: flex; justify-content: space-between; font-size: 11.5px; color: #9C9690; margin-top: 8px; }
-        .mnu-platform-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: #FBFAF8; border-radius: 12px; padding: 10px 12px; }
+        .mnu-platform-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--cream-2); border-radius: 12px; padding: 10px 12px; }
         .mnu-option-row { display: flex; align-items: center; gap: 10px; padding: 10px 4px; border-bottom: 1px solid #F5F3EF; }
         .mnu-option-row:last-child { border-bottom: none; }
-        .mnu-required-chip { font-size: 10px; font-weight: 700; color: #B45309; background: #FFF4E5; border-radius: 999px; padding: 2px 8px; }
-        .inv-icon-btn { width: 36px; height: 36px; border: 1px solid ${POS.border}; border-radius: 9px; background: #fff; color: #6B7280; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
-        .inv-icon-btn:hover { background: #F5F5F3; color: #1F2937; }
+        .mnu-required-chip { font-size: 10px; font-weight: 700; color: var(--warning-text); background: var(--warning-light); border-radius: 999px; padding: 2px 8px; }
+        .inv-icon-btn { width: 36px; height: 36px; border: 1px solid ${POS.border}; border-radius: 9px; background: var(--surface); color: #6B7280; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .inv-icon-btn:hover { background: var(--cream-2); color: var(--espresso-4); }
         .inv-icon-btn:disabled { opacity: .4; cursor: not-allowed; }
-        .inv-btn-ghost { height: 40px; padding: 0 16px; border: 1px solid ${POS.border}; border-radius: 10px; background: #fff; color: #1F2937; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+        .inv-btn-ghost { height: 40px; padding: 0 16px; border: 1px solid ${POS.border}; border-radius: 10px; background: var(--surface); color: var(--espresso-4); font-size: 13.5px; font-weight: 600; cursor: pointer; }
         .inv-btn-danger { height: 40px; padding: 0 16px; border: none; border-radius: 10px; background: #DC2626; color: #fff; font-size: 13.5px; font-weight: 700; cursor: pointer; }
       `}</style>
 
@@ -4312,9 +4320,9 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
       <div className="mnu-shell">
         <div>
           {data.menus.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "48px 20px", background: "#fff", borderRadius: 20, boxShadow: "0 8px 24px rgba(0,0,0,.06)" }}>
+            <div style={{ textAlign: "center", padding: "48px 20px", background: "var(--surface)", borderRadius: 20, boxShadow: "0 8px 24px rgba(0,0,0,.06)" }}>
               <Icon name="cup" size={30} style={{ color: "#9C9690" }} />
-              <p style={{ fontSize: 14, fontWeight: 600, color: "#1F2937", margin: "12px 0 2px" }}>ยังไม่มีเมนู</p>
+              <p style={{ fontSize: 14, fontWeight: 600, color: "var(--espresso-4)", margin: "12px 0 2px" }}>ยังไม่มีเมนู</p>
               <p style={{ fontSize: 12.5, color: "#9C9690", margin: "0 0 16px" }}>เริ่มสร้างเมนูแรกของร้าน</p>
               <button className="mnu-btn-primary" style={{ margin: "0 auto" }} onClick={newMenu}><Icon name="plus" size={16} /> เพิ่มเมนู</button>
             </div>
@@ -4352,9 +4360,9 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
             })
           )}
           {data.menus.length > 0 && catsToRender.every((cat) => sortMenus(data.menus.filter((m) => m.category === cat).filter(passesFilters)).length === 0) && (
-            <div style={{ textAlign: "center", padding: "48px 20px", background: "#fff", borderRadius: 20, boxShadow: "0 8px 24px rgba(0,0,0,.06)" }}>
+            <div style={{ textAlign: "center", padding: "48px 20px", background: "var(--surface)", borderRadius: 20, boxShadow: "0 8px 24px rgba(0,0,0,.06)" }}>
               <Icon name="search-off" size={28} style={{ color: "#9C9690" }} />
-              <p style={{ fontSize: 14, fontWeight: 600, color: "#1F2937", margin: "12px 0 2px" }}>ไม่พบเมนูที่ตรงกับเงื่อนไข</p>
+              <p style={{ fontSize: 14, fontWeight: 600, color: "var(--espresso-4)", margin: "12px 0 2px" }}>ไม่พบเมนูที่ตรงกับเงื่อนไข</p>
               <p style={{ fontSize: 12.5, color: "#9C9690", margin: 0 }}>ลองปรับคำค้นหาหรือตัวกรอง</p>
             </div>
           )}
@@ -4478,7 +4486,7 @@ function MenuInspector({ mode, initial, initialTab, ingredients, ingredientsById
 
 function MenuOverviewTab({ form, setForm, categories, imageError, setImageError, totalCost, margin }) {
   const lbl = { display: "block", fontSize: 12, fontWeight: 600, color: "#9C9690", marginBottom: 6 };
-  const field = { width: "100%", height: 44, border: `1px solid ${POS.border}`, borderRadius: 10, background: "#fff", padding: "0 12px", fontSize: 14, color: "#1F2937", boxSizing: "border-box", outline: "none" };
+  const field = { width: "100%", height: 44, border: `1px solid ${POS.border}`, borderRadius: 10, background: "var(--surface)", padding: "0 12px", fontSize: 14, color: "var(--espresso-4)", boxSizing: "border-box", outline: "none" };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div>
@@ -4513,10 +4521,10 @@ function MenuOverviewTab({ form, setForm, categories, imageError, setImageError,
         )}
       </div>
 
-      <div style={{ background: "#FBFAF8", border: `1px solid ${POS.border}`, borderRadius: 14, padding: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div style={{ background: "var(--cream-2)", border: `1px solid ${POS.border}`, borderRadius: 14, padding: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <div style={{ fontSize: 11.5, color: "#9C9690" }}>ต้นทุน/แก้ว (รวมต้นทุนแฝง)</div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937" }}>฿{money(totalCost)}</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "var(--espresso-4)" }}>฿{money(totalCost)}</div>
         </div>
         <MnuMarginTag pct={margin} />
       </div>
@@ -4566,7 +4574,7 @@ function MenuPricingTab({ form, setForm, totalCost, platforms }) {
   const marginStore = form.priceStore > 0 ? ((form.priceStore - totalCost) / form.priceStore) * 100 : 0;
   const marginDelivery = form.priceDelivery > 0 ? ((form.priceDelivery - totalCost) / form.priceDelivery) * 100 : 0;
   const lbl = { display: "block", fontSize: 12, fontWeight: 600, color: "#9C9690", marginBottom: 6 };
-  const field = { width: "100%", height: 44, border: `1px solid ${POS.border}`, borderRadius: 10, background: "#fff", padding: "0 12px", fontSize: 14, color: "#1F2937", boxSizing: "border-box", outline: "none" };
+  const field = { width: "100%", height: 44, border: `1px solid ${POS.border}`, borderRadius: 10, background: "var(--surface)", padding: "0 12px", fontSize: 14, color: "var(--espresso-4)", boxSizing: "border-box", outline: "none" };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div className="mnu-price-card">
@@ -4594,7 +4602,7 @@ function MenuPricingTab({ form, setForm, totalCost, platforms }) {
               return (
                 <div key={p.id} className="mnu-platform-row">
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1F2937" }}>{p.name}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--espresso-4)" }}>{p.name}</div>
                     <div style={{ fontSize: 11, color: "#9C9690" }}>GP {p.gpPercent}% · สุทธิ ฿{money(net)} · กำไร ฿{money(netProfit)}</div>
                   </div>
                   <MnuMarginTag pct={pctMargin} />
@@ -4616,7 +4624,7 @@ function MenuOptionsTab({ form, optionGroups, toggleOptionGroup }) {
       {optionGroups.map((g) => (
         <label key={g.id} className="mnu-option-row">
           <OptgToggle checked={form.optionGroupIds.includes(g.id)} onChange={() => toggleOptionGroup(g.id)} color={POS.primary} />
-          <span style={{ fontSize: 13.5, fontWeight: 600, color: "#1F2937", flex: 1 }}>{g.name}</span>
+          <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--espresso-4)", flex: 1 }}>{g.name}</span>
           {g.required && <span className="mnu-required-chip">บังคับเลือก</span>}
         </label>
       ))}
@@ -4633,16 +4641,16 @@ const PROMO_TYPES = [
 
 // ป้ายประเภทโปรโมชั่นที่ลูกค้า/แอดมินเห็น — สีต่างกันตามประเภทให้แยกด้วยสายตาได้เร็วในกริดที่มีหลายใบ
 const PROMO_TYPE_META = {
-  single: { label: "Discount", color: "#B45309", bg: "#FFF4E5" },
+  single: { label: "Discount", color: "var(--warning-text)", bg: "#FFF4E5" },
   bundle: { label: "Combo", color: "#7C3AED", bg: "#F3EBFE" },
   qty: { label: "Bundle", color: "#0F766E", bg: "#E6F5F3" },
-  choice: { label: "Mix & Match", color: "#1D4ED8", bg: "#E8EFFE" },
+  choice: { label: "Mix & Match", color: "var(--primary-text)", bg: "#E8EFFE" },
 };
 
 const PROMO_STATUS_META = {
-  live: { label: "Live", color: "#15803D", bg: "#EAF7EE", icon: "circle-check" },
-  upcoming: { label: "Scheduled", color: "#B45309", bg: "#FFF4E5", icon: "clock" },
-  expired: { label: "Expired", color: "#B91C1C", bg: "#FDEBEB", icon: "calendar-x" },
+  live: { label: "Live", color: "var(--success-dark)", bg: "#EAF7EE", icon: "circle-check" },
+  upcoming: { label: "Scheduled", color: "var(--warning-text)", bg: "#FFF4E5", icon: "clock" },
+  expired: { label: "Expired", color: "var(--danger)", bg: "#FDEBEB", icon: "calendar-x" },
   disabled: { label: "Disabled", color: "#6B7280", bg: "#F3F2EF", icon: "eye-off" },
 };
 
@@ -4709,7 +4717,7 @@ function PromoStatCard({ icon, label, value, tone }) {
   const t = tones[tone] || tones.neutral;
   return (
     <div style={{ background: t.bg, borderRadius: 16, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12, minHeight: 76 }}>
-      <div style={{ width: 34, height: 34, borderRadius: 10, background: "#fff", color: t.icFg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 2px 6px rgba(0,0,0,.06)" }}>
+      <div style={{ width: 34, height: 34, borderRadius: 10, background: "var(--surface)", color: t.icFg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 2px 6px rgba(0,0,0,.06)" }}>
         <Icon name={icon} size={17} />
       </div>
       <div style={{ minWidth: 0 }}>
@@ -4733,7 +4741,7 @@ function PromoCard({ promo, menusById, priceNode, status, daysRemaining, moreIte
             <PromoTypeBadge type={type} />
             <PromoStatusBadge status={status} />
             {promo.showAsPopup && (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700, borderRadius: 999, padding: "3px 9px", color: "#7C3AED", background: "#F3E8FF", whiteSpace: "nowrap" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700, borderRadius: 999, padding: "3px 9px", color: "#7C3AED", background: "var(--purple-light)", whiteSpace: "nowrap" }}>
                 <Icon name="browser" size={11} /> Popup
               </span>
             )}
@@ -4912,9 +4920,9 @@ function PromotionsPanel({ data, orders, updateData, showToast }) {
         @media (max-width: 720px) { .promo-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         .promo-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
         .promo-search { flex: 1; min-width: 200px; position: relative; display: flex; align-items: center; }
-        .promo-search input { width: 100%; height: 44px; border: 1px solid ${POS.border}; border-radius: 12px; background: #fff; padding: 0 14px 0 38px; font-size: 14px; color: #1F2937; box-sizing: border-box; outline: none; transition: border 160ms, box-shadow 160ms; }
+        .promo-search input { width: 100%; height: 44px; border: 1px solid ${POS.border}; border-radius: 12px; background: var(--surface); padding: 0 14px 0 38px; font-size: 14px; color: var(--espresso-4); box-sizing: border-box; outline: none; transition: border 160ms, box-shadow 160ms; }
         .promo-search input:focus { border-color: ${POS.primary}; box-shadow: 0 0 0 3px ${POS.primarySoft}; }
-        .promo-select { height: 44px; border: 1px solid ${POS.border}; border-radius: 12px; background: #fff; padding: 0 32px 0 14px; font-size: 13.5px; font-weight: 600; color: #1F2937; cursor: pointer; outline: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; }
+        .promo-select { height: 44px; border: 1px solid ${POS.border}; border-radius: 12px; background: var(--surface); padding: 0 32px 0 14px; font-size: 13.5px; font-weight: 600; color: var(--espresso-4); cursor: pointer; outline: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; }
         .promo-select:focus { border-color: ${POS.primary}; box-shadow: 0 0 0 3px ${POS.primarySoft}; }
         .promo-btn-primary { display: inline-flex; align-items: center; gap: 7px; height: 44px; padding: 0 18px; border: none; border-radius: 12px; background: ${POS.primary}; color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 6px 18px rgba(216,92,8,.28); transition: background 160ms; flex-shrink: 0; }
         .promo-btn-primary:hover { background: ${POS.primaryDark}; }
@@ -4924,26 +4932,26 @@ function PromotionsPanel({ data, orders, updateData, showToast }) {
         @media (min-width: 1180px) and (max-width: 1599px) { .promo-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
         @media (min-width: 640px) and (max-width: 900px) { .promo-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 639px) { .promo-grid { grid-template-columns: minmax(0, 1fr); } }
-        .promo-card { background: #fff; border-radius: 20px; box-shadow: 0 8px 24px rgba(0,0,0,.06); overflow: hidden; display: flex; flex-direction: column; transition: box-shadow 200ms ease; }
+        .promo-card { background: var(--surface); border-radius: 20px; box-shadow: 0 8px 24px rgba(0,0,0,.06); overflow: hidden; display: flex; flex-direction: column; transition: box-shadow 200ms ease; }
         .promo-card:hover { box-shadow: 0 16px 36px rgba(0,0,0,.12); }
-        .promo-price-box { background: #FBFAF8; border-radius: 12px; padding: 10px 12px; }
+        .promo-price-box { background: var(--cream-2); border-radius: 12px; padding: 10px 12px; }
         .promo-card-actions { display: flex; gap: 6px; padding: 0 18px 16px; margin-top: auto; }
-        .mnu-act-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 38px; border: 1px solid ${POS.border}; border-radius: 10px; background: #fff; color: ${POS.navy}; font-size: 12px; font-weight: 700; cursor: pointer; transition: background 140ms ease, border-color 140ms ease; }
+        .mnu-act-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 38px; border: 1px solid ${POS.border}; border-radius: 10px; background: var(--surface); color: ${POS.navy}; font-size: 12px; font-weight: 700; cursor: pointer; transition: background 140ms ease, border-color 140ms ease; }
         .mnu-act-btn:hover { background: ${POS.chipBg}; }
-        .inv-icon-btn { width: 36px; height: 36px; border: 1px solid ${POS.border}; border-radius: 9px; background: #fff; color: #6B7280; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
-        .inv-icon-btn:hover { background: #F5F5F3; color: #1F2937; }
-        .inv-btn-ghost { height: 40px; padding: 0 16px; border: 1px solid ${POS.border}; border-radius: 10px; background: #fff; color: #1F2937; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+        .inv-icon-btn { width: 36px; height: 36px; border: 1px solid ${POS.border}; border-radius: 9px; background: var(--surface); color: #6B7280; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .inv-icon-btn:hover { background: var(--cream-2); color: var(--espresso-4); }
+        .inv-btn-ghost { height: 40px; padding: 0 16px; border: 1px solid ${POS.border}; border-radius: 10px; background: var(--surface); color: var(--espresso-4); font-size: 13.5px; font-weight: 600; cursor: pointer; }
         .inv-btn-danger { height: 40px; padding: 0 16px; border: none; border-radius: 10px; background: #DC2626; color: #fff; font-size: 13.5px; font-weight: 700; cursor: pointer; }
         .promo-inspector-overlay { position: fixed; inset: 0; background: rgba(22,20,17,.4); z-index: 70; display: flex; justify-content: flex-end; animation: mnuFade 160ms ease; }
-        .promo-inspector { width: min(520px, 100%); height: 100%; background: #fff; box-shadow: -8px 0 40px rgba(0,0,0,.18); display: flex; flex-direction: column; animation: mnuSlide 240ms cubic-bezier(.2,.8,.2,1); }
+        .promo-inspector { width: min(520px, 100%); height: 100%; background: var(--surface); box-shadow: -8px 0 40px rgba(0,0,0,.18); display: flex; flex-direction: column; animation: mnuSlide 240ms cubic-bezier(.2,.8,.2,1); }
         .promo-insp-head { padding: 18px 22px; border-bottom: 1px solid ${POS.border}; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-shrink: 0; }
         .promo-insp-tabs { display: flex; gap: 4px; padding: 10px 18px 0; border-bottom: 1px solid ${POS.border}; flex-shrink: 0; overflow-x: auto; }
         .promo-insp-tab { display: inline-flex; align-items: center; gap: 6px; border: none; background: none; padding: 10px 12px; font-size: 12.5px; font-weight: 700; color: #9C9690; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; min-height: 40px; }
         .promo-insp-tab.active { color: ${POS.primary}; border-bottom-color: ${POS.primary}; }
         .promo-insp-body { padding: 20px 22px; overflow-y: auto; flex: 1; }
         .promo-insp-footer { padding: 16px 22px; border-top: 1px solid ${POS.border}; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-        .promo-btn-danger-ghost { display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 14px; border: 1px solid #F3D5D2; border-radius: 10px; background: #fff; color: #DC2626; font-size: 13px; font-weight: 700; cursor: pointer; }
-        .promo-btn-danger-ghost:hover { background: #FDEBEB; }
+        .promo-btn-danger-ghost { display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 14px; border: 1px solid #F3D5D2; border-radius: 10px; background: var(--surface); color: #DC2626; font-size: 13px; font-weight: 700; cursor: pointer; }
+        .promo-btn-danger-ghost:hover { background: var(--danger-light); }
         @keyframes mnuFade { from { opacity: 0; } to { opacity: 1; } }
         @keyframes mnuSlide { from { transform: translateX(100%); } to { transform: translateX(0); } }
         @media (max-width: 760px) {
@@ -4951,11 +4959,11 @@ function PromotionsPanel({ data, orders, updateData, showToast }) {
           .promo-inspector { width: 100%; height: 100dvh; }
         }
         .promo-field:focus { border-color: ${POS.primary} !important; box-shadow: 0 0 0 3px ${POS.primarySoft}; }
-        .promo-type-pill { border: 1px solid ${POS.border}; background: #fff; color: #1F2937; border-radius: 12px; padding: 12px 14px; font-size: 13px; font-weight: 600; cursor: pointer; text-align: left; transition: all 160ms ease; }
+        .promo-type-pill { border: 1px solid ${POS.border}; background: var(--surface); color: var(--espresso-4); border-radius: 12px; padding: 12px 14px; font-size: 13px; font-weight: 600; cursor: pointer; text-align: left; transition: all 160ms ease; }
         .promo-type-pill.active { border-color: ${POS.primary}; background: ${POS.primarySoft}; color: ${POS.primaryDark}; }
         .promo-menu-list { max-height: 260px; overflow-y: auto; border: 1px solid ${POS.border}; border-radius: 12px; padding: 6px; }
         .promo-menu-row { display: flex; align-items: center; gap: 10px; padding: 9px 8px; border-radius: 8px; font-size: 13.5px; min-height: 40px; }
-        .promo-menu-row:hover { background: #FAFAF8; }
+        .promo-menu-row:hover { background: var(--cream-2); }
       `}</style>
 
       <div className="promo-header">
@@ -4997,18 +5005,18 @@ function PromotionsPanel({ data, orders, updateData, showToast }) {
       </div>
 
       {promotions.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "64px 20px", background: "#fff", borderRadius: 20, boxShadow: "0 8px 24px rgba(0,0,0,.06)" }}>
+        <div style={{ textAlign: "center", padding: "64px 20px", background: "var(--surface)", borderRadius: 20, boxShadow: "0 8px 24px rgba(0,0,0,.06)" }}>
           <div style={{ width: 64, height: 64, borderRadius: 18, background: POS.primarySoft, color: POS.primary, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
             <Icon name="discount" size={30} />
           </div>
-          <p style={{ fontSize: 16, fontWeight: 700, color: "#1F2937", margin: "0 0 4px" }}>No promotions yet</p>
+          <p style={{ fontSize: 16, fontWeight: 700, color: "var(--espresso-4)", margin: "0 0 4px" }}>No promotions yet</p>
           <p style={{ fontSize: 13, color: "#9C9690", margin: "0 0 20px" }}>Create your first campaign</p>
           <button className="promo-btn-primary" style={{ margin: "0 auto" }} onClick={newPromo}><Icon name="plus" size={16} /> Create Promotion</button>
         </div>
       ) : visiblePromotions.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "48px 20px", background: "#fff", borderRadius: 20, boxShadow: "0 8px 24px rgba(0,0,0,.06)" }}>
+        <div style={{ textAlign: "center", padding: "48px 20px", background: "var(--surface)", borderRadius: 20, boxShadow: "0 8px 24px rgba(0,0,0,.06)" }}>
           <Icon name="search-off" size={28} style={{ color: "#9C9690" }} />
-          <p style={{ fontSize: 14, fontWeight: 600, color: "#1F2937", margin: "12px 0 2px" }}>ไม่พบโปรโมชั่นที่ตรงกับเงื่อนไข</p>
+          <p style={{ fontSize: 14, fontWeight: 600, color: "var(--espresso-4)", margin: "12px 0 2px" }}>ไม่พบโปรโมชั่นที่ตรงกับเงื่อนไข</p>
           <p style={{ fontSize: 12.5, color: "#9C9690", margin: 0 }}>ลองปรับคำค้นหาหรือตัวกรอง</p>
         </div>
       ) : (
@@ -5027,7 +5035,7 @@ function PromotionsPanel({ data, orders, updateData, showToast }) {
                     <span style={{ fontSize: 13, color: "#9C9690", textDecoration: "line-through" }}>฿{money(originalTotal)}</span>
                     <span style={{ fontSize: 20, fontWeight: 700, color: POS.primary }}>฿{money(promoTotal)}</span>
                   </div>
-                  {savings > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: "#15803D", background: "#EAF7EE", borderRadius: 999, padding: "2px 8px" }}>Save ฿{money(savings)}</span>}
+                  {savings > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: "var(--success-dark)", background: "var(--success-light)", borderRadius: 999, padding: "2px 8px" }}>Save ฿{money(savings)}</span>}
                 </div>
               );
             } else if (type === "qty") {
@@ -5041,7 +5049,7 @@ function PromotionsPanel({ data, orders, updateData, showToast }) {
                     <span style={{ fontSize: 13, color: "#9C9690", textDecoration: "line-through" }}>฿{money(original)}</span>
                     <span style={{ fontSize: 20, fontWeight: 700, color: POS.primary }}>฿{money(setPrice)}</span>
                   </div>
-                  {savings > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: "#15803D", background: "#EAF7EE", borderRadius: 999, padding: "2px 8px" }}>Save ฿{money(savings)}</span>}
+                  {savings > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: "var(--success-dark)", background: "var(--success-light)", borderRadius: 999, padding: "2px 8px" }}>Save ฿{money(savings)}</span>}
                 </div>
               ) : null;
             } else if (type === "choice") {
@@ -5173,7 +5181,7 @@ function PromoInspector({ mode, initial, initialTab, menus, menusById, orders, o
 
 function PromoOverviewTab({ form, setForm, setType }) {
   const lbl = { display: "block", fontSize: 12, fontWeight: 600, color: "#9C9690", marginBottom: 6 };
-  const field = { width: "100%", height: 44, border: `1px solid ${POS.border}`, borderRadius: 10, background: "#fff", padding: "0 12px", fontSize: 14, color: "#1F2937", boxSizing: "border-box", outline: "none" };
+  const field = { width: "100%", height: 44, border: `1px solid ${POS.border}`, borderRadius: 10, background: "var(--surface)", padding: "0 12px", fontSize: 14, color: "var(--espresso-4)", boxSizing: "border-box", outline: "none" };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div>
@@ -5242,7 +5250,7 @@ function PromoMenusTab({ form, menus, toggleMenu }) {
 
 function PromoPricingTab({ form, setForm, originalTotal, promoTotal, qtyMenu, qtySetPrice }) {
   const lbl = { display: "block", fontSize: 12, fontWeight: 600, color: "#9C9690", marginBottom: 6 };
-  const field = { width: "100%", height: 44, border: `1px solid ${POS.border}`, borderRadius: 10, background: "#fff", padding: "0 12px", fontSize: 14, color: "#1F2937", boxSizing: "border-box", outline: "none" };
+  const field = { width: "100%", height: 44, border: `1px solid ${POS.border}`, borderRadius: 10, background: "var(--surface)", padding: "0 12px", fontSize: 14, color: "var(--espresso-4)", boxSizing: "border-box", outline: "none" };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       {form.type === "qty" && (
@@ -5300,7 +5308,7 @@ function PromoPricingTab({ form, setForm, originalTotal, promoTotal, qtyMenu, qt
 
 function PromoScheduleTab({ form, setForm }) {
   const lbl = { display: "block", fontSize: 12, fontWeight: 600, color: "#9C9690", marginBottom: 6 };
-  const field = { width: "100%", height: 44, border: `1px solid ${POS.border}`, borderRadius: 10, background: "#fff", padding: "0 12px", fontSize: 14, color: "#1F2937", boxSizing: "border-box", outline: "none" };
+  const field = { width: "100%", height: 44, border: `1px solid ${POS.border}`, borderRadius: 10, background: "var(--surface)", padding: "0 12px", fontSize: 14, color: "var(--espresso-4)", boxSizing: "border-box", outline: "none" };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <p style={{ fontSize: 12, color: "#9C9690", margin: 0, lineHeight: 1.5 }}>กำหนดช่วงเวลาโปรโมชั่น (ไม่บังคับ — เว้นว่างไว้ถ้าไม่ต้องการจำกัดเวลา)</p>
@@ -5383,7 +5391,7 @@ function PromoAnalyticsTab({ promo, orders, menusById, mode }) {
   }
 
   const statCard = (label, value, icon, tone = POS.primary) => (
-    <div style={{ padding: 14, border: `1px solid ${POS.border}`, borderRadius: 13, background: "#fff", minWidth: 0 }}>
+    <div style={{ padding: 14, border: `1px solid ${POS.border}`, borderRadius: 13, background: "var(--surface)", minWidth: 0 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#9C9690", fontSize: 11.5, marginBottom: 7 }}><Icon name={icon} size={13} /> {label}</div>
       <div style={{ color: tone, fontSize: 20, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis" }}>{value}</div>
     </div>
@@ -5422,10 +5430,10 @@ function PromoAnalyticsTab({ promo, orders, menusById, mode }) {
           {analytics.rows.slice(0, 20).map((row, index) => (
             <div key={row.id} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, padding: "11px 12px", borderBottom: index < Math.min(analytics.rows.length, 20) - 1 ? `1px solid ${POS.border}` : "none" }}>
               <div style={{ minWidth: 0 }}>
-                <div style={{ color: "#1F2937", fontSize: 12.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.customerName}</div>
+                <div style={{ color: "var(--espresso-4)", fontSize: 12.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.customerName}</div>
                 <div style={{ color: "#9C9690", fontSize: 10.5, marginTop: 2 }}>{new Date(row.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })} · ใช้ {row.uses} ครั้ง</div>
               </div>
-              <div style={{ color: "#15803D", fontSize: 12.5, fontWeight: 700, textAlign: "right" }}>฿{money(row.revenue)}</div>
+              <div style={{ color: "var(--success-dark)", fontSize: 12.5, fontWeight: 700, textAlign: "right" }}>฿{money(row.revenue)}</div>
             </div>
           ))}
         </div>
@@ -5436,13 +5444,13 @@ function PromoAnalyticsTab({ promo, orders, menusById, mode }) {
 }
 
 function PromoSettingsTab({ form, setForm }) {
-  const field = { width: "100%", minHeight: 44, border: `1px solid ${POS.border}`, borderRadius: 10, background: "#fff", padding: "0 12px", fontSize: 14, color: "#1F2937", boxSizing: "border-box", outline: "none" };
+  const field = { width: "100%", minHeight: 44, border: `1px solid ${POS.border}`, borderRadius: 10, background: "var(--surface)", padding: "0 12px", fontSize: 14, color: "var(--espresso-4)", boxSizing: "border-box", outline: "none" };
   const label = { display: "block", fontSize: 12, fontWeight: 600, color: "#6B7280", marginBottom: 6 };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <label style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 4px" }}>
         <OptgToggle checked={form.active !== false} onChange={(v) => setForm({ ...form, active: v })} color={POS.primary} />
-        <span style={{ fontSize: 13.5, fontWeight: 600, color: "#1F2937" }}>เปิดใช้งานโปรโมชั่นนี้</span>
+        <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--espresso-4)" }}>เปิดใช้งานโปรโมชั่นนี้</span>
       </label>
       <p style={{ fontSize: 12, color: "#9C9690", margin: "8px 0 0", lineHeight: 1.5 }}>
         โปรโมชั่นที่เปิดใช้งานจะแสดงในหมวด "ดีลพิเศษ" อันดับแรกสุดของหน้าลูกค้า พร้อมราคาปกติขีดฆ่าและราคาโปรสีแดง ปิดใช้งานเพื่อซ่อนชั่วคราวโดยไม่ต้องลบ
@@ -5451,21 +5459,21 @@ function PromoSettingsTab({ form, setForm }) {
       <div style={{ height: 1, background: POS.border, margin: "20px 0 12px" }} />
       <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 4px" }}>
         <span>
-          <span style={{ display: "block", fontSize: 13.5, fontWeight: 700, color: "#1F2937" }}>แสดงเป็น Popup หลัง Splash Screen</span>
+          <span style={{ display: "block", fontSize: 13.5, fontWeight: 700, color: "var(--espresso-4)" }}>แสดงเป็น Popup หลัง Splash Screen</span>
           <span style={{ display: "block", marginTop: 2, color: "#9C9690", fontSize: 11.5 }}>เลือกได้ครั้งละหนึ่งโปรโมชั่น และแสดงหนึ่งครั้งต่อ session</span>
         </span>
         <OptgToggle checked={form.showAsPopup === true} onChange={(v) => setForm({ ...form, showAsPopup: v })} color={POS.primary} />
       </label>
 
       {form.showAsPopup && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 14, padding: 16, borderRadius: 14, background: "#F7F8FA", border: `1px solid ${POS.border}` }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 14, padding: 16, borderRadius: 14, background: "var(--cream-2)", border: `1px solid ${POS.border}` }}>
           <div>
             <label style={label}>URL รูป Popup (แนะนำแนวตั้ง 4:5)</label>
             <TextField className="promo-field" style={field} value={form.popupImageUrl || ""} onChange={(v) => setForm({ ...form, popupImageUrl: v })} placeholder="https://..." />
             <span style={{ display: "block", marginTop: 5, color: "#9C9690", fontSize: 11 }}>หากเว้นว่าง ระบบจะใช้รูปของเมนูแรกในโปรโมชั่น</span>
           </div>
           {form.popupImageUrl && (
-            <img src={form.popupImageUrl} alt="ตัวอย่าง Promotion Popup" style={{ width: "100%", maxHeight: 230, objectFit: "contain", borderRadius: 12, background: "#E9EDF2" }} />
+            <img src={form.popupImageUrl} alt="ตัวอย่าง Promotion Popup" style={{ width: "100%", maxHeight: 230, objectFit: "contain", borderRadius: 12, background: "var(--cream-2)" }} />
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#6B7280", fontSize: 11.5, lineHeight: 1.5 }}>
             <Icon name="clock" size={14} style={{ flexShrink: 0 }} /> รูปจะแสดงกลางหน้าสั่งโดยไม่ครอป กดเพื่อเปิดโปรโมชั่น หรือปิดอัตโนมัติใน 5 วินาที
@@ -5496,10 +5504,10 @@ function compositionLabel(ing, ingredientsById) {
 // พาเลตสีเฉพาะหน้าวัตถุดิบ & สต็อก (Inventory) — ระบบสีความหมาย (semantic) ใช้น้ำเงินเป็นสีหลัก
 // แยกจากธีม sage/espresso ของแท็บอื่น เพื่อให้หน้านี้ดูเป็น enterprise inventory ที่อ่านง่ายในการใช้งานทุกวัน
 const INV = {
-  primary: "#2563EB", primaryDark: "#1D4ED8", primarySoft: "rgba(37,99,235,.08)",
-  success: "#16A34A", successSoft: "#EAF7EE",
-  warning: "#D97706", warningSoft: "#FFF4E5",
-  danger: "#DC2626", dangerSoft: "#FDECEC",
+  primary: "#2563EB", primaryDark: "var(--primary-text)", primarySoft: "rgba(37,99,235,.12)",
+  success: "#16A34A", successSoft: "var(--success-light)",
+  warning: "#D97706", warningSoft: "var(--warning-light)",
+  danger: "#DC2626", dangerSoft: "var(--danger-light)",
   gray: "var(--espresso-3)", ink: "var(--espresso-4)", border: "var(--line)", line: "var(--line-soft)",
 };
 
@@ -5520,7 +5528,7 @@ function fmtQty(n) {
 
 // สไตล์ฟอร์มกลางของหน้าวัตถุดิบ ใช้ร่วมกันในทุก modal ให้หน้าตาเหมือนกันหมด (input/label/โฟกัสวงแหวนน้ำเงิน)
 const invLabelStyle = { display: "block", fontSize: 12, fontWeight: 600, color: INV.gray, marginBottom: 6 };
-const invFieldStyle = { width: "100%", height: 44, border: `1px solid ${INV.border}`, borderRadius: 10, background: "#fff", padding: "0 12px", fontSize: 15, color: INV.ink, boxSizing: "border-box", outline: "none", transition: "border-color 160ms, box-shadow 160ms" };
+const invFieldStyle = { width: "100%", height: 44, border: `1px solid ${INV.border}`, borderRadius: 10, background: "var(--surface)", padding: "0 12px", fontSize: 15, color: INV.ink, boxSizing: "border-box", outline: "none", transition: "border-color 160ms, box-shadow 160ms" };
 const invFocusProps = {
   onFocus: (e) => { e.currentTarget.style.borderColor = INV.primary; e.currentTarget.style.boxShadow = `0 0 0 3px ${INV.primarySoft}`; },
   onBlur: (e) => { e.currentTarget.style.borderColor = INV.border; e.currentTarget.style.boxShadow = "none"; },
@@ -5536,9 +5544,9 @@ function invStatus(ing) {
 
 function InvStatusBadge({ status }) {
   const map = {
-    normal: { bg: INV.successSoft, color: "#15803D", icon: "circle-check", label: "ปกติ" },
-    low: { bg: INV.warningSoft, color: "#B45309", icon: "alert-triangle", label: "ใกล้หมด" },
-    out: { bg: INV.dangerSoft, color: "#B91C1C", icon: "alert-octagon", label: "หมดสต็อก" },
+    normal: { bg: INV.successSoft, color: "var(--success-dark)", icon: "circle-check", label: "ปกติ" },
+    low: { bg: INV.warningSoft, color: "var(--warning-text)", icon: "alert-triangle", label: "ใกล้หมด" },
+    out: { bg: INV.dangerSoft, color: "var(--danger)", icon: "alert-octagon", label: "หมดสต็อก" },
     composite: { bg: "#F3F4F6", color: "#4B5563", icon: "flask", label: "คำนวณอัตโนมัติ" },
     unlimited: { bg: INV.primarySoft, color: INV.primaryDark, icon: "infinity", label: "ไม่จำกัด" },
   };
@@ -5560,7 +5568,7 @@ function InvStatCard({ icon, label, value, sub, tone }) {
   };
   const t = tones[tone] || tones.neutral;
   return (
-    <div style={{ background: "#fff", border: `1px solid ${INV.border}`, borderRadius: 16, padding: "16px 18px", boxShadow: "0 8px 24px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", gap: 10, minHeight: 104 }}>
+    <div style={{ background: "var(--surface)", border: `1px solid ${INV.border}`, borderRadius: 16, padding: "16px 18px", boxShadow: "0 8px 24px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", gap: 10, minHeight: 104 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <div style={{ width: 28, height: 28, borderRadius: 8, background: t.icbg, color: t.ic, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon name={icon} size={15} /></div>
         <span style={{ fontSize: 12.5, fontWeight: 600, color: INV.gray }}>{label}</span>
@@ -5602,7 +5610,7 @@ function InvActionsMenu({ items }) {
       {open && (
         <>
           <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 60 }} />
-          <div role="menu" style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 61, background: "#fff", borderRadius: 12, boxShadow: "0 12px 32px rgba(0,0,0,.16)", border: `1px solid ${INV.border}`, padding: 6, minWidth: 190 }}>
+          <div role="menu" style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 61, background: "var(--surface)", borderRadius: 12, boxShadow: "0 12px 32px rgba(0,0,0,.16)", border: `1px solid ${INV.border}`, padding: 6, minWidth: 190 }}>
             {items.map((it, i) => (
               <button
                 key={i} role="menuitem"
@@ -5650,7 +5658,7 @@ function InvConfirmDialog({ title, message, confirmLabel, onConfirm, onCancel })
   useEffect(() => { cancelRef.current?.focus(); }, []);
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(17,24,39,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 16 }} onClick={onCancel}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 24, width: 380, maxWidth: "100%", boxShadow: "0 20px 60px rgba(0,0,0,.25)" }} role="alertdialog" aria-modal="true">
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: 16, padding: 24, width: 380, maxWidth: "100%", boxShadow: "0 20px 60px rgba(0,0,0,.25)" }} role="alertdialog" aria-modal="true">
         <div style={{ width: 44, height: 44, borderRadius: 12, background: INV.dangerSoft, color: INV.danger, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 14 }}><Icon name="trash" size={20} /></div>
         <div style={{ fontSize: 18, fontWeight: 700, color: INV.ink, marginBottom: 6 }}>{title}</div>
         <div style={{ fontSize: 13.5, color: INV.gray, lineHeight: 1.5, marginBottom: 20 }}>{message}</div>
@@ -5814,32 +5822,32 @@ function IngredientsPanel({ data, updateData, showToast, onSaveAccounting, isAcc
         @media (max-width: 620px) { .inv-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         .inv-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 20px; }
         .inv-search { flex: 1; min-width: 200px; position: relative; display: flex; align-items: center; }
-        .inv-search input { width: 100%; height: 44px; border: 1px solid ${INV.border}; border-radius: 12px; background: #fff; padding: 0 38px 0 38px; font-size: 14px; color: ${INV.ink}; box-sizing: border-box; outline: none; transition: border 160ms, box-shadow 160ms; }
+        .inv-search input { width: 100%; height: 44px; border: 1px solid ${INV.border}; border-radius: 12px; background: var(--surface); padding: 0 38px 0 38px; font-size: 14px; color: ${INV.ink}; box-sizing: border-box; outline: none; transition: border 160ms, box-shadow 160ms; }
         .inv-search input:focus { border-color: ${INV.primary}; box-shadow: 0 0 0 3px ${INV.primarySoft}; }
-        .inv-clear { position: absolute; right: 8px; width: 26px; height: 26px; border: none; background: #F0EFEC; border-radius: 8px; color: ${INV.gray}; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-        .inv-select { height: 44px; border: 1px solid ${INV.border}; border-radius: 12px; background: #fff; padding: 0 32px 0 14px; font-size: 13.5px; font-weight: 600; color: ${INV.ink}; cursor: pointer; outline: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; }
+        .inv-clear { position: absolute; right: 8px; width: 26px; height: 26px; border: none; background: var(--cream-2); border-radius: 8px; color: ${INV.gray}; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .inv-select { height: 44px; border: 1px solid ${INV.border}; border-radius: 12px; background: var(--surface); padding: 0 32px 0 14px; font-size: 13.5px; font-weight: 600; color: ${INV.ink}; cursor: pointer; outline: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; }
         .inv-select:focus { border-color: ${INV.primary}; box-shadow: 0 0 0 3px ${INV.primarySoft}; }
         .inv-btn-primary { display: inline-flex; align-items: center; gap: 7px; height: 44px; padding: 0 18px; border: none; border-radius: 12px; background: ${INV.primary}; color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 6px 18px rgba(37,99,235,.28); transition: background 160ms; }
         .inv-btn-primary:hover { background: ${INV.primaryDark}; }
-        .inv-btn-ghost { height: 40px; padding: 0 16px; border: 1px solid ${INV.border}; border-radius: 10px; background: #fff; color: ${INV.ink}; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+        .inv-btn-ghost { height: 40px; padding: 0 16px; border: 1px solid ${INV.border}; border-radius: 10px; background: var(--surface); color: ${INV.ink}; font-size: 13.5px; font-weight: 600; cursor: pointer; }
         .inv-btn-danger { height: 40px; padding: 0 16px; border: none; border-radius: 10px; background: ${INV.danger}; color: #fff; font-size: 13.5px; font-weight: 700; cursor: pointer; }
         .inv-add-stock { display: inline-flex; align-items: center; gap: 5px; height: 34px; padding: 0 12px; border: 1px solid ${INV.primary}; border-radius: 9px; background: ${INV.primarySoft}; color: ${INV.primaryDark}; font-size: 12.5px; font-weight: 700; cursor: pointer; white-space: nowrap; }
         .inv-add-stock:hover { background: rgba(37,99,235,.14); }
-        .inv-icon-btn { width: 36px; height: 36px; border: 1px solid ${INV.border}; border-radius: 9px; background: #fff; color: ${INV.gray}; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
-        .inv-icon-btn:hover { background: #F5F5F3; color: ${INV.ink}; }
-        .inv-cat { background: #fff; border: 1px solid ${INV.border}; border-radius: 16px; margin-bottom: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.04); }
+        .inv-icon-btn { width: 36px; height: 36px; border: 1px solid ${INV.border}; border-radius: 9px; background: var(--surface); color: ${INV.gray}; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .inv-icon-btn:hover { background: var(--cream-2); color: ${INV.ink}; }
+        .inv-cat { background: var(--surface); border: 1px solid ${INV.border}; border-radius: 16px; margin-bottom: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.04); }
         .inv-cat-head { display: flex; align-items: center; gap: 10px; width: 100%; padding: 14px 18px; border: none; background: none; cursor: pointer; text-align: left; transition: background 140ms ease; }
-        .inv-cat-head:hover { background: #FAFAF8; }
+        .inv-cat-head:hover { background: var(--cream-2); }
         .inv-cat-head .inv-chev { transition: transform 180ms ease; }
         .inv-toolbar-spacer { flex: 1; min-width: 0; }
         .inv-cat-title { font-size: 15px; font-weight: 700; color: ${INV.ink}; }
-        .inv-cat-count { font-size: 12px; font-weight: 700; color: ${INV.gray}; background: #F3F4F6; border-radius: 999px; padding: 2px 9px; }
+        .inv-cat-count { font-size: 12px; font-weight: 700; color: ${INV.gray}; background: var(--cream-2); border-radius: 999px; padding: 2px 9px; }
         .inv-table-scroll { overflow-x: auto; }
         .inv-table { width: 100%; border-collapse: collapse; }
-        .inv-table th { text-align: left; font-size: 11.5px; font-weight: 700; color: ${INV.gray}; padding: 9px 14px; border-top: 1px solid ${INV.line}; border-bottom: 1px solid ${INV.line}; background: #FBFAF8; text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; }
+        .inv-table th { text-align: left; font-size: 11.5px; font-weight: 700; color: ${INV.gray}; padding: 9px 14px; border-top: 1px solid ${INV.line}; border-bottom: 1px solid ${INV.line}; background: var(--cream-2); text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; }
         .inv-table td { padding: 12px 14px; border-bottom: 1px solid #F5F3EF; font-size: 13.5px; color: ${INV.ink}; vertical-align: middle; }
         .inv-table tbody tr:last-child td { border-bottom: none; }
-        .inv-table tbody tr:hover { background: #FAFAF8; }
+        .inv-table tbody tr:hover { background: var(--cream-2); }
         .inv-actions-cell { text-align: right; white-space: nowrap; }
         .inv-row-actions { display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end; }
         .inv-drawer-overlay { position: fixed; inset: 0; background: rgba(17,24,39,.35); z-index: 70; display: flex; justify-content: flex-end; animation: invFade 160ms ease; }
@@ -5902,7 +5910,7 @@ function IngredientsPanel({ data, updateData, showToast, onSaveAccounting, isAcc
       </div>
 
       {renderedCats.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "48px 20px", background: "#fff", border: `1px solid ${INV.border}`, borderRadius: 16 }}>
+        <div style={{ textAlign: "center", padding: "48px 20px", background: "var(--surface)", border: `1px solid ${INV.border}`, borderRadius: 16 }}>
           <Icon name="search-off" size={30} style={{ color: INV.gray, opacity: 0.5 }} />
           <p style={{ fontSize: 14, fontWeight: 600, color: INV.ink, margin: "12px 0 2px" }}>ไม่พบวัตถุดิบที่ตรงกับเงื่อนไข</p>
           <p style={{ fontSize: 12.5, color: INV.gray, margin: 0 }}>ลองปรับคำค้นหาหรือตัวกรอง</p>
@@ -6026,9 +6034,9 @@ function DefaultPackagingSection({ data, updateData }) {
   if (packagingIngredients.length === 0) return null;
 
   return (
-    <div style={{ background: "#fff", border: `1px solid ${INV.border}`, borderRadius: 16, padding: 20, marginTop: 4, boxShadow: "0 8px 24px rgba(0,0,0,.04)" }}>
+    <div style={{ background: "var(--surface)", border: `1px solid ${INV.border}`, borderRadius: 16, padding: 20, marginTop: 4, boxShadow: "0 8px 24px rgba(0,0,0,.04)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-        <div style={{ width: 30, height: 30, borderRadius: 9, background: "#F3F4F6", color: INV.gray, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon name="box" size={16} /></div>
+        <div style={{ width: 30, height: 30, borderRadius: 9, background: "var(--cream-2)", color: INV.gray, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon name="box" size={16} /></div>
         <span style={{ fontSize: 15, fontWeight: 700, color: INV.ink }}>บรรจุภัณฑ์เริ่มต้นสำหรับเมนูใหม่</span>
       </div>
       <p style={{ fontSize: 12, color: INV.gray, margin: "0 0 16px 40px", lineHeight: 1.5 }}>
@@ -6070,7 +6078,7 @@ function IngredientForm({ value, onChange, onSubmit, onCancel, submitLabel, allI
   }
 
   const lbl = { display: "block", fontSize: 12, fontWeight: 600, color: INV.gray, marginBottom: 5 };
-  const field = { width: "100%", height: 42, border: `1px solid ${INV.border}`, borderRadius: 10, background: "#fff", padding: "0 12px", fontSize: 14, color: INV.ink, boxSizing: "border-box", outline: "none" };
+  const field = { width: "100%", height: 42, border: `1px solid ${INV.border}`, borderRadius: 10, background: "var(--surface)", padding: "0 12px", fontSize: 14, color: INV.ink, boxSizing: "border-box", outline: "none" };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
@@ -6157,7 +6165,7 @@ function IngredientForm({ value, onChange, onSubmit, onCancel, submitLabel, allI
         </div>
 
         {isMix && (
-          <div style={{ background: "#FBFAF8", border: `1px solid ${INV.line}`, borderRadius: 12, padding: 14 }}>
+          <div style={{ background: "var(--cream-2)", border: `1px solid ${INV.line}`, borderRadius: 12, padding: 14 }}>
             <p style={{ fontSize: 11.5, color: INV.gray, margin: "0 0 10px", lineHeight: 1.5 }}>
               ใส่เป็นตัวเลขสัดส่วน เช่น 2 กับ 1 = 2:1 (ไม่ต้องรวมเป็น 100) ระบบจะตัดสต็อกวัตถุดิบจริงแต่ละตัวตามสัดส่วนนี้
             </p>
@@ -6193,7 +6201,7 @@ function InvModalShell({ icon, iconTone, title, subtitle, onClose, children }) {
   const t = tones[iconTone] || tones.primary;
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(17,24,39,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 16 }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title} style={{ background: "#fff", borderRadius: 18, padding: 24, width: 380, maxWidth: "100%", maxHeight: "calc(100vh - 32px)", overflowY: "auto", boxSizing: "border-box", boxShadow: "0 24px 64px rgba(0,0,0,.28)" }}>
+      <div onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title} style={{ background: "var(--surface)", borderRadius: 18, padding: 24, width: 380, maxWidth: "100%", maxHeight: "calc(100vh - 32px)", overflowY: "auto", boxSizing: "border-box", boxShadow: "0 24px 64px rgba(0,0,0,.28)" }}>
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 18 }}>
           <div style={{ width: 40, height: 40, borderRadius: 11, background: t.bg, color: t.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon name={icon} size={20} /></div>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -6293,7 +6301,7 @@ function StockAdjustModal({ ingredient, onClose, onConfirm }) {
         <p style={{ fontSize: 12, color: INV.gray, margin: "0 0 16px", lineHeight: 1.5 }}>
           กรอกจำนวนที่นับได้จริงหน้างาน ระบบจะปรับตัวเลขในระบบให้ตรงทันที (ไม่กระทบต้นทุน/หน่วย)
         </p>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#F7F6F3", borderRadius: 10, padding: "10px 12px", marginBottom: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "var(--cream-2)", borderRadius: 10, padding: "10px 12px", marginBottom: 14 }}>
           <span style={{ fontSize: 12.5, color: INV.gray }}>สต็อกในระบบปัจจุบัน</span>
           <span style={{ fontSize: 14, fontWeight: 700, color: INV.ink }}>{fmtQty(ingredient.stockQty)} {UNITS[ingredient.unit]}</span>
         </div>
@@ -6354,10 +6362,10 @@ function RepDeltaTag({ delta }) {
 
 function RepKpiCard({ icon, label, value, sub, delta, tone, big }) {
   const tones = {
-    primary: { fg: DASH.primaryDark, iconBg: "#fff", iconFg: DASH.primary, bg: DASH.primarySoft, border: "rgba(37,99,235,.18)" },
-    success: { fg: DASH.success, iconBg: DASH.successSoft, iconFg: DASH.success, bg: "#fff", border: DASH.border },
-    danger: { fg: DASH.danger, iconBg: DASH.dangerSoft, iconFg: DASH.danger, bg: "#fff", border: DASH.border },
-    neutral: { fg: DASH.neutral, iconBg: DASH.neutralSoft, iconFg: DASH.neutral, bg: "#fff", border: DASH.border },
+    primary: { fg: DASH.primaryDark, iconBg: "var(--surface)", iconFg: DASH.primary, bg: DASH.primarySoft, border: "rgba(37,99,235,.18)" },
+    success: { fg: DASH.success, iconBg: DASH.successSoft, iconFg: DASH.success, bg: "var(--surface)", border: DASH.border },
+    danger: { fg: DASH.danger, iconBg: DASH.dangerSoft, iconFg: DASH.danger, bg: "var(--surface)", border: DASH.border },
+    neutral: { fg: DASH.neutral, iconBg: DASH.neutralSoft, iconFg: DASH.neutral, bg: "var(--surface)", border: DASH.border },
   };
   const t = tones[tone] || tones.neutral;
   return (
@@ -6379,7 +6387,7 @@ function RepKpiCard({ icon, label, value, sub, delta, tone, big }) {
 
 const REP_CHANNEL_META = {
   store: { icon: "building-store", color: DASH.primary, bg: DASH.primarySoft },
-  delivery: { icon: "truck-delivery", color: "#B45309", bg: DASH.warningSoft },
+  delivery: { icon: "truck-delivery", color: "var(--warning-text)", bg: DASH.warningSoft },
   online: { icon: "device-mobile", color: DASH.success, bg: DASH.successSoft },
 };
 
@@ -6387,13 +6395,13 @@ function RepChannelCard({ channel, v, totalRevenue }) {
   const meta = REP_CHANNEL_META[channel];
   const share = totalRevenue > 0 ? Math.round((v.revenue / totalRevenue) * 100) : 0;
   return (
-    <div style={{ background: "#fff", border: `1px solid ${DASH.border}`, borderRadius: 16, padding: 18, boxShadow: "0 8px 24px rgba(0,0,0,.04)" }}>
+    <div style={{ background: "var(--surface)", border: `1px solid ${DASH.border}`, borderRadius: 16, padding: 18, boxShadow: "0 8px 24px rgba(0,0,0,.04)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 10 }}>
         <div style={{ width: 28, height: 28, borderRadius: 8, background: meta.bg, color: meta.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon name={meta.icon} size={14} /></div>
-        <span style={{ fontSize: 13, fontWeight: 700, color: "#1F2937" }}>{CHANNELS[channel]}</span>
+        <span style={{ fontSize: 13, fontWeight: 700, color: "var(--espresso-4)" }}>{CHANNELS[channel]}</span>
         <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: DASH.gray }}>{share}%</span>
       </div>
-      <div style={{ fontSize: 22, fontWeight: 700, color: "#111827", fontFamily: "var(--f-body)" }}>฿{money(v.revenue)}</div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: "var(--espresso-4)", fontFamily: "var(--f-body)" }}>฿{money(v.revenue)}</div>
       <div style={{ fontSize: 12, color: DASH.gray, marginTop: 3 }}>กำไร ฿{money(v.profit)} · {v.cups} แก้ว</div>
       <div style={{ height: 5, borderRadius: 999, background: DASH.neutralSoft, marginTop: 10, overflow: "hidden" }}>
         <div style={{ height: "100%", width: share + "%", background: meta.color, borderRadius: 999 }} />
@@ -6423,11 +6431,11 @@ function RepMenuTable({ rows }) {
           <div key={r.name} style={{ display: "grid", gridTemplateColumns: "20px 1fr auto", gap: 10, alignItems: "center", padding: "8px 4px", borderBottom: i < sorted.length - 1 ? `1px solid ${DASH.neutralSoft}` : "none" }}>
             <span style={{ fontSize: 11.5, fontWeight: 700, color: DASH.gray }}>{i + 1}</span>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 13.5, fontWeight: 600, color: "#1F2937", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</div>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--espresso-4)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</div>
               <div style={{ fontSize: 11, color: DASH.gray, marginTop: 1 }}>{r.qty} แก้ว · margin {r.margin.toFixed(0)}%</div>
             </div>
             <div style={{ textAlign: "right", flexShrink: 0 }}>
-              <div style={{ fontSize: 13.5, fontWeight: 700, color: "#1F2937" }}>฿{money(r.revenue)}</div>
+              <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--espresso-4)" }}>฿{money(r.revenue)}</div>
               <div style={{ fontSize: 11, fontWeight: 600, color: r.profit >= 0 ? DASH.success : DASH.danger }}>กำไร ฿{money(r.profit)}</div>
             </div>
           </div>
@@ -6611,42 +6619,42 @@ function AccountingPanel({ transactions, assets, recurringExpenses, accounts, re
         .acc-actions { display:flex; gap:8px; flex-wrap:wrap; }
         .acc-subnav { position:sticky; top:10px; z-index:20; display:flex; gap:4px; margin-bottom:16px; padding:5px; overflow-x:auto; border:1px solid ${POS.border}; border-radius:13px; background:rgba(255,255,255,.94); backdrop-filter:blur(12px); box-shadow:0 5px 18px rgba(17,24,39,.06); }
         .acc-subnav button { display:inline-flex; align-items:center; gap:6px; min-height:36px; padding:0 12px; border:0; border-radius:9px; background:transparent; color:var(--acc-muted); font:inherit; font-size:11.5px; font-weight:700; white-space:nowrap; cursor:pointer; }
-        .acc-subnav button.active { color:#1D4ED8; background:#E8EEFF; }
-        .acc-subnav-count { min-width:16px; padding:2px 5px; border-radius:999px; color:#92400E; background:#FFF4E5; font-size:9.5px; text-align:center; }
+        .acc-subnav button.active { color:var(--primary-text); background:var(--info-light); }
+        .acc-subnav-count { min-width:16px; padding:2px 5px; border-radius:999px; color:var(--warning-text); background:var(--warning-light); font-size:9.5px; text-align:center; }
         .acc-nav-period { display:flex; align-items:center; gap:5px; margin-left:auto; padding-left:8px; color:var(--acc-muted); font-size:10.5px; white-space:nowrap; }
-        .acc-nav-period input { width:128px; height:34px; box-sizing:border-box; border:1px solid ${POS.border}; border-radius:8px; padding:0 7px; background:#fff; color:var(--acc-ink); font:inherit; font-size:11px; }
+        .acc-nav-period input { width:128px; height:34px; box-sizing:border-box; border:1px solid ${POS.border}; border-radius:8px; padding:0 7px; background:var(--surface); color:var(--acc-ink); font:inherit; font-size:11px; }
         .acc-overview-links { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:8px; margin-top:12px; }
-        .acc-overview-link { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:11px 12px; border:1px solid ${POS.border}; border-radius:11px; background:#fff; color:${POS.navy}; font:inherit; font-size:11.5px; font-weight:700; cursor:pointer; }
+        .acc-overview-link { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:11px 12px; border:1px solid ${POS.border}; border-radius:11px; background:var(--surface); color:${POS.navy}; font:inherit; font-size:11.5px; font-weight:700; cursor:pointer; }
         .acc-kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:12px; }
-        .acc-kpi { padding:16px 18px; background:#fff; border:1px solid ${POS.border}; border-radius:15px; }
+        .acc-kpi { padding:16px 18px; background:var(--surface); border:1px solid ${POS.border}; border-radius:15px; }
         .acc-summary-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px; }
-        .acc-statement { padding:16px 18px; border:1px solid ${POS.border}; border-radius:15px; background:#fff; }
+        .acc-statement { padding:16px 18px; border:1px solid ${POS.border}; border-radius:15px; background:var(--surface); }
         .acc-statement-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:7px 0; color:var(--acc-muted); font-size:12.5px; border-bottom:1px solid #F2F0EC; }
         .acc-statement-row:last-child { border-bottom:0; }
         .acc-toolbar { position:sticky; top:62px; z-index:15; display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px; margin-bottom:12px; border:1px solid ${POS.border}; border-radius:14px; background:rgba(255,255,255,.96); backdrop-filter:blur(10px); }
         .acc-search { position:relative; min-width:220px; flex:1; }
-        .acc-search input,.acc-filter { width:100%; height:40px; box-sizing:border-box; border:1px solid ${POS.border}; border-radius:10px; background:#fff; color:var(--acc-ink); font:inherit; font-size:12.5px; outline:none; }
+        .acc-search input,.acc-filter { width:100%; height:40px; box-sizing:border-box; border:1px solid ${POS.border}; border-radius:10px; background:var(--surface); color:var(--acc-ink); font:inherit; font-size:12.5px; outline:none; }
         .acc-search input { padding:0 12px 0 36px; }
         .acc-filter { width:auto; min-width:132px; padding:0 10px; }
-        .acc-table { overflow:auto; max-height:62vh; border:1px solid ${POS.border}; border-radius:15px; background:#fff; }
+        .acc-table { overflow:auto; max-height:62vh; border:1px solid ${POS.border}; border-radius:15px; background:var(--surface); }
         .acc-row { display:grid; grid-template-columns:105px minmax(210px,1.5fr) 155px 120px 130px 110px 72px; gap:12px; align-items:center; padding:12px 14px; border-bottom:1px solid #F0EEE9; }
         .acc-row:last-child { border-bottom:0; }
-        .acc-row-head { position:sticky; top:0; z-index:3; padding-top:9px; padding-bottom:9px; color:var(--acc-muted); background:#FAFAF8; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; }
-        .acc-pagination { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:10px; padding:9px 11px; border:1px solid ${POS.border}; border-radius:11px; background:#fff; color:var(--acc-muted); font-size:11.5px; }
+        .acc-row-head { position:sticky; top:0; z-index:3; padding-top:9px; padding-bottom:9px; color:var(--acc-muted); background:var(--cream-2); font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; }
+        .acc-pagination { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:10px; padding:9px 11px; border:1px solid ${POS.border}; border-radius:11px; background:var(--surface); color:var(--acc-muted); font-size:11.5px; }
         .acc-type { display:inline-flex; width:max-content; align-items:center; gap:5px; padding:4px 8px; border-radius:7px; font-size:10.5px; font-weight:700; }
         .acc-modal-bg { position:fixed; inset:0; z-index:90; display:flex; align-items:center; justify-content:center; padding:18px; background:rgba(17,24,39,.44); }
-        .acc-modal { width:min(520px,100%); max-height:calc(100vh - 36px); overflow-y:auto; padding:20px; border-radius:18px; background:#fff; box-shadow:0 24px 70px rgba(0,0,0,.2); }
+        .acc-modal { width:min(520px,100%); max-height:calc(100vh - 36px); overflow-y:auto; padding:20px; border-radius:18px; background:var(--surface); box-shadow:0 24px 70px rgba(0,0,0,.2); }
         .acc-form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
         .acc-field-label { display:block; margin-bottom:6px; color:var(--acc-muted); font-size:11.5px; font-weight:700; }
-        .acc-field { width:100%; height:42px; box-sizing:border-box; padding:0 11px; border:1px solid ${POS.border}; border-radius:10px; background:#fff; color:var(--acc-ink); font:inherit; font-size:13.5px; outline:none; }
+        .acc-field { width:100%; height:42px; box-sizing:border-box; padding:0 11px; border:1px solid ${POS.border}; border-radius:10px; background:var(--surface); color:var(--acc-ink); font:inherit; font-size:13.5px; outline:none; }
         textarea.acc-field { height:76px; padding-top:10px; resize:vertical; }
         .acc-assets-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:10px; }
         .acc-asset-kpis { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-bottom:10px; }
-        .acc-asset-kpi { padding:12px 14px; border:1px solid ${POS.border}; border-radius:12px; background:#fff; }
+        .acc-asset-kpi { padding:12px 14px; border:1px solid ${POS.border}; border-radius:12px; background:var(--surface); }
         .acc-owner-row { display:grid; grid-template-columns:105px minmax(220px,1fr) 150px 120px 90px; gap:12px; align-items:center; padding:12px 14px; border-bottom:1px solid #F0EEE9; }
         .acc-owner-row:last-child { border-bottom:0; }
         @media(max-width:1100px){ .acc-kpis{grid-template-columns:repeat(2,minmax(0,1fr));} .acc-overview-links{grid-template-columns:repeat(3,minmax(0,1fr));} .acc-row{grid-template-columns:95px minmax(190px,1.5fr) 140px 115px 110px 72px;} .acc-col-account{display:none;} }
-        @media(max-width:760px){ .acc-head{flex-direction:column;} .acc-kpis,.acc-summary-grid,.acc-asset-kpis{grid-template-columns:1fr;} .acc-assets-head{flex-direction:column;} .acc-overview-links{grid-template-columns:1fr 1fr;} .acc-subnav{top:6px;} .acc-nav-period{margin-left:4px;} .acc-toolbar{position:static;} .acc-table{max-height:none;border:0;background:transparent;overflow:visible;} .acc-row-head{display:none;} .acc-row{display:grid;grid-template-columns:1fr auto;gap:7px;margin-bottom:8px;padding:13px;border:1px solid ${POS.border};border-radius:13px;background:#fff;} .acc-row:last-child{border-bottom:1px solid ${POS.border};} .acc-col-date,.acc-col-category,.acc-col-account{font-size:11.5px;} .acc-col-description{grid-column:1/2;grid-row:1;} .acc-col-amount{grid-column:2;grid-row:1;text-align:right;} .acc-col-type{grid-column:1;} .acc-col-actions{grid-column:2;grid-row:2/4;} .acc-owner-row{grid-template-columns:1fr auto;gap:7px;margin-bottom:8px;padding:13px;border:1px solid ${POS.border};border-radius:13px;background:#fff;} .acc-owner-row>div:nth-child(1){grid-column:1;font-size:10.5px!important;} .acc-owner-row>div:nth-child(2){grid-column:1;grid-row:1;} .acc-owner-row>div:nth-child(3){grid-column:1;} .acc-owner-row>div:nth-child(4){grid-column:2;grid-row:1;text-align:right!important;} .acc-owner-row>div:nth-child(5){grid-column:2;grid-row:2/4;} }
+        @media(max-width:760px){ .acc-head{flex-direction:column;} .acc-kpis,.acc-summary-grid,.acc-asset-kpis{grid-template-columns:1fr;} .acc-assets-head{flex-direction:column;} .acc-overview-links{grid-template-columns:1fr 1fr;} .acc-subnav{top:6px;} .acc-nav-period{margin-left:4px;} .acc-toolbar{position:static;} .acc-table{max-height:none;border:0;background:transparent;overflow:visible;} .acc-row-head{display:none;} .acc-row{display:grid;grid-template-columns:1fr auto;gap:7px;margin-bottom:8px;padding:13px;border:1px solid ${POS.border};border-radius:13px;background:var(--surface);} .acc-row:last-child{border-bottom:1px solid ${POS.border};} .acc-col-date,.acc-col-category,.acc-col-account{font-size:11.5px;} .acc-col-description{grid-column:1/2;grid-row:1;} .acc-col-amount{grid-column:2;grid-row:1;text-align:right;} .acc-col-type{grid-column:1;} .acc-col-actions{grid-column:2;grid-row:2/4;} .acc-owner-row{grid-template-columns:1fr auto;gap:7px;margin-bottom:8px;padding:13px;border:1px solid ${POS.border};border-radius:13px;background:var(--surface);} .acc-owner-row>div:nth-child(1){grid-column:1;font-size:10.5px!important;} .acc-owner-row>div:nth-child(2){grid-column:1;grid-row:1;} .acc-owner-row>div:nth-child(3){grid-column:1;} .acc-owner-row>div:nth-child(4){grid-column:2;grid-row:1;text-align:right!important;} .acc-owner-row>div:nth-child(5){grid-column:2;grid-row:2/4;} }
         @media(max-width:520px){ .acc-actions>*{flex:1;} .acc-form-grid{grid-template-columns:1fr;} .acc-filter{width:100%;} }
       `}</style>
 
@@ -6714,10 +6722,10 @@ function AccountingPanel({ transactions, assets, recurringExpenses, accounts, re
         <select className="acc-filter" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} aria-label="กรองประเภทรายการ"><option value="all">ทุกรายการ</option><option value="income">รายรับ</option><option value="expense">รายจ่าย</option></select>
         <button className="cbtn" onClick={()=>exportAccountingCsv(periodTransactions,month)}><Icon name="download" size={14}/><span style={{marginLeft:4}}>Export CSV</span></button>
         {month && <button className="cbtn" onClick={() => setMonth("")}>ดูทั้งหมด</button>}
-        {closedPeriod&&<span className="acc-type" style={{color:"#7A5A00",background:"#FFF9E5"}}>ปิดงวดแล้ว</span>}
+        {closedPeriod&&<span className="acc-type" style={{color:"var(--warning-text)",background:"var(--warning-light)"}}>ปิดงวดแล้ว</span>}
       </div>
 
-      {filtered.length === 0 ? <div style={{ padding:30, border:`1px solid ${POS.border}`, borderRadius:15, background:"#fff", textAlign:"center" }}><Icon name="book-2" size={27} style={{ color:POS.gray }} /><p style={{ margin:"8px 0 2px", color:POS.navy, fontWeight:700, fontSize:13.5 }}>ยังไม่มีรายการในช่วงนี้</p><p style={{ margin:0, color:POS.gray, fontSize:12 }}>เพิ่มรายรับหรือรายจ่ายรายการแรกได้จากปุ่มด้านบน</p></div> : <div className="acc-table">
+      {filtered.length === 0 ? <div style={{ padding:30, border:`1px solid ${POS.border}`, borderRadius:15, background:"var(--surface)", textAlign:"center" }}><Icon name="book-2" size={27} style={{ color:POS.gray }} /><p style={{ margin:"8px 0 2px", color:POS.navy, fontWeight:700, fontSize:13.5 }}>ยังไม่มีรายการในช่วงนี้</p><p style={{ margin:0, color:POS.gray, fontSize:12 }}>เพิ่มรายรับหรือรายจ่ายรายการแรกได้จากปุ่มด้านบน</p></div> : <div className="acc-table">
         <div className="acc-row acc-row-head"><span>วันที่</span><span>รายละเอียด</span><span>หมวด</span><span>ช่องทางเงิน</span><span>ประเภท</span><span style={{ textAlign:"right" }}>จำนวน</span><span /></div>
         {pagedTransactions.map((transaction) => {
           const isIncome = transaction.type === "income";
@@ -6728,7 +6736,7 @@ function AccountingPanel({ transactions, assets, recurringExpenses, accounts, re
             <div className="acc-col-account" style={{ color:POS.gray, fontSize:11.5 }}>{accountingAccountLabel(transaction.paymentAccount)}</div>
             <div className="acc-col-type"><span className="acc-type" style={{ color:transaction.status === "pending" ? "#92400E" : transaction.status === "skipped" ? POS.gray : isIncome ? "#15803D" : "#B91C1C", background:transaction.status === "pending" ? "#FFF4E5" : transaction.status === "skipped" ? "#F3F4F6" : isIncome ? "#EAF7EE" : "#FDECEC" }}>{transaction.status === "pending" ? "รอชำระ" : transaction.status === "skipped" ? "ข้ามแล้ว" : isIncome ? "รายรับ" : "รายจ่าย"}</span></div>
             <div className="acc-col-amount" style={{ color:isIncome ? "#15803D" : "#B91C1C", fontSize:13, fontWeight:700, textAlign:"right", whiteSpace:"nowrap" }}>{isIncome ? "+" : "−"}฿{money(transaction.amount)}</div>
-            <div className="acc-col-actions" style={{ display:"flex", gap:4, justifyContent:"flex-end" }}><button className="cbtn" style={{ width:32, height:32, padding:0, display:"grid", placeItems:"center" }} onClick={() => setEditing(transaction)} aria-label={`แก้ไข ${transaction.description}`} title={transaction.sourceType && transaction.sourceType !== "manual" ? "แก้ไขข้อมูลประกอบรายการ" : "แก้ไขรายการ"}><Icon name="edit" size={14} /></button><button className="cbtn" disabled={Boolean(transaction.sourceType && transaction.sourceType !== "manual")} title={transaction.sourceType && transaction.sourceType !== "manual" ? "รายการอัตโนมัติต้องยกเลิกจากเอกสารต้นทาง" : "ลบรายการ"} style={{ width:32, height:32, padding:0, display:"grid", placeItems:"center", color:"#B91C1C" }} onClick={() => setDeleteFor(transaction)} aria-label={`ลบ ${transaction.description}`}><Icon name="trash" size={14} /></button></div>
+            <div className="acc-col-actions" style={{ display:"flex", gap:4, justifyContent:"flex-end" }}><button className="cbtn" style={{ width:32, height:32, padding:0, display:"grid", placeItems:"center" }} onClick={() => setEditing(transaction)} aria-label={`แก้ไข ${transaction.description}`} title={transaction.sourceType && transaction.sourceType !== "manual" ? "แก้ไขข้อมูลประกอบรายการ" : "แก้ไขรายการ"}><Icon name="edit" size={14} /></button><button className="cbtn" disabled={Boolean(transaction.sourceType && transaction.sourceType !== "manual")} title={transaction.sourceType && transaction.sourceType !== "manual" ? "รายการอัตโนมัติต้องยกเลิกจากเอกสารต้นทาง" : "ลบรายการ"} style={{ width:32, height:32, padding:0, display:"grid", placeItems:"center", color:"var(--danger)" }} onClick={() => setDeleteFor(transaction)} aria-label={`ลบ ${transaction.description}`}><Icon name="trash" size={14} /></button></div>
           </div>;
         })}
       </div>}
@@ -6753,7 +6761,7 @@ function AccountingKpi({ label, value, color, background, icon }) {
 
 function AccountingStatementRow({ label, value, note, strong, tone }) {
   const color = tone === "positive" ? "#15803D" : tone === "negative" ? "#B91C1C" : strong ? POS.navy : POS.gray;
-  return <div className="acc-statement-row" style={strong ? { fontWeight:700, color } : undefined}><div><span>{label}</span>{note && <div style={{ marginTop:2, color:"#B45309", fontSize:9.5 }}>{note}</div>}</div><span style={{ color, fontWeight:strong ? 700 : 600, whiteSpace:"nowrap" }}>{value < 0 ? "−" : ""}฿{money(Math.abs(value))}</span></div>;
+  return <div className="acc-statement-row" style={strong ? { fontWeight:700, color } : undefined}><div><span>{label}</span>{note && <div style={{ marginTop:2, color:"var(--warning-text)", fontSize:9.5 }}>{note}</div>}</div><span style={{ color, fontWeight:strong ? 700 : 600, whiteSpace:"nowrap" }}>{value < 0 ? "−" : ""}฿{money(Math.abs(value))}</span></div>;
 }
 
 function AccountingAssetsSection({ assets, onSave, onDelete, showToast }) {
@@ -6792,20 +6800,20 @@ function AccountingAssetsSection({ assets, onSave, onDelete, showToast }) {
     <style>{`
       .acc-assets-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:10px; }
       .acc-asset-kpis { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-bottom:10px; }
-      .acc-asset-kpi { padding:12px 14px; border:1px solid ${POS.border}; border-radius:12px; background:#fff; }
+      .acc-asset-kpi { padding:12px 14px; border:1px solid ${POS.border}; border-radius:12px; background:var(--surface); }
       .acc-asset-row { display:grid; grid-template-columns:minmax(190px,1.5fr) 150px 110px 110px 110px 85px 72px; gap:12px; align-items:center; padding:12px 14px; border-bottom:1px solid #F0EEE9; }
       .acc-asset-row:last-child { border-bottom:0; }
-      .acc-asset-row-head { padding-top:9px; padding-bottom:9px; color:${POS.gray}; background:#FAFAF8; font-size:10.5px; font-weight:700; text-transform:uppercase; }
+      .acc-asset-row-head { padding-top:9px; padding-bottom:9px; color:${POS.gray}; background:var(--cream-2); font-size:10.5px; font-weight:700; text-transform:uppercase; }
       @media(max-width:1000px){ .acc-asset-row{grid-template-columns:minmax(180px,1fr) 130px 100px 100px 85px 72px;} .acc-asset-col-date{display:none;} }
-      @media(max-width:700px){ .acc-asset-kpis{grid-template-columns:1fr;} .acc-asset-row-head{display:none;} .acc-asset-row{display:grid;grid-template-columns:1fr auto;gap:6px;margin-bottom:8px;border:1px solid ${POS.border};border-radius:12px;background:#fff;} .acc-asset-row:last-child{border-bottom:1px solid ${POS.border};} .acc-asset-col-category,.acc-asset-col-cost,.acc-asset-col-book{font-size:11.5px;} .acc-asset-actions{grid-column:2;grid-row:1/4;} }
+      @media(max-width:700px){ .acc-asset-kpis{grid-template-columns:1fr;} .acc-asset-row-head{display:none;} .acc-asset-row{display:grid;grid-template-columns:1fr auto;gap:6px;margin-bottom:8px;border:1px solid ${POS.border};border-radius:12px;background:var(--surface);} .acc-asset-row:last-child{border-bottom:1px solid ${POS.border};} .acc-asset-col-category,.acc-asset-col-cost,.acc-asset-col-book{font-size:11.5px;} .acc-asset-actions{grid-column:2;grid-row:1/4;} }
     `}</style>
     <div className="acc-assets-head"><div><h3 style={{ margin:"0 0 3px", color:POS.navy, fontSize:17 }}>สินทรัพย์และอุปกรณ์</h3><p style={{ margin:0, color:POS.gray, fontSize:11.5 }}>ค่าเสื่อมแบบเส้นตรงสำหรับการบริหารร้าน ปรับอายุใช้งานของแต่ละรายการได้</p></div><button className="cbtn cbtn-accent" onClick={addAsset}><Icon name="plus" size={14} /><span style={{ marginLeft:5 }}>เพิ่มอุปกรณ์</span></button></div>
-    <div className="acc-asset-kpis"><div className="acc-asset-kpi"><div style={{ color:POS.gray, fontSize:10.5 }}>ราคาทุนทั้งหมด</div><b style={{ display:"block", marginTop:3, color:POS.navy, fontSize:17 }}>฿{money(totalCost)}</b></div><div className="acc-asset-kpi"><div style={{ color:POS.gray, fontSize:10.5 }}>มูลค่าตามบัญชีปัจจุบัน</div><b style={{ display:"block", marginTop:3, color:"#1D4ED8", fontSize:17 }}>฿{money(bookValue)}</b></div><div className="acc-asset-kpi"><div style={{ color:POS.gray, fontSize:10.5 }}>ค่าเสื่อมต่อเดือน</div><b style={{ display:"block", marginTop:3, color:"#92400E", fontSize:17 }}>฿{money(monthlyDepreciation)}</b></div></div>
+    <div className="acc-asset-kpis"><div className="acc-asset-kpi"><div style={{ color:POS.gray, fontSize:10.5 }}>ราคาทุนทั้งหมด</div><b style={{ display:"block", marginTop:3, color:POS.navy, fontSize:17 }}>฿{money(totalCost)}</b></div><div className="acc-asset-kpi"><div style={{ color:POS.gray, fontSize:10.5 }}>มูลค่าตามบัญชีปัจจุบัน</div><b style={{ display:"block", marginTop:3, color:"var(--primary-text)", fontSize:17 }}>฿{money(bookValue)}</b></div><div className="acc-asset-kpi"><div style={{ color:POS.gray, fontSize:10.5 }}>ค่าเสื่อมต่อเดือน</div><b style={{ display:"block", marginTop:3, color:"var(--warning-text)", fontSize:17 }}>฿{money(monthlyDepreciation)}</b></div></div>
     {assets.length === 0 ? <div style={{ padding:24, border:`1px dashed ${POS.border}`, borderRadius:13, textAlign:"center", color:POS.gray, fontSize:12.5 }}>ยังไม่มีอุปกรณ์ในทะเบียน</div> : <div className="acc-table"><div className="acc-asset-row acc-asset-row-head"><span>อุปกรณ์</span><span>ประเภท</span><span>วันที่ซื้อ</span><span style={{textAlign:"right"}}>ราคาทุน</span><span style={{textAlign:"right"}}>มูลค่าคงเหลือ</span><span>สถานะ</span><span /></div>{assets.map((asset) => {
       const assetAccumulated = accumulatedAssetDepreciation(asset, new Date());
       const currentValue = Math.max(Number(asset.residualValue) || 0, (Number(asset.cost) || 0) - assetAccumulated);
       const category = ACCOUNTING_ASSET_CATEGORIES.find((item) => item.id === asset.category)?.label || asset.category;
-      return <div className="acc-asset-row" key={asset.id}><div><div style={{ color:POS.navy, fontWeight:700, fontSize:13 }}>{asset.name}</div>{asset.serialNumber && <div style={{ marginTop:2, color:POS.gray, fontSize:10 }}>S/N {asset.serialNumber}</div>}</div><div className="acc-asset-col-category" style={{ color:POS.gray, fontSize:11.5 }}>{category}</div><div className="acc-asset-col-date" style={{ color:POS.gray, fontSize:11.5 }}>{new Date(`${asset.purchaseDate}T00:00:00`).toLocaleDateString("th-TH",{day:"numeric",month:"short",year:"2-digit"})}</div><div className="acc-asset-col-cost" style={{ textAlign:"right", color:POS.navy, fontSize:12.5 }}>฿{money(asset.cost)}</div><div className="acc-asset-col-book" style={{ textAlign:"right", color:"#1D4ED8", fontSize:12.5, fontWeight:700 }}>฿{money(currentValue)}</div><div><span className="acc-type" style={{ color:asset.status === "active" ? "#15803D" : "#6B7280", background:asset.status === "active" ? "#EAF7EE" : "#F3F4F6" }}>{asset.status === "active" ? "ใช้งาน" : asset.status === "maintenance" ? "ซ่อม" : "เลิกใช้"}</span></div><div className="acc-asset-actions" style={{ display:"flex", gap:4 }}><button className="cbtn" style={{width:32,height:32,padding:0}} onClick={()=>setEditing(asset)} aria-label={`แก้ไข ${asset.name}`}><Icon name="edit" size={13}/></button><button className="cbtn" style={{width:32,height:32,padding:0,color:"#B91C1C"}} onClick={()=>setDeleteFor(asset)} aria-label={`ลบ ${asset.name}`}><Icon name="trash" size={13}/></button></div></div>;
+      return <div className="acc-asset-row" key={asset.id}><div><div style={{ color:POS.navy, fontWeight:700, fontSize:13 }}>{asset.name}</div>{asset.serialNumber && <div style={{ marginTop:2, color:POS.gray, fontSize:10 }}>S/N {asset.serialNumber}</div>}</div><div className="acc-asset-col-category" style={{ color:POS.gray, fontSize:11.5 }}>{category}</div><div className="acc-asset-col-date" style={{ color:POS.gray, fontSize:11.5 }}>{new Date(`${asset.purchaseDate}T00:00:00`).toLocaleDateString("th-TH",{day:"numeric",month:"short",year:"2-digit"})}</div><div className="acc-asset-col-cost" style={{ textAlign:"right", color:POS.navy, fontSize:12.5 }}>฿{money(asset.cost)}</div><div className="acc-asset-col-book" style={{ textAlign:"right", color:"var(--primary-text)", fontSize:12.5, fontWeight:700 }}>฿{money(currentValue)}</div><div><span className="acc-type" style={{ color:asset.status === "active" ? "#15803D" : "#6B7280", background:asset.status === "active" ? "#EAF7EE" : "#F3F4F6" }}>{asset.status === "active" ? "ใช้งาน" : asset.status === "maintenance" ? "ซ่อม" : "เลิกใช้"}</span></div><div className="acc-asset-actions" style={{ display:"flex", gap:4 }}><button className="cbtn" style={{width:32,height:32,padding:0}} onClick={()=>setEditing(asset)} aria-label={`แก้ไข ${asset.name}`}><Icon name="edit" size={13}/></button><button className="cbtn" style={{width:32,height:32,padding:0,color:"var(--danger)"}} onClick={()=>setDeleteFor(asset)} aria-label={`ลบ ${asset.name}`}><Icon name="trash" size={13}/></button></div></div>;
     })}</div>}
     {editing && <AccountingAssetModal asset={editing} onClose={()=>setEditing(null)} onSave={async (asset) => { await onSave(asset); setEditing(null); showToast(asset.id ? "แก้ไขสินทรัพย์แล้ว" : "เพิ่มสินทรัพย์และบันทึกเงินจ่ายแล้ว"); }} />}
     {deleteFor && <div className="acc-modal-bg" onClick={()=>!deleting&&setDeleteFor(null)}><div className="acc-modal" style={{width:"min(390px,100%)"}} role="alertdialog" aria-modal="true" onClick={(event)=>event.stopPropagation()}><h3 style={{margin:"0 0 7px",color:POS.navy}}>ลบสินทรัพย์นี้?</h3><p style={{margin:"0 0 16px",color:POS.gray,fontSize:12.5}}>ทะเบียน “{deleteFor.name}” และรายการเงินจ่ายที่เชื่อมไว้จะถูกลบ</p><div style={{display:"flex",gap:8}}><button className="cbtn" style={{flex:1}} onClick={()=>setDeleteFor(null)}>ยกเลิก</button><button className="cbtn cbtn-danger" disabled={deleting} style={{flex:1}} onClick={confirmDelete}>{deleting?"กำลังลบ...":"ลบ"}</button></div></div></div>}
@@ -6822,9 +6830,9 @@ function AccountingRecurringSection({ templates, transactions, onSave, onDelete,
   async function removeTemplate(template){try{await onDelete(template);showToast("ลบค่าใช้จ่ายประจำแล้ว (ประวัติเดิมยังอยู่)");}catch(error){showToast("ลบไม่สำเร็จ: "+error.message);}}
   async function updateOccurrence(transaction,status){try{await onUpdateOccurrence(transaction,status);showToast(status === "paid" ? "บันทึกว่าชำระแล้ว" : "ข้ามรายการเดือนนี้แล้ว");}catch(error){showToast("อัปเดตไม่สำเร็จ: "+error.message);}}
   return <section style={{marginTop:20}}><div className="acc-assets-head"><div><h3 style={{margin:"0 0 3px",color:POS.navy,fontSize:17}}>ค่าใช้จ่ายประจำ</h3><p style={{margin:0,color:POS.gray,fontSize:11.5}}>สร้างรายการรอชำระอัตโนมัติทุกเดือน และนับเข้ารายงานเมื่อยืนยันว่าจ่ายแล้วเท่านั้น</p></div><button className="cbtn cbtn-accent" onClick={addTemplate}><Icon name="plus" size={14}/><span style={{marginLeft:5}}>เพิ่มรายการประจำ</span></button></div>
-    <div className="acc-asset-kpis"><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>ประมาณการต่อเดือน</div><b style={{display:"block",marginTop:3,color:POS.navy,fontSize:17}}>฿{money(monthlyTotal)}</b></div><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>รอชำระเดือนนี้</div><b style={{display:"block",marginTop:3,color:pending.length?"#92400E":"#15803D",fontSize:17}}>{pending.length} รายการ</b></div><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>ชำระแล้วเดือนนี้</div><b style={{display:"block",marginTop:3,color:"#15803D",fontSize:17}}>{currentOccurrences.filter((transaction)=>transaction.status === "paid").length} รายการ</b></div></div>
-    {pending.length>0&&<div style={{padding:12,border:"1px solid #F1D7AD",borderRadius:13,background:"#FFF8ED",marginBottom:10}}><div style={{fontSize:11,fontWeight:700,color:"#92400E",marginBottom:7}}>รายการรอยืนยันเดือนนี้</div>{pending.map((transaction)=><div key={transaction.id} style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",padding:"7px 0",borderBottom:"1px solid #F7E7CB"}}><div style={{flex:1,minWidth:150}}><div style={{fontSize:12.5,fontWeight:700,color:POS.navy}}>{transaction.description}</div><div style={{fontSize:10.5,color:POS.gray}}>ครบกำหนด {new Date(`${transaction.transactionDate}T00:00:00`).toLocaleDateString("th-TH",{day:"numeric",month:"short"})}</div></div><b style={{color:"#92400E",fontSize:12.5}}>฿{money(transaction.amount)}</b><button className="cbtn" onClick={()=>updateOccurrence(transaction,"skipped")}>ข้ามเดือนนี้</button><button className="cbtn cbtn-accent" onClick={()=>updateOccurrence(transaction,"paid")}>ชำระแล้ว</button></div>)}</div>}
-    {templates.length===0?<div style={{padding:22,border:`1px dashed ${POS.border}`,borderRadius:13,textAlign:"center",color:POS.gray,fontSize:12.5}}>ยังไม่มีค่าใช้จ่ายประจำ</div>:<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(245px,1fr))",gap:8}}>{templates.map((template)=><div key={template.id} style={{padding:13,border:`1px solid ${POS.border}`,borderRadius:12,background:"#fff",opacity:template.active===false?.6:1}}><div style={{display:"flex",justifyContent:"space-between",gap:8}}><div><div style={{fontSize:13,fontWeight:700,color:POS.navy}}>{template.name}</div><div style={{marginTop:3,fontSize:10.5,color:POS.gray}}>{accountingCategoryLabel("expense",template.category)} · ทุกวันที่ {template.dayOfMonth}</div></div><span className="acc-type" style={{color:template.active===false?POS.gray:"#15803D",background:template.active===false?"#F3F4F6":"#EAF7EE"}}>{template.active===false?"พัก":"ใช้งาน"}</span></div><div style={{marginTop:10,fontSize:18,fontWeight:700,color:"#B91C1C"}}>฿{money(template.amount)}<span style={{fontSize:10.5,fontWeight:500,color:POS.gray}}>/เดือน</span></div><div style={{display:"flex",gap:5,marginTop:10}}><button className="cbtn" style={{flex:1}} onClick={()=>setEditing(template)}><Icon name="edit" size={13}/><span style={{marginLeft:4}}>แก้ไข</span></button><button className="cbtn" style={{width:34,padding:0,color:"#B91C1C"}} onClick={()=>removeTemplate(template)} aria-label={`ลบ ${template.name}`}><Icon name="trash" size={13}/></button></div></div>)}</div>}
+    <div className="acc-asset-kpis"><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>ประมาณการต่อเดือน</div><b style={{display:"block",marginTop:3,color:POS.navy,fontSize:17}}>฿{money(monthlyTotal)}</b></div><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>รอชำระเดือนนี้</div><b style={{display:"block",marginTop:3,color:pending.length?"#92400E":"#15803D",fontSize:17}}>{pending.length} รายการ</b></div><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>ชำระแล้วเดือนนี้</div><b style={{display:"block",marginTop:3,color:"var(--success-dark)",fontSize:17}}>{currentOccurrences.filter((transaction)=>transaction.status === "paid").length} รายการ</b></div></div>
+    {pending.length>0&&<div style={{padding:12,border:"1px solid #F1D7AD",borderRadius:13,background:"var(--warning-light)",marginBottom:10}}><div style={{fontSize:11,fontWeight:700,color:"var(--warning-text)",marginBottom:7}}>รายการรอยืนยันเดือนนี้</div>{pending.map((transaction)=><div key={transaction.id} style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",padding:"7px 0",borderBottom:"1px solid #F7E7CB"}}><div style={{flex:1,minWidth:150}}><div style={{fontSize:12.5,fontWeight:700,color:POS.navy}}>{transaction.description}</div><div style={{fontSize:10.5,color:POS.gray}}>ครบกำหนด {new Date(`${transaction.transactionDate}T00:00:00`).toLocaleDateString("th-TH",{day:"numeric",month:"short"})}</div></div><b style={{color:"var(--warning-text)",fontSize:12.5}}>฿{money(transaction.amount)}</b><button className="cbtn" onClick={()=>updateOccurrence(transaction,"skipped")}>ข้ามเดือนนี้</button><button className="cbtn cbtn-accent" onClick={()=>updateOccurrence(transaction,"paid")}>ชำระแล้ว</button></div>)}</div>}
+    {templates.length===0?<div style={{padding:22,border:`1px dashed ${POS.border}`,borderRadius:13,textAlign:"center",color:POS.gray,fontSize:12.5}}>ยังไม่มีค่าใช้จ่ายประจำ</div>:<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(245px,1fr))",gap:8}}>{templates.map((template)=><div key={template.id} style={{padding:13,border:`1px solid ${POS.border}`,borderRadius:12,background:"var(--surface)",opacity:template.active===false?.6:1}}><div style={{display:"flex",justifyContent:"space-between",gap:8}}><div><div style={{fontSize:13,fontWeight:700,color:POS.navy}}>{template.name}</div><div style={{marginTop:3,fontSize:10.5,color:POS.gray}}>{accountingCategoryLabel("expense",template.category)} · ทุกวันที่ {template.dayOfMonth}</div></div><span className="acc-type" style={{color:template.active===false?POS.gray:"#15803D",background:template.active===false?"#F3F4F6":"#EAF7EE"}}>{template.active===false?"พัก":"ใช้งาน"}</span></div><div style={{marginTop:10,fontSize:18,fontWeight:700,color:"var(--danger)"}}>฿{money(template.amount)}<span style={{fontSize:10.5,fontWeight:500,color:POS.gray}}>/เดือน</span></div><div style={{display:"flex",gap:5,marginTop:10}}><button className="cbtn" style={{flex:1}} onClick={()=>setEditing(template)}><Icon name="edit" size={13}/><span style={{marginLeft:4}}>แก้ไข</span></button><button className="cbtn" style={{width:34,padding:0,color:"var(--danger)"}} onClick={()=>removeTemplate(template)} aria-label={`ลบ ${template.name}`}><Icon name="trash" size={13}/></button></div></div>)}</div>}
     {editing&&<AccountingRecurringModal template={editing} onClose={()=>setEditing(null)} onSave={async(template)=>{await onSave(template);setEditing(null);showToast(template.id?"แก้ไขค่าใช้จ่ายประจำแล้ว":"เพิ่มค่าใช้จ่ายประจำแล้ว");}}/>}
   </section>;
 }
@@ -6842,9 +6850,9 @@ function AccountingOwnerFundingSection({transactions,reimbursements,capitalMovem
   async function remove(item){setDeletingId(item.id);try{if(item.kind==="reimbursement")await onDelete(item.record);else await onDeleteCapital(item.record);showToast("ลบรายการเงินเจ้าของแล้ว");}catch(error){showToast("ลบไม่สำเร็จ: "+error.message);}finally{setDeletingId(null);}}
   return <section style={{marginTop:20}}>
     <div className="acc-assets-head"><div><h3 style={{margin:"0 0 3px",color:POS.navy,fontSize:17}}>เงินเจ้าของและเงินลงทุน</h3><p style={{margin:0,color:POS.gray,fontSize:11.5}}>แยกยอดที่ร้านต้องคืนออกจากเงินทุนถาวร โดยไม่บันทึกเป็นรายได้จากการขาย</p></div><div style={{display:"flex",gap:6,flexWrap:"wrap"}}><button className="cbtn" onClick={()=>setAddingCapital(true)}><Icon name="pig-money" size={14}/><span style={{marginLeft:5}}>บันทึกเงินลงทุน</span></button><button className="cbtn cbtn-accent" disabled={ownerPayable<=0} onClick={()=>setReimbursing(true)}><Icon name="cash-banknote" size={14}/><span style={{marginLeft:5}}>คืนเงินให้เจ้าของ</span></button></div></div>
-    <div className="acc-asset-kpis" style={{gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))"}}><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>เจ้าของออกให้ทั้งหมด</div><b style={{display:"block",marginTop:3,color:POS.navy,fontSize:18}}>฿{money(ownerAdvancedTotal)}</b></div><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>ร้านคืนแล้ว</div><b style={{display:"block",marginTop:3,color:"#15803D",fontSize:18}}>฿{money(ownerReimbursedTotal)}</b></div><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>เปลี่ยนยอดค้างเป็นทุน</div><b style={{display:"block",marginTop:3,color:"#1D4ED8",fontSize:18}}>฿{money(ownerConvertedTotal)}</b></div><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>เงินลงทุนสะสม</div><b style={{display:"block",marginTop:3,color:"#1D4ED8",fontSize:18}}>฿{money(ownerCapitalTotal)}</b></div><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>{ownerPayable>=0?"ร้านยังค้างคืนเจ้าของ":"คืน/แปลงเกินยอดสำรองจ่าย"}</div><b style={{display:"block",marginTop:3,color:ownerPayable>0?"#B45309":ownerPayable<0?"#B91C1C":"#15803D",fontSize:18}}>฿{money(Math.abs(ownerPayable))}</b></div></div>
-    <div style={{padding:12,border:"1px solid #F1D7AD",borderRadius:12,background:"#FFF8ED",color:"#7C4A03",fontSize:11.5,lineHeight:1.55,marginBottom:12}}><b>วิธีลงรายการ:</b> เพิ่มรายจ่าย ซื้อวัตถุดิบ หรือเพิ่มสินทรัพย์ตามปกติ แล้วเลือกช่องทางเงิน “เจ้าของสำรองจ่าย” ระบบจะเพิ่มยอดค้างคืนให้อัตโนมัติ</div>
-    {timeline.length===0?<div style={{padding:24,border:`1px dashed ${POS.border}`,borderRadius:13,textAlign:"center",color:POS.gray,fontSize:12.5}}>ยังไม่มีรายการเงินเจ้าของ</div>:<div className="acc-table" style={{maxHeight:"55vh"}}><div className="acc-owner-row acc-row-head"><span>วันที่</span><span>รายละเอียด</span><span>ประเภท</span><span style={{textAlign:"right"}}>จำนวน</span><span/></div>{timeline.map((item)=>{const isAdvance=item.kind==="advance";const isReimbursement=item.kind==="reimbursement";const label=isAdvance?"เจ้าของออกให้":isReimbursement?"ร้านคืนเงิน":item.kind==="conversion"?"เปลี่ยนเป็นทุน":"ลงทุนเข้าร้าน";return <div className="acc-owner-row" key={item.id}><div style={{color:POS.gray,fontSize:11.5}}>{new Date(`${item.date}T00:00:00`).toLocaleDateString("th-TH",{day:"numeric",month:"short",year:"2-digit"})}</div><div style={{minWidth:0}}><div style={{color:POS.navy,fontSize:12.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.description}</div>{item.note&&<div style={{marginTop:2,color:POS.gray,fontSize:10.5}}>{item.note}</div>}</div><div><span className="acc-type" style={{color:isAdvance?"#92400E":isReimbursement?"#15803D":"#1D4ED8",background:isAdvance?"#FFF4E5":isReimbursement?"#EAF7EE":"#E8EEFF"}}>{label}</span></div><div style={{textAlign:"right",fontWeight:700,color:isAdvance?"#B45309":isReimbursement?"#15803D":"#1D4ED8",fontSize:12.5}}>{isAdvance?"+":isReimbursement?"−":""}฿{money(item.amount)}</div><div style={{textAlign:"right"}}>{!isAdvance&&<button className="cbtn" disabled={deletingId===item.id} style={{width:32,height:32,padding:0,color:"#B91C1C"}} onClick={()=>remove(item)} aria-label="ลบรายการเงินเจ้าของ"><Icon name="trash" size={13}/></button>}</div></div>})}</div>}
+    <div className="acc-asset-kpis" style={{gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))"}}><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>เจ้าของออกให้ทั้งหมด</div><b style={{display:"block",marginTop:3,color:POS.navy,fontSize:18}}>฿{money(ownerAdvancedTotal)}</b></div><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>ร้านคืนแล้ว</div><b style={{display:"block",marginTop:3,color:"var(--success-dark)",fontSize:18}}>฿{money(ownerReimbursedTotal)}</b></div><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>เปลี่ยนยอดค้างเป็นทุน</div><b style={{display:"block",marginTop:3,color:"var(--primary-text)",fontSize:18}}>฿{money(ownerConvertedTotal)}</b></div><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>เงินลงทุนสะสม</div><b style={{display:"block",marginTop:3,color:"var(--primary-text)",fontSize:18}}>฿{money(ownerCapitalTotal)}</b></div><div className="acc-asset-kpi"><div style={{color:POS.gray,fontSize:10.5}}>{ownerPayable>=0?"ร้านยังค้างคืนเจ้าของ":"คืน/แปลงเกินยอดสำรองจ่าย"}</div><b style={{display:"block",marginTop:3,color:ownerPayable>0?"#B45309":ownerPayable<0?"#B91C1C":"#15803D",fontSize:18}}>฿{money(Math.abs(ownerPayable))}</b></div></div>
+    <div style={{padding:12,border:"1px solid #F1D7AD",borderRadius:12,background:"var(--warning-light)",color:"var(--warning-text)",fontSize:11.5,lineHeight:1.55,marginBottom:12}}><b>วิธีลงรายการ:</b> เพิ่มรายจ่าย ซื้อวัตถุดิบ หรือเพิ่มสินทรัพย์ตามปกติ แล้วเลือกช่องทางเงิน “เจ้าของสำรองจ่าย” ระบบจะเพิ่มยอดค้างคืนให้อัตโนมัติ</div>
+    {timeline.length===0?<div style={{padding:24,border:`1px dashed ${POS.border}`,borderRadius:13,textAlign:"center",color:POS.gray,fontSize:12.5}}>ยังไม่มีรายการเงินเจ้าของ</div>:<div className="acc-table" style={{maxHeight:"55vh"}}><div className="acc-owner-row acc-row-head"><span>วันที่</span><span>รายละเอียด</span><span>ประเภท</span><span style={{textAlign:"right"}}>จำนวน</span><span/></div>{timeline.map((item)=>{const isAdvance=item.kind==="advance";const isReimbursement=item.kind==="reimbursement";const label=isAdvance?"เจ้าของออกให้":isReimbursement?"ร้านคืนเงิน":item.kind==="conversion"?"เปลี่ยนเป็นทุน":"ลงทุนเข้าร้าน";return <div className="acc-owner-row" key={item.id}><div style={{color:POS.gray,fontSize:11.5}}>{new Date(`${item.date}T00:00:00`).toLocaleDateString("th-TH",{day:"numeric",month:"short",year:"2-digit"})}</div><div style={{minWidth:0}}><div style={{color:POS.navy,fontSize:12.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.description}</div>{item.note&&<div style={{marginTop:2,color:POS.gray,fontSize:10.5}}>{item.note}</div>}</div><div><span className="acc-type" style={{color:isAdvance?"#92400E":isReimbursement?"#15803D":"#1D4ED8",background:isAdvance?"#FFF4E5":isReimbursement?"#EAF7EE":"#E8EEFF"}}>{label}</span></div><div style={{textAlign:"right",fontWeight:700,color:isAdvance?"#B45309":isReimbursement?"#15803D":"#1D4ED8",fontSize:12.5}}>{isAdvance?"+":isReimbursement?"−":""}฿{money(item.amount)}</div><div style={{textAlign:"right"}}>{!isAdvance&&<button className="cbtn" disabled={deletingId===item.id} style={{width:32,height:32,padding:0,color:"var(--danger)"}} onClick={()=>remove(item)} aria-label="ลบรายการเงินเจ้าของ"><Icon name="trash" size={13}/></button>}</div></div>})}</div>}
     {reimbursing&&<AccountingOwnerReimbursementModal maxAmount={Math.max(0,ownerPayable)} advances={advances.filter((advance)=>advance.remainingAmount>0.009)} onClose={()=>setReimbursing(false)} onSave={async(value)=>{await onSave(value);setReimbursing(false);showToast("บันทึกคืนเงินให้เจ้าของแล้ว");}}/>}
     {addingCapital&&<AccountingOwnerCapitalModal maxConvertible={Math.max(0,ownerPayable)} onClose={()=>setAddingCapital(false)} onSave={async(value)=>{await onSaveCapital(value);setAddingCapital(false);showToast(value.kind==="conversion"?"เปลี่ยนยอดค้างเป็นเงินลงทุนแล้ว":"บันทึกเงินลงทุนเข้าร้านแล้ว");}}/>}
   </section>;
@@ -6860,7 +6868,7 @@ function AccountingOwnerReimbursementModal({maxAmount,advances,onClose,onSave}){
   function setAllocation(advance,value){const amount=Math.min(advance.remainingAmount,Math.max(0,Number(value)||0));setAllocations((current)=>({...current,[advance.id]:amount||""}));}
   function selectAll(){let available=maxAmount;const next={};for(const advance of advances){const amount=Math.min(advance.remainingAmount,available);if(amount>0)next[advance.id]=amount;available-=amount;}setAllocations(next);}
   async function submit(event){event.preventDefault();setError("");const amount=form.allocationMode==="selected"?selectedTotal:(Number(form.amount)||0);if(amount<=0){setError(form.allocationMode==="selected"?"กรุณาเลือกอย่างน้อย 1 รายการและระบุยอดที่คืน":"กรุณากรอกจำนวนเงินที่คืน");return;}if(amount>maxAmount+.001){setError(`คืนได้ไม่เกินยอดค้าง ฿${money(maxAmount)}`);return;}const selectedAllocations=advances.map((advance)=>({transactionId:advance.id,amount:Number(allocations[advance.id])||0})).filter((allocation)=>allocation.amount>0);setSaving(true);try{await onSave({...form,amount,allocations:selectedAllocations});}catch(saveError){setError(saveError.message||"บันทึกไม่สำเร็จ");setSaving(false);}}
-  return <div className="acc-modal-bg" onClick={onClose}><form className="acc-modal" style={{width:"min(620px,100%)"}} role="dialog" aria-modal="true" aria-label="คืนเงินให้เจ้าของ" onSubmit={submit} onClick={(event)=>event.stopPropagation()}><h3 style={{margin:"0 0 4px",color:POS.navy}}>คืนเงินให้เจ้าของ</h3><p style={{margin:"0 0 14px",fontSize:11.5,color:POS.gray}}>ยอดค้างสูงสุด ฿{money(maxAmount)} · เลือกคืนเต็มจำนวนหรือบางส่วนได้หลายรายการ</p><div style={{display:"flex",gap:6,padding:4,marginBottom:12,borderRadius:11,background:POS.chipBg}}><button type="button" className="cbtn" style={{flex:1,border:0,background:form.allocationMode==="selected"?"#fff":"transparent",color:form.allocationMode==="selected"?"#1D4ED8":POS.gray}} onClick={()=>setForm({...form,allocationMode:"selected"})}>เลือกรายการที่จะคืน</button><button type="button" className="cbtn" style={{flex:1,border:0,background:form.allocationMode==="unallocated"?"#fff":"transparent",color:form.allocationMode==="unallocated"?"#1D4ED8":POS.gray}} onClick={()=>setForm({...form,allocationMode:"unallocated"})}>ไม่ระบุรายการ</button></div>{form.allocationMode==="selected"?<div style={{marginBottom:13,border:`1px solid ${POS.border}`,borderRadius:12,overflow:"hidden"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"9px 11px",background:"#FAFAF8",borderBottom:`1px solid ${POS.border}`}}><span style={{fontSize:11.5,fontWeight:700,color:POS.navy}}>รายการที่ยังคืนไม่ครบ ({advances.length})</span><button type="button" className="cbtn" style={{height:30,padding:"0 9px",fontSize:10.5}} onClick={selectAll}>คืนเต็มทั้งหมด</button></div><div style={{maxHeight:260,overflowY:"auto"}}>{advances.map((advance)=>{const value=allocations[advance.id]||"";return <div key={advance.id} style={{display:"grid",gridTemplateColumns:"minmax(180px,1fr) 110px 95px",gap:8,alignItems:"center",padding:"10px 11px",borderBottom:"1px solid #F0EEE9"}}><div style={{minWidth:0}}><div style={{fontSize:12.5,fontWeight:700,color:POS.navy,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{advance.description}</div><div style={{marginTop:2,fontSize:10.5,color:POS.gray}}>{new Date(`${advance.transactionDate}T00:00:00`).toLocaleDateString("th-TH",{day:"numeric",month:"short",year:"2-digit"})} · เหลือ ฿{money(advance.remainingAmount)}</div></div><input className="acc-field" aria-label={`ยอดคืน ${advance.description}`} style={{height:36,textAlign:"right"}} type="number" min="0" max={advance.remainingAmount} step="0.01" value={value} onChange={(event)=>setAllocation(advance,event.target.value)} placeholder="0.00"/><button type="button" className="cbtn" style={{height:34,padding:"0 8px",fontSize:10.5}} onClick={()=>setAllocation(advance,advance.remainingAmount)}>คืนเต็ม</button></div>})}</div><div style={{display:"flex",justifyContent:"space-between",padding:"10px 11px",background:"#F7FAFF",color:"#1D4ED8",fontSize:12.5,fontWeight:700}}><span>ยอดคืนครั้งนี้</span><span>฿{money(selectedTotal)}</span></div></div>:<div style={{marginBottom:13}}><label className="acc-field-label">ยอดคืนแบบไม่ระบุรายการ *</label><input className="acc-field" type="number" min="0.01" max={maxAmount} step="0.01" value={form.amount} onChange={(event)=>setForm({...form,amount:event.target.value})} placeholder="0.00"/><p style={{margin:"5px 0 0",fontSize:10.5,color:POS.gray}}>ระบบจะตัดยอดจากรายการเก่าสุดก่อน เหมาะสำหรับการลงยอดย้อนหลัง</p></div>}<div className="acc-form-grid"><div><label className="acc-field-label">วันที่คืนเงิน *</label><input className="acc-field" type="date" value={form.reimbursementDate} onChange={(event)=>setForm({...form,reimbursementDate:event.target.value})}/></div><div><label className="acc-field-label">จ่ายจากบัญชีร้าน *</label><select className="acc-field" value={form.paymentAccount} onChange={(event)=>setForm({...form,paymentAccount:event.target.value})}>{ACCOUNTING_PAYMENT_ACCOUNTS.filter((account)=>ACCOUNTING_CASH_ACCOUNT_IDS.has(account.id)).map((account)=><option key={account.id} value={account.id}>{account.label}</option>)}</select></div><div><label className="acc-field-label">ชื่อเจ้าของ</label><TextField className="acc-field" value={form.ownerName} onChange={(value)=>setForm({...form,ownerName:value})}/></div><div><label className="acc-field-label">หมายเหตุ</label><TextField className="acc-field" value={form.note} onChange={(value)=>setForm({...form,note:value})} placeholder="เช่น คืนค่าเครื่องชงบางส่วน"/></div></div>{error&&<p style={{margin:"10px 0 0",color:"#B91C1C",fontSize:12}}>{error}</p>}<div style={{display:"flex",gap:8,marginTop:16}}><button type="button" className="cbtn" disabled={saving} style={{flex:1}} onClick={onClose}>ยกเลิก</button><button type="submit" className="cbtn cbtn-accent" disabled={saving} style={{flex:1}}>{saving?"กำลังบันทึก...":`บันทึกคืน ฿${money(form.allocationMode==="selected"?selectedTotal:Number(form.amount)||0)}`}</button></div></form></div>;
+  return <div className="acc-modal-bg" onClick={onClose}><form className="acc-modal" style={{width:"min(620px,100%)"}} role="dialog" aria-modal="true" aria-label="คืนเงินให้เจ้าของ" onSubmit={submit} onClick={(event)=>event.stopPropagation()}><h3 style={{margin:"0 0 4px",color:POS.navy}}>คืนเงินให้เจ้าของ</h3><p style={{margin:"0 0 14px",fontSize:11.5,color:POS.gray}}>ยอดค้างสูงสุด ฿{money(maxAmount)} · เลือกคืนเต็มจำนวนหรือบางส่วนได้หลายรายการ</p><div style={{display:"flex",gap:6,padding:4,marginBottom:12,borderRadius:11,background:POS.chipBg}}><button type="button" className="cbtn" style={{flex:1,border:0,background:form.allocationMode==="selected"?"var(--surface)":"transparent",color:form.allocationMode==="selected"?"#1D4ED8":POS.gray}} onClick={()=>setForm({...form,allocationMode:"selected"})}>เลือกรายการที่จะคืน</button><button type="button" className="cbtn" style={{flex:1,border:0,background:form.allocationMode==="unallocated"?"var(--surface)":"transparent",color:form.allocationMode==="unallocated"?"#1D4ED8":POS.gray}} onClick={()=>setForm({...form,allocationMode:"unallocated"})}>ไม่ระบุรายการ</button></div>{form.allocationMode==="selected"?<div style={{marginBottom:13,border:`1px solid ${POS.border}`,borderRadius:12,overflow:"hidden"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"9px 11px",background:"var(--cream-2)",borderBottom:`1px solid ${POS.border}`}}><span style={{fontSize:11.5,fontWeight:700,color:POS.navy}}>รายการที่ยังคืนไม่ครบ ({advances.length})</span><button type="button" className="cbtn" style={{height:30,padding:"0 9px",fontSize:10.5}} onClick={selectAll}>คืนเต็มทั้งหมด</button></div><div style={{maxHeight:260,overflowY:"auto"}}>{advances.map((advance)=>{const value=allocations[advance.id]||"";return <div key={advance.id} style={{display:"grid",gridTemplateColumns:"minmax(180px,1fr) 110px 95px",gap:8,alignItems:"center",padding:"10px 11px",borderBottom:"1px solid #F0EEE9"}}><div style={{minWidth:0}}><div style={{fontSize:12.5,fontWeight:700,color:POS.navy,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{advance.description}</div><div style={{marginTop:2,fontSize:10.5,color:POS.gray}}>{new Date(`${advance.transactionDate}T00:00:00`).toLocaleDateString("th-TH",{day:"numeric",month:"short",year:"2-digit"})} · เหลือ ฿{money(advance.remainingAmount)}</div></div><input className="acc-field" aria-label={`ยอดคืน ${advance.description}`} style={{height:36,textAlign:"right"}} type="number" min="0" max={advance.remainingAmount} step="0.01" value={value} onChange={(event)=>setAllocation(advance,event.target.value)} placeholder="0.00"/><button type="button" className="cbtn" style={{height:34,padding:"0 8px",fontSize:10.5}} onClick={()=>setAllocation(advance,advance.remainingAmount)}>คืนเต็ม</button></div>})}</div><div style={{display:"flex",justifyContent:"space-between",padding:"10px 11px",background:"var(--info-light)",color:"var(--primary-text)",fontSize:12.5,fontWeight:700}}><span>ยอดคืนครั้งนี้</span><span>฿{money(selectedTotal)}</span></div></div>:<div style={{marginBottom:13}}><label className="acc-field-label">ยอดคืนแบบไม่ระบุรายการ *</label><input className="acc-field" type="number" min="0.01" max={maxAmount} step="0.01" value={form.amount} onChange={(event)=>setForm({...form,amount:event.target.value})} placeholder="0.00"/><p style={{margin:"5px 0 0",fontSize:10.5,color:POS.gray}}>ระบบจะตัดยอดจากรายการเก่าสุดก่อน เหมาะสำหรับการลงยอดย้อนหลัง</p></div>}<div className="acc-form-grid"><div><label className="acc-field-label">วันที่คืนเงิน *</label><input className="acc-field" type="date" value={form.reimbursementDate} onChange={(event)=>setForm({...form,reimbursementDate:event.target.value})}/></div><div><label className="acc-field-label">จ่ายจากบัญชีร้าน *</label><select className="acc-field" value={form.paymentAccount} onChange={(event)=>setForm({...form,paymentAccount:event.target.value})}>{ACCOUNTING_PAYMENT_ACCOUNTS.filter((account)=>ACCOUNTING_CASH_ACCOUNT_IDS.has(account.id)).map((account)=><option key={account.id} value={account.id}>{account.label}</option>)}</select></div><div><label className="acc-field-label">ชื่อเจ้าของ</label><TextField className="acc-field" value={form.ownerName} onChange={(value)=>setForm({...form,ownerName:value})}/></div><div><label className="acc-field-label">หมายเหตุ</label><TextField className="acc-field" value={form.note} onChange={(value)=>setForm({...form,note:value})} placeholder="เช่น คืนค่าเครื่องชงบางส่วน"/></div></div>{error&&<p style={{margin:"10px 0 0",color:"var(--danger)",fontSize:12}}>{error}</p>}<div style={{display:"flex",gap:8,marginTop:16}}><button type="button" className="cbtn" disabled={saving} style={{flex:1}} onClick={onClose}>ยกเลิก</button><button type="submit" className="cbtn cbtn-accent" disabled={saving} style={{flex:1}}>{saving?"กำลังบันทึก...":`บันทึกคืน ฿${money(form.allocationMode==="selected"?selectedTotal:Number(form.amount)||0)}`}</button></div></form></div>;
 }
 
 function AccountingOwnerCapitalModal({maxConvertible,onClose,onSave}){
@@ -6869,7 +6877,7 @@ function AccountingOwnerCapitalModal({maxConvertible,onClose,onSave}){
   const [error,setError]=useState("");
   useEscape(onClose);
   async function submit(event){event.preventDefault();setError("");const amount=Number(form.amount)||0;if(amount<=0){setError("กรุณากรอกจำนวนเงินลงทุน");return;}if(form.kind==="conversion"&&amount>maxConvertible+.001){setError(`เปลี่ยนเป็นทุนได้ไม่เกินยอดค้าง ฿${money(maxConvertible)}`);return;}setSaving(true);try{await onSave({...form,amount});}catch(saveError){setError(saveError.message||"บันทึกไม่สำเร็จ");setSaving(false);}}
-  return <div className="acc-modal-bg" onClick={onClose}><form className="acc-modal" style={{width:"min(460px,100%)"}} role="dialog" aria-modal="true" aria-label="บันทึกเงินลงทุนของเจ้าของ" onSubmit={submit} onClick={(event)=>event.stopPropagation()}><h3 style={{margin:"0 0 4px",color:POS.navy}}>บันทึกเงินลงทุนของเจ้าของ</h3><p style={{margin:"0 0 14px",fontSize:11.5,color:POS.gray}}>เงินลงทุนไม่ใช่รายรับจากการขาย และไม่เพิ่มกำไรของร้าน</p><div style={{display:"flex",gap:6,padding:4,marginBottom:14,borderRadius:11,background:POS.chipBg}}><button type="button" className="cbtn" style={{flex:1,border:0,background:form.kind==="contribution"?"#fff":"transparent",color:form.kind==="contribution"?"#1D4ED8":POS.gray}} onClick={()=>setForm({...form,kind:"contribution"})}>นำเงินเข้าร้าน</button><button type="button" className="cbtn" disabled={maxConvertible<=0} style={{flex:1,border:0,background:form.kind==="conversion"?"#fff":"transparent",color:form.kind==="conversion"?"#1D4ED8":POS.gray}} onClick={()=>setForm({...form,kind:"conversion"})}>เปลี่ยนยอดค้างเป็นทุน</button></div><div className="acc-form-grid"><div><label className="acc-field-label">วันที่ *</label><input className="acc-field" type="date" value={form.movementDate} onChange={(event)=>setForm({...form,movementDate:event.target.value})}/></div><div><label className="acc-field-label">จำนวนเงิน *</label><input className="acc-field" type="number" min="0.01" max={form.kind==="conversion"?maxConvertible:undefined} step="0.01" value={form.amount} onChange={(event)=>setForm({...form,amount:event.target.value})} placeholder="0.00"/></div>{form.kind==="contribution"&&<div><label className="acc-field-label">เงินเข้าบัญชีร้าน *</label><select className="acc-field" value={form.paymentAccount} onChange={(event)=>setForm({...form,paymentAccount:event.target.value})}>{ACCOUNTING_PAYMENT_ACCOUNTS.filter((account)=>ACCOUNTING_CASH_ACCOUNT_IDS.has(account.id)).map((account)=><option key={account.id} value={account.id}>{account.label}</option>)}</select></div>}<div><label className="acc-field-label">ชื่อเจ้าของ</label><TextField className="acc-field" value={form.ownerName} onChange={(value)=>setForm({...form,ownerName:value})}/></div><div style={{gridColumn:"1/-1"}}><label className="acc-field-label">หมายเหตุ</label><textarea className="acc-field" value={form.note} onChange={(event)=>setForm({...form,note:event.target.value})}/></div></div>{form.kind==="conversion"&&<div style={{marginTop:10,padding:"9px 11px",borderRadius:10,background:"#E8EEFF",color:"#1D4ED8",fontSize:11.5}}>ยอดค้างปัจจุบัน ฿{money(maxConvertible)} · การเปลี่ยนเป็นทุนไม่มีเงินสดเข้าออก</div>}{error&&<p style={{margin:"10px 0 0",color:"#B91C1C",fontSize:12}}>{error}</p>}<div style={{display:"flex",gap:8,marginTop:16}}><button type="button" className="cbtn" disabled={saving} style={{flex:1}} onClick={onClose}>ยกเลิก</button><button type="submit" className="cbtn cbtn-accent" disabled={saving} style={{flex:1}}>{saving?"กำลังบันทึก...":"บันทึกเงินลงทุน"}</button></div></form></div>;
+  return <div className="acc-modal-bg" onClick={onClose}><form className="acc-modal" style={{width:"min(460px,100%)"}} role="dialog" aria-modal="true" aria-label="บันทึกเงินลงทุนของเจ้าของ" onSubmit={submit} onClick={(event)=>event.stopPropagation()}><h3 style={{margin:"0 0 4px",color:POS.navy}}>บันทึกเงินลงทุนของเจ้าของ</h3><p style={{margin:"0 0 14px",fontSize:11.5,color:POS.gray}}>เงินลงทุนไม่ใช่รายรับจากการขาย และไม่เพิ่มกำไรของร้าน</p><div style={{display:"flex",gap:6,padding:4,marginBottom:14,borderRadius:11,background:POS.chipBg}}><button type="button" className="cbtn" style={{flex:1,border:0,background:form.kind==="contribution"?"var(--surface)":"transparent",color:form.kind==="contribution"?"#1D4ED8":POS.gray}} onClick={()=>setForm({...form,kind:"contribution"})}>นำเงินเข้าร้าน</button><button type="button" className="cbtn" disabled={maxConvertible<=0} style={{flex:1,border:0,background:form.kind==="conversion"?"var(--surface)":"transparent",color:form.kind==="conversion"?"#1D4ED8":POS.gray}} onClick={()=>setForm({...form,kind:"conversion"})}>เปลี่ยนยอดค้างเป็นทุน</button></div><div className="acc-form-grid"><div><label className="acc-field-label">วันที่ *</label><input className="acc-field" type="date" value={form.movementDate} onChange={(event)=>setForm({...form,movementDate:event.target.value})}/></div><div><label className="acc-field-label">จำนวนเงิน *</label><input className="acc-field" type="number" min="0.01" max={form.kind==="conversion"?maxConvertible:undefined} step="0.01" value={form.amount} onChange={(event)=>setForm({...form,amount:event.target.value})} placeholder="0.00"/></div>{form.kind==="contribution"&&<div><label className="acc-field-label">เงินเข้าบัญชีร้าน *</label><select className="acc-field" value={form.paymentAccount} onChange={(event)=>setForm({...form,paymentAccount:event.target.value})}>{ACCOUNTING_PAYMENT_ACCOUNTS.filter((account)=>ACCOUNTING_CASH_ACCOUNT_IDS.has(account.id)).map((account)=><option key={account.id} value={account.id}>{account.label}</option>)}</select></div>}<div><label className="acc-field-label">ชื่อเจ้าของ</label><TextField className="acc-field" value={form.ownerName} onChange={(value)=>setForm({...form,ownerName:value})}/></div><div style={{gridColumn:"1/-1"}}><label className="acc-field-label">หมายเหตุ</label><textarea className="acc-field" value={form.note} onChange={(event)=>setForm({...form,note:event.target.value})}/></div></div>{form.kind==="conversion"&&<div style={{marginTop:10,padding:"9px 11px",borderRadius:10,background:"var(--info-light)",color:"var(--primary-text)",fontSize:11.5}}>ยอดค้างปัจจุบัน ฿{money(maxConvertible)} · การเปลี่ยนเป็นทุนไม่มีเงินสดเข้าออก</div>}{error&&<p style={{margin:"10px 0 0",color:"var(--danger)",fontSize:12}}>{error}</p>}<div style={{display:"flex",gap:8,marginTop:16}}><button type="button" className="cbtn" disabled={saving} style={{flex:1}} onClick={onClose}>ยกเลิก</button><button type="submit" className="cbtn cbtn-accent" disabled={saving} style={{flex:1}}>{saving?"กำลังบันทึก...":"บันทึกเงินลงทุน"}</button></div></form></div>;
 }
 
 function AccountingAccountsSection({accounts,transactions,reimbursements,capitalMovements,reconciliations,onUpdateAccount,onSaveReconciliation,showToast}){
@@ -6879,7 +6887,7 @@ function AccountingAccountsSection({accounts,transactions,reimbursements,capital
   function expectedBalance(account){const transactionBalance=transactions.filter((transaction)=>transaction.paymentAccount===account.id&&(!transaction.status||transaction.status==="paid")).reduce((sum,transaction)=>sum+(transaction.type==="income"?1:-1)*(Number(transaction.amount)||0),0);const reimbursementTotal=reimbursements.filter((item)=>item.paymentAccount===account.id).reduce((sum,item)=>sum+(Number(item.amount)||0),0);const contributed=capitalMovements.filter((item)=>item.kind==="contribution"&&item.paymentAccount===account.id).reduce((sum,item)=>sum+(Number(item.amount)||0),0);return (Number(account.openingBalance)||0)+transactionBalance+contributed-reimbursementTotal;}
   function latestFor(accountId){return [...reconciliations].filter((item)=>item.accountId===accountId).sort((a,b)=>String(b.reconciledAt).localeCompare(String(a.reconciledAt)))[0]||null;}
   async function saveOpening(){try{await onUpdateAccount(openingFor,{openingBalance:Number(openingValue)||0});setOpeningFor(null);showToast("บันทึกยอดตั้งต้นแล้ว");}catch(error){showToast("บันทึกไม่สำเร็จ: "+error.message);}}
-  return <section style={{marginTop:20}}><div className="acc-assets-head"><div><h3 style={{margin:"0 0 3px",color:POS.navy,fontSize:17}}>บัญชีเงินและกระทบยอด</h3><p style={{margin:0,color:POS.gray,fontSize:11.5}}>เปรียบเทียบยอดตามรายการในระบบกับยอดเงินจริงในเงินสดหรือบัญชีธนาคาร</p></div></div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(230px,1fr))",gap:9}}>{accounts.map((account)=>{const expected=expectedBalance(account);const latest=latestFor(account.id);return <div key={account.id} style={{padding:14,border:`1px solid ${POS.border}`,borderRadius:13,background:"#fff"}}><div style={{display:"flex",alignItems:"center",gap:9}}><div style={{width:34,height:34,borderRadius:9,display:"grid",placeItems:"center",background:"#E8EEFF",color:"#1D4ED8"}}><Icon name={account.id==="cash"?"cash":account.id==="credit_card"?"credit-card":"building-bank"} size={17}/></div><div><div style={{fontSize:12.5,fontWeight:700,color:POS.navy}}>{account.name}</div><div style={{fontSize:10,color:POS.gray}}>ยอดตามระบบ</div></div></div><div style={{marginTop:10,fontSize:21,fontWeight:700,color:expected>=0?POS.navy:"#B91C1C"}}>฿{money(expected)}</div><div style={{marginTop:5,minHeight:30,fontSize:10.5,color:latest?Math.abs(Number(latest.difference)||0)<.01?"#15803D":"#B45309":POS.gray}}>{latest?`กระทบล่าสุด ${new Date(latest.reconciledAt).toLocaleDateString("th-TH")} · ต่าง ฿${money(latest.difference)}`:"ยังไม่เคยกระทบยอด"}</div><div style={{display:"flex",gap:5,marginTop:8}}><button className="cbtn" style={{flex:1}} onClick={()=>{setOpeningFor(account);setOpeningValue(String(account.openingBalance||0));}}>ยอดตั้งต้น</button><button className="cbtn cbtn-accent" style={{flex:1}} onClick={()=>setReconcileFor({...account,expectedBalance:expected})}>กระทบยอด</button></div></div>;})}</div>
+  return <section style={{marginTop:20}}><div className="acc-assets-head"><div><h3 style={{margin:"0 0 3px",color:POS.navy,fontSize:17}}>บัญชีเงินและกระทบยอด</h3><p style={{margin:0,color:POS.gray,fontSize:11.5}}>เปรียบเทียบยอดตามรายการในระบบกับยอดเงินจริงในเงินสดหรือบัญชีธนาคาร</p></div></div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(230px,1fr))",gap:9}}>{accounts.map((account)=>{const expected=expectedBalance(account);const latest=latestFor(account.id);return <div key={account.id} style={{padding:14,border:`1px solid ${POS.border}`,borderRadius:13,background:"var(--surface)"}}><div style={{display:"flex",alignItems:"center",gap:9}}><div style={{width:34,height:34,borderRadius:9,display:"grid",placeItems:"center",background:"var(--info-light)",color:"var(--primary-text)"}}><Icon name={account.id==="cash"?"cash":account.id==="credit_card"?"credit-card":"building-bank"} size={17}/></div><div><div style={{fontSize:12.5,fontWeight:700,color:POS.navy}}>{account.name}</div><div style={{fontSize:10,color:POS.gray}}>ยอดตามระบบ</div></div></div><div style={{marginTop:10,fontSize:21,fontWeight:700,color:expected>=0?POS.navy:"#B91C1C"}}>฿{money(expected)}</div><div style={{marginTop:5,minHeight:30,fontSize:10.5,color:latest?Math.abs(Number(latest.difference)||0)<.01?"#15803D":"#B45309":POS.gray}}>{latest?`กระทบล่าสุด ${new Date(latest.reconciledAt).toLocaleDateString("th-TH")} · ต่าง ฿${money(latest.difference)}`:"ยังไม่เคยกระทบยอด"}</div><div style={{display:"flex",gap:5,marginTop:8}}><button className="cbtn" style={{flex:1}} onClick={()=>{setOpeningFor(account);setOpeningValue(String(account.openingBalance||0));}}>ยอดตั้งต้น</button><button className="cbtn cbtn-accent" style={{flex:1}} onClick={()=>setReconcileFor({...account,expectedBalance:expected})}>กระทบยอด</button></div></div>;})}</div>
     {openingFor&&<div className="acc-modal-bg" onClick={()=>setOpeningFor(null)}><div className="acc-modal" style={{width:"min(380px,100%)"}} role="dialog" aria-modal="true" onClick={(event)=>event.stopPropagation()}><h3 style={{margin:"0 0 5px",color:POS.navy}}>ยอดตั้งต้น — {openingFor.name}</h3><p style={{margin:"0 0 13px",fontSize:11.5,color:POS.gray}}>ใช้ยอดก่อนวันที่เริ่มบันทึกรายการในระบบ</p><input className="acc-field" type="number" step="0.01" value={openingValue} onChange={(event)=>setOpeningValue(event.target.value)}/><div style={{display:"flex",gap:8,marginTop:14}}><button className="cbtn" style={{flex:1}} onClick={()=>setOpeningFor(null)}>ยกเลิก</button><button className="cbtn cbtn-accent" style={{flex:1}} onClick={saveOpening}>บันทึก</button></div></div></div>}
     {reconcileFor&&<AccountingReconciliationModal account={reconcileFor} onClose={()=>setReconcileFor(null)} onSave={async(value)=>{await onSaveReconciliation(value);setReconcileFor(null);showToast(Math.abs(value.difference)<.01?"กระทบยอดตรงกันแล้ว":"บันทึกส่วนต่างกระทบยอดแล้ว");}}/>}
   </section>;
@@ -6927,7 +6935,7 @@ function AccountingRecurringModal({template,onClose,onSave}){
     <div style={{gridColumn:"1/-1"}}><label className="acc-field-label">ผู้รับเงิน / ผู้ให้บริการ</label><TextField className="acc-field" value={form.vendorName||""} onChange={(value)=>patch("vendorName",value)} placeholder="ไม่บังคับ"/></div>
     <label style={{gridColumn:"1/-1",display:"flex",alignItems:"center",gap:8,fontSize:12.5,color:POS.navy}}><input type="checkbox" checked={form.active!==false} onChange={(event)=>patch("active",event.target.checked)}/> เปิดสร้างรายการอัตโนมัติทุกเดือน</label>
     <div style={{gridColumn:"1/-1"}}><label className="acc-field-label">หมายเหตุ</label><textarea className="acc-field" value={form.note||""} onChange={(event)=>patch("note",event.target.value)}/></div>
-  </div>{error&&<p style={{color:"#B91C1C",fontSize:12}}>{error}</p>}<div style={{display:"flex",gap:8,marginTop:16}}><button type="button" className="cbtn" style={{flex:1}} onClick={onClose}>ยกเลิก</button><button type="submit" className="cbtn cbtn-accent" disabled={saving} style={{flex:1}}>{saving?"กำลังบันทึก...":"บันทึก"}</button></div></form></div>;
+  </div>{error&&<p style={{color:"var(--danger)",fontSize:12}}>{error}</p>}<div style={{display:"flex",gap:8,marginTop:16}}><button type="button" className="cbtn" style={{flex:1}} onClick={onClose}>ยกเลิก</button><button type="submit" className="cbtn cbtn-accent" disabled={saving} style={{flex:1}}>{saving?"กำลังบันทึก...":"บันทึก"}</button></div></form></div>;
 }
 
 function AccountingAssetModal({ asset, onClose, onSave }) {
@@ -6953,9 +6961,9 @@ function AccountingAssetModal({ asset, onClose, onSave }) {
     <div><label className="acc-field-label">Serial number</label><TextField className="acc-field" value={form.serialNumber||""} onChange={(value)=>patch("serialNumber",value)} placeholder="ไม่บังคับ"/></div>
     <div><label className="acc-field-label">หมดประกัน</label><input className="acc-field" type="date" value={form.warrantyEnd||""} onChange={(event)=>patch("warrantyEnd",event.target.value)}/></div>
     {form.status === "disposed" && <div><label className="acc-field-label">วันที่เลิกใช้ / ขาย</label><input className="acc-field" type="date" value={form.disposedDate||todayStr()} onChange={(event)=>patch("disposedDate",event.target.value)}/></div>}
-    <div style={{display:"flex",alignItems:"center",padding:"10px 12px",borderRadius:10,background:"#FFF8ED",color:"#92400E",fontSize:12}}>ค่าเสื่อมประมาณ ฿{money(monthly)}/เดือน</div>
+    <div style={{display:"flex",alignItems:"center",padding:"10px 12px",borderRadius:10,background:"var(--warning-light)",color:"var(--warning-text)",fontSize:12}}>ค่าเสื่อมประมาณ ฿{money(monthly)}/เดือน</div>
     <div style={{gridColumn:"1/-1"}}><label className="acc-field-label">หมายเหตุ</label><textarea className="acc-field" value={form.note||""} onChange={(event)=>patch("note",event.target.value)}/></div>
-  </div>{error&&<p style={{margin:"10px 0 0",color:"#B91C1C",fontSize:12}}>{error}</p>}<p style={{margin:"10px 0 0",color:POS.gray,fontSize:10.5,lineHeight:1.45}}>ค่าเสื่อมนี้ใช้สำหรับรายงานบริหารภายใน การใช้ยื่นภาษีควรให้นักบัญชีตรวจประเภทและอัตราอีกครั้ง</p><div style={{display:"flex",gap:8,marginTop:16}}><button type="button" className="cbtn" disabled={saving} style={{flex:1}} onClick={onClose}>ยกเลิก</button><button type="submit" className="cbtn cbtn-accent" disabled={saving} style={{flex:1}}>{saving?"กำลังบันทึก...":"บันทึกอุปกรณ์"}</button></div></form></div>;
+  </div>{error&&<p style={{margin:"10px 0 0",color:"var(--danger)",fontSize:12}}>{error}</p>}<p style={{margin:"10px 0 0",color:POS.gray,fontSize:10.5,lineHeight:1.45}}>ค่าเสื่อมนี้ใช้สำหรับรายงานบริหารภายใน การใช้ยื่นภาษีควรให้นักบัญชีตรวจประเภทและอัตราอีกครั้ง</p><div style={{display:"flex",gap:8,marginTop:16}}><button type="button" className="cbtn" disabled={saving} style={{flex:1}} onClick={onClose}>ยกเลิก</button><button type="submit" className="cbtn cbtn-accent" disabled={saving} style={{flex:1}}>{saving?"กำลังบันทึก...":"บันทึกอุปกรณ์"}</button></div></form></div>;
 }
 
 function AccountingTransactionModal({ transaction, vatRegistered, onClose, onSave }) {
@@ -6984,20 +6992,20 @@ function AccountingTransactionModal({ transaction, vatRegistered, onClose, onSav
 
   return <div className="acc-modal-bg" onClick={onClose}><form className="acc-modal" role="dialog" aria-modal="true" aria-label={form.id ? "แก้ไขรายการบัญชี" : "เพิ่มรายการบัญชี"} onSubmit={submit} onClick={(event) => event.stopPropagation()}>
     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, marginBottom:16 }}><div><p style={{ margin:0, color:POS.gray, fontSize:10.5, fontWeight:700, textTransform:"uppercase" }}>{sourceLocked ? "System transaction" : "Manual transaction"}</p><h3 style={{ margin:"2px 0 0", color:POS.navy }}>{form.id ? "แก้ไขรายการ" : "เพิ่มรายการบัญชี"}</h3></div><button type="button" className="cbtn" style={{ width:34, height:34, padding:0 }} onClick={onClose}><Icon name="x" size={15} /></button></div>
-    {sourceLocked && <div style={{ marginBottom:12, padding:"9px 11px", borderRadius:10, color:"#1D4ED8", background:"#E8EEFF", fontSize:11.5, lineHeight:1.45 }}>รายการนี้สร้างจากระบบอัตโนมัติ จึงล็อกวันที่ ยอดเงิน รายละเอียด และหมวดไว้ แต่แก้ข้อมูลประกอบบัญชีได้</div>}
-    <div style={{ display:"flex", gap:6, padding:4, marginBottom:14, borderRadius:11, background:POS.chipBg }}><button type="button" disabled={sourceLocked} className="cbtn" style={{ flex:1, border:0, color:form.type === "income" ? "#15803D" : POS.gray, background:form.type === "income" ? "#fff" : "transparent", boxShadow:form.type === "income" ? "0 1px 4px rgba(0,0,0,.08)" : "none" }} onClick={() => setForm((current) => ({ ...current, type:"income", category:"manual_sales", paymentAccount:current.paymentAccount==="owner_advance"?"promptpay":current.paymentAccount }))}>รายรับ</button><button type="button" disabled={sourceLocked} className="cbtn" style={{ flex:1, border:0, color:form.type === "expense" ? "#B91C1C" : POS.gray, background:form.type === "expense" ? "#fff" : "transparent", boxShadow:form.type === "expense" ? "0 1px 4px rgba(0,0,0,.08)" : "none" }} onClick={() => setForm((current) => ({ ...current, type:"expense", category:"inventory_purchase" }))}>รายจ่าย</button></div>
+    {sourceLocked && <div style={{ marginBottom:12, padding:"9px 11px", borderRadius:10, color:"var(--primary-text)", background:"var(--info-light)", fontSize:11.5, lineHeight:1.45 }}>รายการนี้สร้างจากระบบอัตโนมัติ จึงล็อกวันที่ ยอดเงิน รายละเอียด และหมวดไว้ แต่แก้ข้อมูลประกอบบัญชีได้</div>}
+    <div style={{ display:"flex", gap:6, padding:4, marginBottom:14, borderRadius:11, background:POS.chipBg }}><button type="button" disabled={sourceLocked} className="cbtn" style={{ flex:1, border:0, color:form.type === "income" ? "#15803D" : POS.gray, background:form.type === "income" ? "var(--surface)" : "transparent", boxShadow:form.type === "income" ? "0 1px 4px rgba(0,0,0,.08)" : "none" }} onClick={() => setForm((current) => ({ ...current, type:"income", category:"manual_sales", paymentAccount:current.paymentAccount==="owner_advance"?"promptpay":current.paymentAccount }))}>รายรับ</button><button type="button" disabled={sourceLocked} className="cbtn" style={{ flex:1, border:0, color:form.type === "expense" ? "#B91C1C" : POS.gray, background:form.type === "expense" ? "var(--surface)" : "transparent", boxShadow:form.type === "expense" ? "0 1px 4px rgba(0,0,0,.08)" : "none" }} onClick={() => setForm((current) => ({ ...current, type:"expense", category:"inventory_purchase" }))}>รายจ่าย</button></div>
     <div className="acc-form-grid">
       <div><label className="acc-field-label">วันที่รายการ *</label><input className="acc-field" disabled={sourceLocked} type="date" value={form.transactionDate} onChange={(event) => patch("transactionDate", event.target.value)} /></div>
       <div><label className="acc-field-label">จำนวนเงิน *</label><input className="acc-field" disabled={sourceLocked} type="number" min="0.01" step="0.01" inputMode="decimal" value={form.amount} onChange={(event) => patch("amount", event.target.value)} placeholder="0.00" /></div>
       <div style={{ gridColumn:"1/-1" }}><label className="acc-field-label">รายละเอียด *</label><TextField className="acc-field" disabled={sourceLocked} value={form.description} onChange={(value) => patch("description", value)} placeholder={form.type === "income" ? "เช่น รายรับจากออกบูธ" : "เช่น ค่าไฟเดือนกรกฎาคม"} /></div>
       <div><label className="acc-field-label">หมวด *</label><select className="acc-field" disabled={sourceLocked} value={form.category} onChange={(event) => patch("category", event.target.value)}>{categories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}</select></div>
       <div><label className="acc-field-label">ช่องทางเงิน</label><select className="acc-field" value={form.paymentAccount} onChange={(event) => patch("paymentAccount", event.target.value)}>{ACCOUNTING_PAYMENT_ACCOUNTS.filter((account)=>form.type==="expense"||account.id!=="owner_advance").map((account) => <option key={account.id} value={account.id}>{account.label}</option>)}</select></div>
-      {form.type==="expense"&&form.paymentAccount==="owner_advance"&&<div style={{gridColumn:"1/-1",padding:"9px 11px",borderRadius:10,background:"#FFF8ED",color:"#7C4A03",fontSize:11.5,lineHeight:1.45}}>รายการนี้เป็นค่าใช้จ่ายของร้าน แต่ยังไม่ลดเงินสดหรือเงินธนาคาร ระบบจะเพิ่มยอดที่ร้านค้างคืนเจ้าของแทน</div>}
+      {form.type==="expense"&&form.paymentAccount==="owner_advance"&&<div style={{gridColumn:"1/-1",padding:"9px 11px",borderRadius:10,background:"var(--warning-light)",color:"var(--warning-text)",fontSize:11.5,lineHeight:1.45}}>รายการนี้เป็นค่าใช้จ่ายของร้าน แต่ยังไม่ลดเงินสดหรือเงินธนาคาร ระบบจะเพิ่มยอดที่ร้านค้างคืนเจ้าของแทน</div>}
       <div style={{ gridColumn:"1/-1" }}><label className="acc-field-label">คู่ค้า / ผู้รับเงิน</label><TextField className="acc-field" value={form.vendorName || ""} onChange={(value) => patch("vendorName", value)} placeholder="ไม่บังคับ" /></div>
       {vatRegistered&&<><div><label className="acc-field-label">VAT ที่รวมในยอด</label><input className="acc-field" type="number" min="0" step="0.01" value={form.vatAmount||""} onChange={(event)=>patch("vatAmount",event.target.value)} placeholder="0.00"/></div><div><label className="acc-field-label">เลขใบกำกับภาษี</label><TextField className="acc-field" value={form.taxInvoiceNumber||""} onChange={(value)=>patch("taxInvoiceNumber",value)} placeholder="ถ้ามี"/></div></>}
       <div style={{ gridColumn:"1/-1" }}><label className="acc-field-label">หมายเหตุ</label><textarea className="acc-field" value={form.note || ""} onChange={(event) => patch("note", event.target.value)} placeholder="รายละเอียดเพิ่มเติม (ถ้ามี)" /></div>
     </div>
-    {error && <p style={{ margin:"10px 0 0", color:"#B91C1C", fontSize:12 }}>{error}</p>}
+    {error && <p style={{ margin:"10px 0 0", color:"var(--danger)", fontSize:12 }}>{error}</p>}
     <div style={{ display:"flex", gap:8, marginTop:16 }}><button type="button" className="cbtn" disabled={saving} style={{ flex:1 }} onClick={onClose}>ยกเลิก</button><button type="submit" className="cbtn cbtn-accent" disabled={saving} style={{ flex:1 }}>{saving ? "กำลังบันทึก..." : "บันทึกรายการ"}</button></div>
   </form></div>;
 }
@@ -7018,7 +7026,7 @@ function RepHourlyChart({ sales }) {
   return (
     <div>
       <p style={{ fontSize: 12, color: DASH.gray, margin: "-4px 0 12px" }}>
-        ช่วงขายดีที่สุด: <b style={{ color: "#1F2937" }}>{peak.hour}:00–{peak.hour + 1}:00</b> (฿{money(peak.revenue)})
+        ช่วงขายดีที่สุด: <b style={{ color: "var(--espresso-4)" }}>{peak.hour}:00–{peak.hour + 1}:00</b> (฿{money(peak.revenue)})
       </p>
       <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 100 }}>
         {visible.map((h) => (
@@ -7182,28 +7190,28 @@ function ReportsPanel({ data, orders, shopName, showToast }) {
     <div className="rep-wrap">
       <style>{`
         .rep-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 20px; }
-        .rep-period-tabs { display: inline-flex; background: #F0EFEC; border-radius: 12px; padding: 3px; gap: 2px; }
+        .rep-period-tabs { display: inline-flex; background: var(--cream-2); border-radius: 12px; padding: 3px; gap: 2px; }
         .rep-period-tab { border: none; cursor: pointer; padding: 8px 14px; min-height: 38px; border-radius: 9px; font-size: 13px; font-weight: 600; background: transparent; color: #6B7280; transition: all 160ms ease; }
-        .rep-period-tab.active { background: #fff; color: ${DASH.primaryDark}; box-shadow: 0 2px 6px rgba(0,0,0,.08); }
+        .rep-period-tab.active { background: var(--surface); color: ${DASH.primaryDark}; box-shadow: 0 2px 6px rgba(0,0,0,.08); }
         .rep-kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 20px; }
         @media (max-width: 900px) { .rep-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 480px) { .rep-kpi-grid { grid-template-columns: minmax(0, 1fr); } }
         .rep-channel-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 20px; }
         @media (max-width: 720px) { .rep-channel-grid { grid-template-columns: minmax(0, 1fr); } }
-        .rep-card { background: #fff; border: 1px solid ${DASH.border}; border-radius: 16px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,.05); margin-bottom: 20px; }
+        .rep-card { background: var(--surface); border: 1px solid ${DASH.border}; border-radius: 16px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,.05); margin-bottom: 20px; }
         .rep-two-col { display: grid; grid-template-columns: 1.1fr 1fr; gap: 20px; align-items: start; }
         @media (max-width: 900px) { .rep-two-col { grid-template-columns: minmax(0, 1fr); } }
         .rep-search { flex: 1; min-width: 180px; position: relative; display: flex; align-items: center; }
-        .rep-search input { width: 100%; height: 40px; border: 1px solid ${DASH.border}; border-radius: 10px; background: #fff; padding: 0 14px 0 36px; font-size: 13.5px; box-sizing: border-box; outline: none; }
+        .rep-search input { width: 100%; height: 40px; border: 1px solid ${DASH.border}; border-radius: 10px; background: var(--surface); padding: 0 14px 0 36px; font-size: 13.5px; box-sizing: border-box; outline: none; }
         .rep-search input:focus { border-color: ${DASH.primary}; box-shadow: 0 0 0 3px ${DASH.primarySoft}; }
-        .rep-select { height: 40px; border: 1px solid ${DASH.border}; border-radius: 10px; background: #fff; padding: 0 30px 0 12px; font-size: 13px; font-weight: 600; color: #1F2937; cursor: pointer; outline: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; }
+        .rep-select { height: 40px; border: 1px solid ${DASH.border}; border-radius: 10px; background: var(--surface); padding: 0 30px 0 12px; font-size: 13px; font-weight: 600; color: var(--espresso-4); cursor: pointer; outline: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; }
         .rep-table { width: 100%; border-collapse: collapse; }
         .rep-table th { text-align: left; font-size: 11px; font-weight: 700; color: ${DASH.gray}; padding: 8px 12px; border-bottom: 1px solid ${DASH.neutralSoft}; text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; }
-        .rep-table td { padding: 10px 12px; border-bottom: 1px solid #F5F3EF; font-size: 13px; color: #1F2937; vertical-align: middle; }
+        .rep-table td { padding: 10px 12px; border-bottom: 1px solid #F5F3EF; font-size: 13px; color: var(--espresso-4); vertical-align: middle; }
         .rep-table tbody tr:last-child td { border-bottom: none; }
-        .rep-table tbody tr:hover { background: #FAFAF8; }
-        .rep-load-more { display: block; margin: 12px auto 0; height: 38px; padding: 0 20px; border: 1px solid ${DASH.border}; border-radius: 10px; background: #fff; color: #1F2937; font-size: 12.5px; font-weight: 600; cursor: pointer; }
-        .rep-load-more:hover { background: #FAFAF8; }
+        .rep-table tbody tr:hover { background: var(--cream-2); }
+        .rep-load-more { display: block; margin: 12px auto 0; height: 38px; padding: 0 20px; border: 1px solid ${DASH.border}; border-radius: 10px; background: var(--surface); color: var(--espresso-4); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+        .rep-load-more:hover { background: var(--cream-2); }
         @media (max-width: 720px) {
           .rep-table.rep-table-cards thead { display: none; }
           .rep-table.rep-table-cards, .rep-table.rep-table-cards tbody, .rep-table.rep-table-cards tr, .rep-table.rep-table-cards td { display: block; width: 100%; box-sizing: border-box; }
@@ -7297,7 +7305,7 @@ function ReportsPanel({ data, orders, shopName, showToast }) {
                       <td data-label="เวลา" style={{ whiteSpace: "nowrap" }}>{new Date(s.timestamp).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</td>
                       <td className="rep-td-menu" data-label="เมนู">
                         <span style={{ fontWeight: 600 }}>{s.menuName}{s.milkNote ? ` (${s.milkNote})` : ""}</span>
-                        {s.note && <span style={{ fontSize: 11, color: "#92400E", display: "flex", alignItems: "center", gap: 3 }}><Icon name="message-2" size={11} />{s.note}</span>}
+                        {s.note && <span style={{ fontSize: 11, color: "var(--warning-text)", display: "flex", alignItems: "center", gap: 3 }}><Icon name="message-2" size={11} />{s.note}</span>}
                       </td>
                       <td data-label="ช่องทาง" style={{ whiteSpace: "nowrap" }}><ChannelPill channel={s.channel} />{s.platformName ? <span style={{ fontSize: 11, color: DASH.gray }}> {s.platformName}</span> : null}</td>
                       <td data-label="จำนวน">{s.qty}</td>
@@ -7425,12 +7433,12 @@ function OrderHistoryModal({ order, onClose, onPrint }) {
         aria-modal="true"
         aria-label={`รายละเอียดออเดอร์ ${order.id.slice(-6).toUpperCase()}`}
         onClick={(e) => e.stopPropagation()}
-        style={{ width: "min(620px, 100%)", maxHeight: "min(760px, calc(100vh - 36px))", overflowY: "auto", background: "#fff", borderRadius: 18, padding: 20, boxShadow: "0 24px 70px rgba(0,0,0,.24)" }}
+        style={{ width: "min(620px, 100%)", maxHeight: "min(760px, calc(100vh - 36px))", overflowY: "auto", background: "var(--surface)", borderRadius: 18, padding: 20, boxShadow: "0 24px 70px rgba(0,0,0,.24)" }}
       >
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
           <div>
             <p style={{ margin: 0, color: DASH.gray, fontSize: 11 }}>เลขออเดอร์</p>
-            <h2 style={{ margin: "2px 0 6px", color: "#111827", fontSize: 20 }}>#{order.id.slice(-6).toUpperCase()}</h2>
+            <h2 style={{ margin: "2px 0 6px", color: "var(--espresso-4)", fontSize: 20 }}>#{order.id.slice(-6).toUpperCase()}</h2>
             <StatusBadge status={order.status} />
           </div>
           <button type="button" className="cbtn" onClick={onClose} aria-label="ปิดรายละเอียด" style={{ display: "grid", width: 34, height: 34, padding: 0, placeItems: "center" }}>
@@ -7449,7 +7457,7 @@ function OrderHistoryModal({ order, onClose, onPrint }) {
           ].map(([label, value]) => (
             <div key={label} style={{ border: `1px solid ${DASH.border}`, borderRadius: 10, padding: "9px 11px" }}>
               <div style={{ color: DASH.gray, fontSize: 10.5, marginBottom: 2 }}>{label}</div>
-              <div style={{ color: "#1F2937", fontSize: 13, fontWeight: 600 }}>{value}</div>
+              <div style={{ color: "var(--espresso-4)", fontSize: 13, fontWeight: 600 }}>{value}</div>
             </div>
           ))}
         </div>
@@ -7469,7 +7477,7 @@ function OrderHistoryModal({ order, onClose, onPrint }) {
         </div>
 
         {order.note && (
-          <div style={{ marginBottom: 14, borderRadius: 10, padding: "10px 12px", background: DASH.warningSoft, color: "#92400E", fontSize: 12.5 }}>
+          <div style={{ marginBottom: 14, borderRadius: 10, padding: "10px 12px", background: DASH.warningSoft, color: "var(--warning-text)", fontSize: 12.5 }}>
             <b>หมายเหตุ:</b> {order.note}
           </div>
         )}
@@ -7490,9 +7498,9 @@ function OrderHistoryModal({ order, onClose, onPrint }) {
 // โทนสีเฉพาะหน้าตัวเลือกเสริม — ระบบสีความหมาย (semantic) แยกจากหน้าอื่น ให้ใช้น้ำเงินเป็นสีหลัก
 // เขียว/แดง/ส้มมีความหมายตายตัว (สำเร็จ/อันตราย/เตือน) ไม่ใช้สีพร่ำเพรื่อ
 const OPTG = {
-  primary: "#2563EB", primaryDark: "#1D4ED8", primarySoft: "rgba(37,99,235,.08)",
-  danger: "#DC2626", dangerSoft: "#FDEBEB",
-  gold: "#D97706", goldSoft: "#FFF4E5",
+  primary: "#2563EB", primaryDark: "var(--primary-text)", primarySoft: "rgba(37,99,235,.12)",
+  danger: "#DC2626", dangerSoft: "var(--danger-light)",
+  gold: "#D97706", goldSoft: "var(--warning-light)",
   border: "var(--line)", gray: "var(--espresso-3)", ink: "var(--espresso-4)", warm: "var(--cream)",
 };
 
@@ -7513,7 +7521,7 @@ function OptgToggle({ checked, onChange, label, color }) {
       >
         <span style={{
           position: "absolute", top: 2, left: checked ? 17 : 2, width: 17, height: 17, borderRadius: "50%",
-          background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,.25)", transition: "left 200ms ease",
+          background: "var(--surface)", boxShadow: "0 1px 3px rgba(0,0,0,.25)", transition: "left 200ms ease",
         }} />
       </span>
       {label && <span style={{ fontSize: 12.5, fontWeight: 600, color: OPTG.gray }}>{label}</span>}
@@ -7529,13 +7537,13 @@ function OptgKebab({ items }) {
         onClick={() => setOpen((v) => !v)}
         title="ตัวเลือกเพิ่มเติม"
         style={{
-          width: 30, height: 30, borderRadius: 9, border: `1px solid ${OPTG.border}`, background: "#fff",
+          width: 30, height: 30, borderRadius: 9, border: `1px solid ${OPTG.border}`, background: "var(--surface)",
           color: OPTG.gray, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
         }}
       ><Icon name="dots-vertical" size={15} /></button>
       {open && (
         <div style={{
-          position: "absolute", top: 34, right: 0, zIndex: 8, background: "#fff", border: `1px solid ${OPTG.border}`,
+          position: "absolute", top: 34, right: 0, zIndex: 8, background: "var(--surface)", border: `1px solid ${OPTG.border}`,
           borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.14)", padding: 5, minWidth: 160, display: "flex", flexDirection: "column", gap: 1,
         }}>
           {items.map((it, i) => (
@@ -7653,11 +7661,11 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
       <style>{`
         .optg-shell { display: grid; grid-template-columns: 1fr 320px; gap: 24px; align-items: start; }
         @media (max-width: 980px) { .optg-shell { grid-template-columns: 1fr; } }
-        .optg-card { background: #fff; border: 1px solid ${OPTG.border}; border-radius: 16px; margin-bottom: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.05); }
+        .optg-card { background: var(--surface); border: 1px solid ${OPTG.border}; border-radius: 16px; margin-bottom: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.05); }
         .optg-card-head { display: flex; align-items: center; gap: 10px; padding: 16px 18px; }
         .optg-name-input { border: none; background: transparent; font-size: 17px; font-weight: 700; color: ${OPTG.ink}; padding: 4px 6px; border-radius: 8px; flex: 1; min-width: 0; }
-        .optg-name-input:focus { outline: 2px solid ${OPTG.primary}; background: #fff; }
-        .optg-collapse-btn { width: 30px; height: 30px; border-radius: 9px; border: 1px solid ${OPTG.border}; background: #fff; color: ${OPTG.gray}; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+        .optg-name-input:focus { outline: 2px solid ${OPTG.primary}; background: var(--surface); }
+        .optg-collapse-btn { width: 30px; height: 30px; border-radius: 9px; border: 1px solid ${OPTG.border}; background: var(--surface); color: ${OPTG.gray}; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
         .optg-badge { font-size: 11px; font-weight: 700; color: ${OPTG.primaryDark}; background: ${OPTG.primarySoft}; border-radius: 999px; padding: 3px 9px; white-space: nowrap; }
         .optg-body { padding: 0 18px 18px; }
         .optg-row-head { display: grid; grid-template-columns: 1.1fr 1.3fr .7fr 1.3fr 70px 78px; gap: 10px; padding: 0 10px; margin-bottom: 6px; }
@@ -7666,16 +7674,16 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
         .optg-choice-row { display: grid; grid-template-columns: 1.1fr 1.3fr .7fr 1.3fr 70px 78px; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 12px; transition: background 150ms ease; }
         .optg-choice-row:hover { background: ${OPTG.warm}; }
         @media (max-width: 760px) { .optg-choice-row { grid-template-columns: 1fr; gap: 6px; padding: 10px; border: 1px solid ${OPTG.border}; margin-bottom: 8px; } }
-        .optg-input { width: 100%; border: 1px solid transparent; background: #F3F4F6; border-radius: 9px; padding: 7px 10px; font-size: 13px; color: ${OPTG.ink}; transition: background 150ms ease, border-color 150ms ease; }
-        .optg-input:focus { outline: none; background: #fff; border-color: ${OPTG.primary}; }
-        .optg-fav-btn { width: 30px; height: 30px; border-radius: 9px; border: 1px solid ${OPTG.border}; background: #fff; color: #C9C2B4; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 150ms ease; }
+        .optg-input { width: 100%; border: 1px solid transparent; background: var(--cream-2); border-radius: 9px; padding: 7px 10px; font-size: 13px; color: ${OPTG.ink}; transition: background 150ms ease, border-color 150ms ease; }
+        .optg-input:focus { outline: none; background: var(--surface); border-color: ${OPTG.primary}; }
+        .optg-fav-btn { width: 30px; height: 30px; border-radius: 9px; border: 1px solid ${OPTG.border}; background: var(--surface); color: #C9C2B4; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 150ms ease; }
         .optg-fav-btn.active { background: ${OPTG.goldSoft}; border-color: #F2CB8A; color: ${OPTG.gold}; }
         .optg-add-choice { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; border: 1.5px dashed #C7CEDD; background: ${OPTG.primarySoft}; color: ${OPTG.primaryDark}; border-radius: 12px; padding: 10px; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 150ms ease; margin-top: 6px; }
         .optg-add-choice:hover { border-color: ${OPTG.primary}; background: rgba(37,99,235,.14); }
         .optg-extra-toggle { border: none; background: none; color: ${OPTG.gray}; font-size: 11.5px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 4px; padding: 4px 6px; }
         .optg-extra-toggle:hover { color: ${OPTG.primaryDark}; }
         .optg-sidebar { position: sticky; top: 10px; display: flex; flex-direction: column; gap: 16px; }
-        .optg-side-card { background: #fff; border: 1px solid ${OPTG.border}; border-radius: 16px; padding: 18px; box-shadow: 0 10px 30px rgba(0,0,0,.05); }
+        .optg-side-card { background: var(--surface); border: 1px solid ${OPTG.border}; border-radius: 16px; padding: 18px; box-shadow: 0 10px 30px rgba(0,0,0,.05); }
         .optg-stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
         .optg-stat { background: ${OPTG.warm}; border-radius: 12px; padding: 10px 12px; }
         .optg-stat b { display: block; font-size: 22px; font-weight: 700; color: ${OPTG.ink}; }
@@ -7683,7 +7691,7 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
         .optg-nav-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; border: none; background: none; text-align: left; padding: 8px 9px; border-radius: 9px; font-size: 12.5px; font-weight: 600; color: ${OPTG.ink}; cursor: pointer; }
         .optg-nav-item:hover { background: ${OPTG.warm}; }
         .optg-nav-item.active { background: ${OPTG.primarySoft}; color: ${OPTG.primaryDark}; }
-        .optg-preview-choice { padding: 7px 13px; border-radius: 10px; border: 1px solid ${OPTG.border}; background: #fff; font-size: 12.5px; font-weight: 600; color: ${OPTG.ink}; }
+        .optg-preview-choice { padding: 7px 13px; border-radius: 10px; border: 1px solid ${OPTG.border}; background: var(--surface); font-size: 12.5px; font-weight: 600; color: ${OPTG.ink}; }
         .optg-preview-choice.default { background: ${OPTG.primary}; border-color: ${OPTG.primary}; color: #fff; }
       `}</style>
 
@@ -8186,9 +8194,9 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
         .set-grid { display: grid; grid-template-columns: 1.15fr 1fr; gap: 20px; align-items: start; }
         @media (max-width: 900px) { .set-grid { grid-template-columns: 1fr; } }
         .set-col { display: flex; flex-direction: column; gap: 20px; }
-        .set-card { background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 20px; box-shadow: 0 2px 10px rgba(0,0,0,.03); }
+        .set-card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 20px; box-shadow: 0 2px 10px rgba(0,0,0,.03); }
         .set-status-card { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; border-radius: 16px; padding: 16px 20px; margin-bottom: 20px; }
-        .set-icon-btn { width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--line); background: #fff; color: var(--espresso-3); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; transition: background 150ms ease, color 150ms ease; }
+        .set-icon-btn { width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface); color: var(--espresso-3); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; transition: background 150ms ease, color 150ms ease; }
         .set-icon-btn:hover { background: var(--cream-2); color: var(--espresso-4); }
         .set-icon-btn-danger:hover { background: var(--danger-light); color: var(--danger); }
         .set-platform-row { display: grid; grid-template-columns: 1fr 110px 40px; gap: 8px; align-items: start; padding: 10px 0; border-bottom: 1px solid var(--line); }
@@ -8202,20 +8210,20 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
           .set-wrap .cbtn { min-height: 44px; }
           .set-wrap .set-icon-btn { width: 44px; height: 44px; }
         }
-        .set-banner-card { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 8px; background: #fff; cursor: grab; }
+        .set-banner-card { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 8px; background: var(--surface); cursor: grab; }
         .set-banner-card:active { cursor: grabbing; }
         .set-drag-handle { color: var(--espresso-2); flex-shrink: 0; cursor: grab; touch-action: none; }
         .set-banner-thumb { width: 76px; height: 40px; border-radius: 8px; overflow: hidden; flex-shrink: 0; background: var(--cream-2); }
         .set-banner-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
         .set-banner-thumb-empty { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--espresso-2); }
         .set-alert { display: flex; gap: 8px; align-items: flex-start; background: var(--gold-light); border: 1px solid var(--gold); color: var(--gold-dark); border-radius: 10px; padding: 10px 12px; font-size: 12px; line-height: 1.5; margin-top: 10px; }
-        .set-savebar { position: sticky; bottom: 0; margin-top: 24px; background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 12px 18px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; box-shadow: 0 -4px 20px rgba(0,0,0,.06); z-index: 10; }
+        .set-savebar { position: sticky; bottom: 0; margin-top: 24px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 18px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; box-shadow: 0 -4px 20px rgba(0,0,0,.06); z-index: 10; }
         .set-empty { text-align: center; padding: 24px 10px; color: var(--espresso-2); font-size: 12.5px; }
         .cbtn:focus-visible, .set-icon-btn:focus-visible, .cfield:focus-visible { outline: 2px solid var(--sage); outline-offset: 2px; }
         .cbtn:disabled { opacity: .5; cursor: not-allowed; }
-        .cbtn:disabled:hover { background: #fff; }
+        .cbtn:disabled:hover { background: var(--surface); }
         .cbtn-accent:disabled:hover { background: var(--sage); }
-        .inv-btn-ghost { height: 40px; padding: 0 16px; border: 1px solid ${INV.border}; border-radius: 10px; background: #fff; color: ${INV.ink}; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+        .inv-btn-ghost { height: 40px; padding: 0 16px; border: 1px solid ${INV.border}; border-radius: 10px; background: var(--surface); color: ${INV.ink}; font-size: 13.5px; font-weight: 600; cursor: pointer; }
         .inv-btn-danger { height: 40px; padding: 0 16px; border: none; border-radius: 10px; background: ${INV.danger}; color: #fff; font-size: 13.5px; font-weight: 700; cursor: pointer; }
       `}</style>
 
@@ -8430,7 +8438,7 @@ function AddPlatformModal({ existingNames, onAdd, onClose }) {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(17,24,39,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 16 }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 24, width: 380, maxWidth: "100%", boxShadow: "0 20px 60px rgba(0,0,0,.25)" }} role="dialog" aria-modal="true">
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: 16, padding: 24, width: 380, maxWidth: "100%", boxShadow: "0 20px 60px rgba(0,0,0,.25)" }} role="dialog" aria-modal="true">
         <div style={{ fontSize: 17, fontWeight: 700, color: "var(--espresso-5)", marginBottom: 14 }}>เพิ่มแพลตฟอร์มเดลิเวอรี่</div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
