@@ -370,6 +370,15 @@ const GLOBAL_CSS = `
   html[data-theme="dark"] .corder [style*="color: rgb(113, 137, 163)"] { color: #A9B5C5 !important; }
   html[data-theme="dark"] .corder [style*="background: rgb(245, 240, 234)"],
   html[data-theme="dark"] .corder [style*="background: rgb(237, 227, 210)"] { background: #111B28 !important; }
+  html[data-theme="dark"] .corder .zone-header { background: rgba(15,24,36,.94) !important; border: 1px solid rgba(148,163,184,.16); box-shadow: 0 10px 30px rgba(0,0,0,.28) !important; }
+  html[data-theme="dark"] .corder .zone-logo-shell { background: #F8F6F2 !important; border-color: rgba(255,255,255,.16) !important; }
+  html[data-theme="dark"] .corder .zone-logo-shell div { color: #163B73 !important; }
+  html[data-theme="dark"] .corder .customer-category-nav { background: rgba(15,24,36,.82) !important; border-color: rgba(148,163,184,.16) !important; }
+  html[data-theme="dark"] .corder .customer-category-tab { color: #A9B5C5 !important; }
+  html[data-theme="dark"] .corder .customer-category-tab.active { background: #26364A !important; color: #F4F7FB !important; box-shadow: 0 3px 10px rgba(0,0,0,.28) !important; }
+  html[data-theme="dark"] .corder .customer-option-choice { background: #172333 !important; color: #E7ECF3 !important; border-color: #344256 !important; }
+  html[data-theme="dark"] .corder .customer-option-choice.selected { background: rgba(206,86,13,.22) !important; color: #FFF4EA !important; border-color: #E9782F !important; }
+  html[data-theme="dark"] .corder .customer-option-choice [style*="color"] { color: #B8C4D2 !important; }
   @media (prefers-reduced-motion: reduce) {
     .banner-slide { transition-duration: 0ms; }
   }
@@ -1798,7 +1807,7 @@ export default function CustomerOrder({ shopUid }) {
         display: "flex", alignItems: "center", justifyContent: "space-between",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
-          <div style={{
+          <div className="zone-logo-shell" style={{
             width: 44, height: 44, borderRadius: 14, background: "#fff", border: "1px solid #ECE8E2",
             display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden",
           }}>
@@ -1845,12 +1854,13 @@ export default function CustomerOrder({ shopUid }) {
         <div style={{ padding: 24, textAlign: "center", color: COLORS.espresso2, fontSize: 13 }}>ร้านยังไม่มีเมนู</div>
       ) : (
         <div style={{ display: "flex", flex: 1, minHeight: 0, gap: 10, padding: "10px 10px 0" }}>
-          <nav style={{ ...GLASS_PANEL, width: 88, flexShrink: 0, overflowY: "auto", borderRadius: 16, padding: "8px 0" }}>
+          <nav className="customer-category-nav" style={{ ...GLASS_PANEL, width: 88, flexShrink: 0, overflowY: "auto", borderRadius: 16, padding: "8px 0" }}>
             {categories.map((cat) => {
               const active = activeCategory === cat;
               return (
                 <button
                   key={cat}
+                  className={`customer-category-tab${active ? " active" : ""}`}
                   onClick={() => scrollToCategory(cat)}
                   style={{
                     display: "block", width: "calc(100% - 12px)", margin: "0 6px 6px", textAlign: "center", padding: "10px 6px", fontSize: 12.5,
@@ -2342,6 +2352,7 @@ function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm, hideQty
               return (
                 <button
                   key={c.id}
+                  className={`customer-option-choice${selected ? " selected" : ""}`}
                   onClick={() => pick(g.id, { ...c, groupId: g.id, groupName: g.name })}
                   style={{
                     display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%",
@@ -2428,6 +2439,7 @@ function ChoicePickerModal({ promo, menusById, visible, onCancel, onConfirm }) {
           return (
             <button
               key={m.id}
+              className={`customer-option-choice${isSel ? " selected" : ""}`}
               onClick={() => toggle(m.id)}
               disabled={disabled}
               style={{

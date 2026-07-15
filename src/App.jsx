@@ -127,6 +127,22 @@ function money(n) {
   return v.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function customerThemeForTime(date = new Date()) {
+  const hour = date.getHours();
+  return hour >= 19 || hour < 6 ? "dark" : "light";
+}
+
+function nextCustomerThemeChange(date = new Date()) {
+  const next = new Date(date);
+  if (date.getHours() < 6) next.setHours(6, 0, 0, 0);
+  else if (date.getHours() < 19) next.setHours(19, 0, 0, 0);
+  else {
+    next.setDate(next.getDate() + 1);
+    next.setHours(6, 0, 0, 0);
+  }
+  return next.getTime();
+}
+
 function round4(n) { return Math.round(n * 10000) / 10000; }
 
 function movingWeightedAverageCost(currentQty, currentCost, addedQty, totalPaid) {
@@ -8456,41 +8472,42 @@ export default function App() {
     if (saved === "dark" || saved === "light") return saved;
     return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   });
+  const [customerTheme, setCustomerTheme] = useState(() => customerThemeForTime());
 
-  const orderMatch = window.location.pathname.match(/^\/order\/([^/]+)/);
+  const orderShopUid = window.location.pathname.match(/^\/order\/([^/]+)/)?.[1] || null;
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    document.documentElement.style.colorScheme = theme;
+    const activeTheme = orderShopUid ? customerTheme : theme;
+    document.documentElement.dataset.theme = activeTheme;
+    document.documentElement.style.colorScheme = activeTheme;
     localStorage.setItem("coffee-shop-theme", theme);
-  }, [theme]);
+  }, [theme, customerTheme, orderShopUid]);
+
+  useEffect(() => {
+    if (!orderShopUid) return undefined;
+    let timer;
+    const syncAndSchedule = () => {
+      const now = new Date();
+      setCustomerTheme(customerThemeForTime(now));
+      timer = window.setTimeout(syncAndSchedule, Math.max(1000, nextCustomerThemeChange(now) - now.getTime() + 100));
+    };
+    syncAndSchedule();
+    return () => window.clearTimeout(timer);
+  }, [orderShopUid]);
 
   function toggleTheme() {
     setTheme((current) => current === "dark" ? "light" : "dark");
   }
 
   useEffect(() => {
-    if (orderMatch) return;
+    if (orderShopUid) return;
     const unsub = onAuthStateChanged(auth, (u) => setUser(u));
     return () => unsub();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (orderMatch) {
-    return (
-      <>
-        <CustomerOrder shopUid={orderMatch[1]} />
-        <button
-          type="button"
-          onClick={toggleTheme}
-          title={theme === "dark" ? "ใช้โหมดสว่าง" : "ใช้โหมดมืด"}
-          aria-label={theme === "dark" ? "ใช้โหมดสว่าง" : "ใช้โหมดมืด"}
-          style={{ position:"fixed", top:14, right:14, zIndex:120, width:42, height:42, borderRadius:13, border:theme === "dark"?"1px solid #334155":"1px solid rgba(255,255,255,.72)", background:theme === "dark"?"rgba(18,27,39,.88)":"rgba(255,255,255,.72)", color:theme === "dark"?"#F4F7FB":"#063360", backdropFilter:"blur(14px)", boxShadow:"0 8px 24px rgba(0,0,0,.14)", cursor:"pointer" }}
-        >
-          <Icon name={theme === "dark" ? "sun" : "moon"} size={19} />
-        </button>
-      </>
-    );
+  if (orderShopUid) {
+    return <CustomerOrder shopUid={orderShopUid} />;
   }
 
   if (user === undefined) {
