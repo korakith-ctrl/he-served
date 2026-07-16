@@ -10,7 +10,7 @@ const db = admin.database();
 const SLIPOK_API_KEY = defineSecret("SLIPOK_API_KEY");
 const SLIPOK_BRANCH_ID = defineString("SLIPOK_BRANCH_ID");
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
-const GEMINI_RECEIPT_MODEL = defineString("GEMINI_RECEIPT_MODEL", { default: "gemini-2.5-flash" });
+const GEMINI_RECEIPT_MODEL = defineString("GEMINI_RECEIPT_MODEL", { default: "gemini-3.5-flash" });
 
 const REGION = "asia-southeast1";
 
@@ -247,17 +247,33 @@ exports.scanPurchaseReceipt = onCall({ region: REGION, secrets: [GEMINI_API_KEY]
   const rawImage = imageBase64.includes(",") ? imageBase64.split(",").pop() : imageBase64;
 
   try {
-    const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_RECEIPT_MODEL.value())}:generateContent`,
-      {
-        contents: [{ parts: [
-          { inlineData: { mimeType: /^image\/(jpeg|png|webp)$/.test(mimeType || "") ? mimeType : "image/jpeg", data: rawImage } },
-          { text: prompt },
-        ] }],
-        generationConfig: { responseMimeType: "application/json", responseSchema: RECEIPT_SCHEMA, temperature: 0.1 },
-      },
-      { headers: { "x-goog-api-key": GEMINI_API_KEY.value(), "Content-Type": "application/json" }, timeout: 55000 }
-    );
+    const requestBody = {
+      contents: [{ parts: [
+        { text: prompt },
+        { inlineData: { mimeType: /^image\/(jpeg|png|webp|heic|heif)$/.test(mimeType || "") ? mimeType : "image/jpeg", data: rawImage } },
+      ] }],
+      generationConfig: { responseMimeType: "application/json", responseSchema: RECEIPT_SCHEMA, temperature: 0.1 },
+    };
+    // Model availability differs for older/newer API projects. Retry a current
+    // lower-cost model only when the configured model itself is unavailable.
+    const modelCandidates = [...new Set([GEMINI_RECEIPT_MODEL.value(), "gemini-3.5-flash", "gemini-3.1-flash-lite"])];
+    let response;
+    let lastModelError;
+    for (const model of modelCandidates) {
+      try {
+        response = await axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+          requestBody,
+          { headers: { "x-goog-api-key": GEMINI_API_KEY.value(), "Content-Type": "application/json" }, timeout: 55000 }
+        );
+        break;
+      } catch (modelError) {
+        lastModelError = modelError;
+        if (modelError.response?.status !== 404) throw modelError;
+        logger.warn("receipt model unavailable; trying fallback", { model, apiMessage: modelError.response?.data?.error?.message });
+      }
+    }
+    if (!response) throw lastModelError || new Error("no receipt model available");
     const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) throw new Error("empty model response");
     const parsed = JSON.parse(text);

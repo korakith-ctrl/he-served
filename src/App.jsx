@@ -6272,13 +6272,20 @@ function InvModalShell({ icon, iconTone, title, subtitle, onClose, children, wid
 
 function receiptImageData(file) {
   return new Promise((resolve, reject) => {
-    if (!file?.type?.startsWith("image/")) { reject(new Error("กรุณาเลือกไฟล์รูปภาพ")); return; }
+    const isHeic = /\.(heic|heif)$/i.test(file?.name || "") || /^image\/(heic|heif)$/i.test(file?.type || "");
+    if (!file || (!file.type?.startsWith("image/") && !isHeic)) { reject(new Error("กรุณาเลือกไฟล์รูปภาพ")); return; }
     if (file.size > 15 * 1024 * 1024) { reject(new Error("รูปมีขนาดใหญ่เกิน 15 MB")); return; }
     const reader = new FileReader();
     reader.onerror = () => reject(new Error("เปิดรูปไม่สำเร็จ"));
     reader.onload = () => {
       const img = new Image();
-      img.onerror = () => reject(new Error("รูปนี้ไม่รองรับ กรุณาใช้ JPG หรือ PNG"));
+      // Chrome บางรุ่น preview HEIC ไม่ได้ แต่ Gemini รับ HEIC โดยตรงได้
+      // จึงส่งไฟล์ต้นฉบับต่อโดยไม่บังคับให้ browser decode ก่อน
+      img.onerror = () => {
+        if (isHeic && file.size <= 6 * 1024 * 1024) {
+          resolve({ dataUrl: reader.result, mimeType: file.type || (/\.heif$/i.test(file.name) ? "image/heif" : "image/heic") });
+        } else reject(new Error("รูปนี้ไม่รองรับหรือมีขนาดใหญ่เกินไป กรุณาใช้ JPG หรือ PNG"));
+      };
       img.onload = () => {
         const maxSide = 1800;
         const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
@@ -6365,7 +6372,7 @@ function ReceiptReceivingModal({ uid, ingredients, onClose, onConfirm }) {
       <style>{`
         .receipt-layout{display:grid;grid-template-columns:280px minmax(0,1fr);gap:20px}.receipt-preview{position:sticky;top:0;border:1px solid ${INV.border};border-radius:14px;background:var(--cream-2);overflow:hidden;min-height:320px}.receipt-preview img{display:block;width:100%;max-height:520px;object-fit:contain}.receipt-drop{min-height:320px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;color:${INV.gray}}.receipt-meta{display:grid;grid-template-columns:1.4fr 1fr;gap:10px}.receipt-row{display:grid;grid-template-columns:24px minmax(160px,1.35fr) minmax(165px,1.2fr) 105px 105px 34px;gap:8px;align-items:start;padding:10px 0;border-bottom:1px solid ${INV.line}}.receipt-row:last-child{border-bottom:0}.receipt-head{font-size:10.5px;font-weight:700;color:${INV.gray};text-transform:uppercase;padding-bottom:7px}.receipt-field{height:40px!important;margin:0!important}.receipt-original{font-size:12.5px;font-weight:600;color:${INV.ink};padding-top:4px;overflow-wrap:anywhere}.receipt-hint{font-size:10.5px;color:${INV.gray};margin-top:3px}.receipt-summary{display:flex;justify-content:space-between;gap:16px;background:var(--cream-2);border-radius:12px;padding:12px 14px;margin-top:12px}.receipt-spin{animation:receiptSpin 1s linear infinite}@keyframes receiptSpin{to{transform:rotate(360deg)}}@media(max-width:760px){.receipt-layout{grid-template-columns:1fr}.receipt-preview{position:static;min-height:180px}.receipt-preview img{max-height:260px}.receipt-drop{min-height:180px}.receipt-meta{grid-template-columns:1fr}.receipt-head{display:none}.receipt-row{grid-template-columns:24px 1fr 34px}.receipt-row>div:nth-child(2),.receipt-row>div:nth-child(3),.receipt-row>div:nth-child(4),.receipt-row>div:nth-child(5){grid-column:2}.receipt-row>button{grid-column:3;grid-row:1}.receipt-row>input[type=checkbox]{grid-row:1}}
       `}</style>
-      <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" capture="environment" style={{ display: "none" }} onChange={(e) => scanFile(e.target.files?.[0])} />
+      <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" capture="environment" style={{ display: "none" }} onChange={(e) => scanFile(e.target.files?.[0])} />
       <div className="receipt-layout">
         <div>
           <div className="receipt-preview">
