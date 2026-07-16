@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { auth, db } from "./firebase";
+import { auth, db, cloudFunctions } from "./firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { ref, onValue, set, update, push, runTransaction } from "firebase/database";
+import { httpsCallable } from "firebase/functions";
 import QRCode from "qrcode";
 import Login from "./Login.jsx";
 import CustomerOrder from "./CustomerOrder.jsx";
@@ -1601,7 +1602,7 @@ function ShopApp({ uid, user, theme, onToggleTheme }) {
           {tab === "orders" && <OrdersPanel uid={uid} orders={orders} recordSale={recordSale} cancelOrder={cancelOrder} awardLoyaltyBeans={awardLoyaltyBeans} revokeLoyaltyBeans={revokeLoyaltyBeans} showToast={showToast} data={data} ingredientsById={ingredientsById} />}
           {tab === "menus" && <MenusPanel data={dataForDisplay} ingredientsById={ingredientsById} updateData={updateData} showToast={showToast} />}
           {tab === "promotions" && <PromotionsPanel data={data} orders={orders} updateData={updateData} showToast={showToast} />}
-          {tab === "ingredients" && <IngredientsPanel data={data} updateData={updateData} showToast={showToast} onSaveAccounting={saveAccountingTransaction} isAccountingPeriodClosed={isAccountingPeriodClosed} />}
+          {tab === "ingredients" && <IngredientsPanel uid={uid} data={data} updateData={updateData} showToast={showToast} onSaveAccounting={saveAccountingTransaction} isAccountingPeriodClosed={isAccountingPeriodClosed} />}
           {tab === "reports" && <ReportsPanel data={dataForDisplay} orders={orders} shopName={data.settings.shopName} showToast={showToast} />}
           {tab === "accounting" && <AccountingPanel transactions={accountingTransactions} assets={accountingAssets} recurringExpenses={recurringExpenses} accounts={accountingAccounts} reconciliations={accountReconciliations} ownerReimbursements={ownerReimbursements} ownerCapitalMovements={ownerCapitalMovements} accountingSettings={accountingSettings} periodClosings={accountingPeriodClosings} sales={dataForDisplay.sales} overheadPerCup={data.settings.overheadPerCup} onSave={saveAccountingTransaction} onDelete={deleteAccountingTransaction} onSaveAsset={saveAccountingAsset} onDeleteAsset={deleteAccountingAsset} onSaveRecurring={saveRecurringExpense} onDeleteRecurring={deleteRecurringExpense} onUpdateOccurrence={updateRecurringOccurrence} onUpdateAccount={updateAccountingAccount} onSaveReconciliation={saveAccountReconciliation} onSaveOwnerReimbursement={saveOwnerReimbursement} onDeleteOwnerReimbursement={deleteOwnerReimbursement} onSaveOwnerCapitalMovement={saveOwnerCapitalMovement} onDeleteOwnerCapitalMovement={deleteOwnerCapitalMovement} onSaveSettings={saveAccountingSettings} onSetPeriodClosed={setAccountingPeriodClosed} showToast={showToast} />}
           {tab === "loyalty" && <LoyaltyPanel customers={customers} orders={orders} loyaltyBeanGoal={data.settings.loyaltyBeanGoal} adjustCustomerBeans={adjustCustomerBeans} createLoyaltyCustomer={createLoyaltyCustomer} updateLoyaltyGoal={updateLoyaltyGoal} showToast={showToast} backfillEligibleCount={backfillEligibleOrders.length} backfillLoyaltyBeans={backfillLoyaltyBeans} />}
@@ -5671,8 +5672,9 @@ function InvConfirmDialog({ title, message, confirmLabel, onConfirm, onCancel })
   );
 }
 
-function IngredientsPanel({ data, updateData, showToast, onSaveAccounting, isAccountingPeriodClosed }) {
+function IngredientsPanel({ uid, data, updateData, showToast, onSaveAccounting, isAccountingPeriodClosed }) {
   const [restocking, setRestocking] = useState(null);
+  const [bulkReceiving, setBulkReceiving] = useState(false);
   const [adjusting, setAdjusting] = useState(null);
   const [drawer, setDrawer] = useState(null); // null | { mode: "add" | "edit", initial }
   const [confirmDel, setConfirmDel] = useState(null);
@@ -5734,6 +5736,54 @@ function IngredientsPanel({ data, updateData, showToast, onSaveAccounting, isAcc
     } else {
       showToast("เติมสต็อกแล้ว (ไม่ได้ลงรายจ่ายเพราะไม่ระบุราคา)");
     }
+  }
+
+  async function doBulkReceive(receipt) {
+    if (isAccountingPeriodClosed(receipt.purchaseDate)) throw new Error("งวดบัญชีเดือนนี้ถูกปิดแล้ว กรุณาปลดล็อกก่อนรับสต็อกย้อนหลัง");
+    const rows = receipt.items.filter((item) => item.included !== false);
+    if (rows.length === 0) throw new Error("กรุณาเลือกรายการที่จะรับเข้าอย่างน้อย 1 รายการ");
+    if (rows.some((item) => !item.ingredientId || Number(item.qty) <= 0)) throw new Error("กรุณาจับคู่วัตถุดิบและกรอกจำนวนรับเข้าให้ครบทุกรายการ");
+    const duplicateIds = rows.map((item) => item.ingredientId).filter((id, index, all) => all.indexOf(id) !== index);
+    if (duplicateIds.length) throw new Error("มีวัตถุดิบซ้ำกัน กรุณารวมเป็นบรรทัดเดียวก่อนบันทึก");
+
+    const purchasedAt = new Date(`${receipt.purchaseDate}T12:00:00`).toISOString();
+    const batchId = genId("receipt");
+    const records = rows.map((row) => {
+      const ingredient = data.ingredients.find((item) => item.id === row.ingredientId);
+      const qtyAdded = Number(row.qty) || 0;
+      const totalCost = Number(row.total) || 0;
+      const previousStockQty = Number(ingredient.stockQty) || 0;
+      const previousCostPerUnit = Number(ingredient.costPerUnit) || 0;
+      const resultingCostPerUnit = movingWeightedAverageCost(previousStockQty, previousCostPerUnit, qtyAdded, totalCost);
+      return {
+        id: genId("purchase"), timestamp: purchasedAt, ingredientId: ingredient.id, qtyAdded, totalCost,
+        supplierName: receipt.supplierName || "", paymentAccount: receipt.paymentAccount || "bank",
+        note: [receipt.receiptNumber ? `ใบเสร็จ ${receipt.receiptNumber}` : "", row.rawName && row.rawName !== ingredient.name ? `ต้นฉบับ: ${row.rawName}` : "", row.note || ""].filter(Boolean).join(" · "),
+        previousStockQty, previousCostPerUnit,
+        purchaseUnitCost: totalCost > 0 ? round4(totalCost / qtyAdded) : null,
+        resultingCostPerUnit,
+        costingMethod: resultingCostPerUnit == null ? "quantity_only" : "moving_weighted_average",
+        receiptBatchId: batchId,
+      };
+    });
+
+    updateData((next) => {
+      for (const record of records) {
+        const ingredient = next.ingredients.find((item) => item.id === record.ingredientId);
+        ingredient.stockQty = round4((Number(ingredient.stockQty) || 0) + record.qtyAdded);
+        if (record.resultingCostPerUnit != null) ingredient.costPerUnit = record.resultingCostPerUnit;
+        next.purchases.push(record);
+      }
+    });
+
+    const accountingResults = await Promise.allSettled(records.filter((record) => record.totalCost > 0).map((record) => {
+      const ingredient = data.ingredients.find((item) => item.id === record.ingredientId);
+      return onSaveAccounting({ id: `purchase_${record.id}`, ...accountingTransactionFromPurchase(record, ingredient) });
+    }));
+    const failed = accountingResults.filter((result) => result.status === "rejected");
+    setBulkReceiving(false);
+    if (failed.length) showToast(`รับสต็อก ${records.length} รายการแล้ว แต่ลงรายจ่ายไม่สำเร็จ ${failed.length} รายการ`);
+    else showToast(`รับสต็อกและสร้างรายจ่ายแล้ว ${records.length} รายการ`);
   }
 
   function doAdjustStock(id, countedQty) {
@@ -5906,6 +5956,7 @@ function IngredientsPanel({ data, updateData, showToast, onSaveAccounting, isAcc
           <option value="value">เรียง: มูลค่ามาก→น้อย</option>
         </select>
         <div className="inv-toolbar-spacer" />
+        <button className="inv-btn-ghost" style={{ height: 44, display: "inline-flex", alignItems: "center", gap: 7 }} onClick={() => setBulkReceiving(true)}><Icon name="receipt" size={16} /> รับของจากใบเสร็จ</button>
         <button className="inv-btn-primary" onClick={() => setDrawer({ mode: "add", initial: blankIng })}><Icon name="plus" size={16} /> เพิ่มวัตถุดิบ</button>
       </div>
 
@@ -5984,6 +6035,9 @@ function IngredientsPanel({ data, updateData, showToast, onSaveAccounting, isAcc
 
       {restocking && (
         <RestockModal ingredient={data.ingredients.find((i) => i.id === restocking)} onClose={() => setRestocking(null)} onConfirm={doRestock} />
+      )}
+      {bulkReceiving && (
+        <ReceiptReceivingModal uid={uid} ingredients={tracked} onClose={() => setBulkReceiving(false)} onConfirm={doBulkReceive} />
       )}
       {adjusting && (
         <StockAdjustModal ingredient={data.ingredients.find((i) => i.id === adjusting)} onClose={() => setAdjusting(null)} onConfirm={doAdjustStock} />
@@ -6193,7 +6247,7 @@ function IngredientForm({ value, onChange, onSubmit, onCancel, submitLabel, allI
   );
 }
 
-function InvModalShell({ icon, iconTone, title, subtitle, onClose, children }) {
+function InvModalShell({ icon, iconTone, title, subtitle, onClose, children, width = 380 }) {
   const tones = {
     primary: { bg: INV.primarySoft, color: INV.primary },
     neutral: { bg: "#F3F4F6", color: INV.gray },
@@ -6201,7 +6255,7 @@ function InvModalShell({ icon, iconTone, title, subtitle, onClose, children }) {
   const t = tones[iconTone] || tones.primary;
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(17,24,39,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 16 }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title} style={{ background: "var(--surface)", borderRadius: 18, padding: 24, width: 380, maxWidth: "100%", maxHeight: "calc(100vh - 32px)", overflowY: "auto", boxSizing: "border-box", boxShadow: "0 24px 64px rgba(0,0,0,.28)" }}>
+      <div onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title} style={{ background: "var(--surface)", borderRadius: 18, padding: 24, width, maxWidth: "100%", maxHeight: "calc(100vh - 32px)", overflowY: "auto", boxSizing: "border-box", boxShadow: "0 24px 64px rgba(0,0,0,.28)" }}>
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 18 }}>
           <div style={{ width: 40, height: 40, borderRadius: 11, background: t.bg, color: t.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon name={icon} size={20} /></div>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -6213,6 +6267,142 @@ function InvModalShell({ icon, iconTone, title, subtitle, onClose, children }) {
         {children}
       </div>
     </div>
+  );
+}
+
+function receiptImageData(file) {
+  return new Promise((resolve, reject) => {
+    if (!file?.type?.startsWith("image/")) { reject(new Error("กรุณาเลือกไฟล์รูปภาพ")); return; }
+    if (file.size > 15 * 1024 * 1024) { reject(new Error("รูปมีขนาดใหญ่เกิน 15 MB")); return; }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("เปิดรูปไม่สำเร็จ"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("รูปนี้ไม่รองรับ กรุณาใช้ JPG หรือ PNG"));
+      img.onload = () => {
+        const maxSide = 1800;
+        const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve({ dataUrl: canvas.toDataURL("image/jpeg", 0.84), mimeType: "image/jpeg" });
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function ReceiptReceivingModal({ uid, ingredients, onClose, onConfirm }) {
+  const [imageUrl, setImageUrl] = useState("");
+  const [scanning, setScanning] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [supplierName, setSupplierName] = useState("");
+  const [purchaseDate, setPurchaseDate] = useState(todayStr());
+  const [receiptNumber, setReceiptNumber] = useState("");
+  const [paymentAccount, setPaymentAccount] = useState("bank");
+  const [receiptTotal, setReceiptTotal] = useState(0);
+  const [items, setItems] = useState([]);
+  const inputRef = useRef(null);
+  useEscape(() => { if (!scanning && !saving) onClose(); });
+
+  function blankLine() {
+    return { id: genId("receipt_line"), rawName: "", ingredientId: "", qty: "", total: "", confidence: 1, note: "", included: true };
+  }
+  function patchLine(id, patch) { setItems((rows) => rows.map((row) => row.id === id ? { ...row, ...patch } : row)); }
+
+  async function scanFile(file) {
+    if (!file) return;
+    setError("");
+    setScanning(true);
+    try {
+      const image = await receiptImageData(file);
+      setImageUrl(image.dataUrl);
+      const scan = httpsCallable(cloudFunctions, "scanPurchaseReceipt");
+      const result = await scan({
+        shopUid: uid,
+        imageBase64: image.dataUrl,
+        mimeType: image.mimeType,
+        ingredients: ingredients.map((item) => ({ id: item.id, name: item.name, unit: item.unit })),
+      });
+      const value = result.data || {};
+      setSupplierName(value.vendorName || "");
+      setPurchaseDate(value.purchaseDate || todayStr());
+      setReceiptNumber(value.receiptNumber || "");
+      setReceiptTotal(Number(value.grandTotal) || 0);
+      setItems((value.items || []).map((item) => ({
+        id: genId("receipt_line"), rawName: item.rawName || "", ingredientId: item.ingredientId || "",
+        qty: item.stockQty || "", total: item.lineTotal || "", confidence: Number(item.confidence) || 0,
+        note: item.note || "", included: true,
+      })));
+      if (!(value.items || []).length) setError("ไม่พบรายการสินค้าในภาพ ลองถ่ายใหม่ให้เห็นทั้งใบ หรือเพิ่มรายการเอง");
+    } catch (scanError) {
+      setError(scanError?.message?.replace(/^Firebase:\s*/i, "") || "อ่านใบเสร็จไม่สำเร็จ");
+    } finally {
+      setScanning(false);
+    }
+  }
+
+  const included = items.filter((item) => item.included !== false);
+  const linesTotal = included.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
+  const unresolved = included.filter((item) => !item.ingredientId || Number(item.qty) <= 0).length;
+  const canSave = included.length > 0 && unresolved === 0 && purchaseDate && !saving;
+  async function submit() {
+    if (!canSave) return;
+    setSaving(true); setError("");
+    try {
+      await onConfirm({ supplierName: supplierName.trim(), purchaseDate, receiptNumber: receiptNumber.trim(), paymentAccount, items });
+    } catch (submitError) {
+      setError(submitError.message || "บันทึกรายการไม่สำเร็จ");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <InvModalShell icon="receipt" iconTone="primary" title="รับของจากใบเสร็จ" subtitle="AI ช่วยกรอก · ตรวจสอบก่อนเพิ่มสต็อก" onClose={scanning || saving ? () => {} : onClose} width={980}>
+      <style>{`
+        .receipt-layout{display:grid;grid-template-columns:280px minmax(0,1fr);gap:20px}.receipt-preview{position:sticky;top:0;border:1px solid ${INV.border};border-radius:14px;background:var(--cream-2);overflow:hidden;min-height:320px}.receipt-preview img{display:block;width:100%;max-height:520px;object-fit:contain}.receipt-drop{min-height:320px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;color:${INV.gray}}.receipt-meta{display:grid;grid-template-columns:1.4fr 1fr;gap:10px}.receipt-row{display:grid;grid-template-columns:24px minmax(160px,1.35fr) minmax(165px,1.2fr) 105px 105px 34px;gap:8px;align-items:start;padding:10px 0;border-bottom:1px solid ${INV.line}}.receipt-row:last-child{border-bottom:0}.receipt-head{font-size:10.5px;font-weight:700;color:${INV.gray};text-transform:uppercase;padding-bottom:7px}.receipt-field{height:40px!important;margin:0!important}.receipt-original{font-size:12.5px;font-weight:600;color:${INV.ink};padding-top:4px;overflow-wrap:anywhere}.receipt-hint{font-size:10.5px;color:${INV.gray};margin-top:3px}.receipt-summary{display:flex;justify-content:space-between;gap:16px;background:var(--cream-2);border-radius:12px;padding:12px 14px;margin-top:12px}.receipt-spin{animation:receiptSpin 1s linear infinite}@keyframes receiptSpin{to{transform:rotate(360deg)}}@media(max-width:760px){.receipt-layout{grid-template-columns:1fr}.receipt-preview{position:static;min-height:180px}.receipt-preview img{max-height:260px}.receipt-drop{min-height:180px}.receipt-meta{grid-template-columns:1fr}.receipt-head{display:none}.receipt-row{grid-template-columns:24px 1fr 34px}.receipt-row>div:nth-child(2),.receipt-row>div:nth-child(3),.receipt-row>div:nth-child(4),.receipt-row>div:nth-child(5){grid-column:2}.receipt-row>button{grid-column:3;grid-row:1}.receipt-row>input[type=checkbox]{grid-row:1}}
+      `}</style>
+      <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" capture="environment" style={{ display: "none" }} onChange={(e) => scanFile(e.target.files?.[0])} />
+      <div className="receipt-layout">
+        <div>
+          <div className="receipt-preview">
+            {imageUrl ? <img src={imageUrl} alt="ใบเสร็จที่เลือก" /> : <div className="receipt-drop"><Icon name="camera" size={34} /><b style={{ color: INV.ink, marginTop: 10 }}>ถ่ายรูปหรือเลือกใบเสร็จ</b><span style={{ fontSize: 12, marginTop: 4, lineHeight: 1.5 }}>วางใบเสร็จให้ตรง เห็นครบทั้งใบ<br />และไม่มีเงาบังตัวหนังสือ</span></div>}
+            {scanning && <div style={{ position: "absolute", inset: 0, background: "rgba(255,255,255,.82)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, color: INV.primaryDark }}><Icon className="receipt-spin" name="loader-2" size={28} /><b>กำลังอ่านใบเสร็จ...</b><span style={{ fontSize: 11.5 }}>ปกติใช้เวลาไม่เกิน 20 วินาที</span></div>}
+          </div>
+          <button className="inv-btn-ghost" style={{ width: "100%", height: 42, marginTop: 10 }} onClick={() => inputRef.current?.click()} disabled={scanning || saving}><Icon name={imageUrl ? "refresh" : "camera"} size={15} /> {imageUrl ? "ถ่าย / เลือกรูปใหม่" : "เปิดกล้อง / เลือกรูป"}</button>
+          <p style={{ fontSize: 10.5, color: INV.gray, lineHeight: 1.5, margin: "8px 2px 0" }}><Icon name="shield-lock" size={11} /> รูปใช้เพื่ออ่านข้อมูลครั้งนี้และไม่บันทึกไว้ในระบบ</p>
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div className="receipt-meta">
+            <div><label style={invLabelStyle}>ผู้ขาย / ร้านค้า</label><input {...invFocusProps} style={invFieldStyle} value={supplierName} onChange={(e) => setSupplierName(e.target.value)} placeholder="ชื่อร้านบนใบเสร็จ" /></div>
+            <div><label style={invLabelStyle}>วันที่ซื้อ</label><input {...invFocusProps} style={invFieldStyle} type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} /></div>
+            <div><label style={invLabelStyle}>เลขที่ใบเสร็จ</label><input {...invFocusProps} style={invFieldStyle} value={receiptNumber} onChange={(e) => setReceiptNumber(e.target.value)} placeholder="ไม่บังคับ" /></div>
+            <div><label style={invLabelStyle}>จ่ายผ่าน</label><select {...invFocusProps} style={invFieldStyle} value={paymentAccount} onChange={(e) => setPaymentAccount(e.target.value)}>{ACCOUNTING_PAYMENT_ACCOUNTS.filter((account) => account.id !== "unassigned").map((account) => <option key={account.id} value={account.id}>{account.label}</option>)}</select></div>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 20, marginBottom: 4 }}><div><b style={{ fontSize: 14.5, color: INV.ink }}>รายการรับเข้า</b><span style={{ fontSize: 11.5, color: unresolved ? INV.danger : INV.gray, marginLeft: 8 }}>{unresolved ? `ต้องตรวจอีก ${unresolved} รายการ` : `${included.length} รายการพร้อมบันทึก`}</span></div><button className="inv-btn-ghost" style={{ height: 34, padding: "0 10px", fontSize: 12 }} onClick={() => setItems((rows) => [...rows, blankLine()])}><Icon name="plus" size={13} /> เพิ่มเอง</button></div>
+          <div className="receipt-row receipt-head"><span /><span>รายการบนใบเสร็จ</span><span>จับคู่กับวัตถุดิบ</span><span>จำนวนรับเข้า</span><span>ยอดเงิน</span><span /></div>
+          {items.length === 0 && !scanning ? <div style={{ border: `1px dashed ${INV.border}`, borderRadius: 12, padding: "28px 16px", textAlign: "center", color: INV.gray, fontSize: 12.5 }}>ถ่ายใบเสร็จให้ AI ช่วยกรอก หรือกด “เพิ่มเอง” เพื่อรับของหลายรายการ</div> : items.map((item) => {
+            const ing = ingredients.find((entry) => entry.id === item.ingredientId);
+            return <div className="receipt-row" key={item.id} style={{ opacity: item.included === false ? .45 : 1 }}>
+              <input type="checkbox" checked={item.included !== false} onChange={(e) => patchLine(item.id, { included: e.target.checked })} aria-label="รวมรายการนี้" style={{ marginTop: 12 }} />
+              <div><input className="receipt-field" {...invFocusProps} style={invFieldStyle} value={item.rawName} onChange={(e) => patchLine(item.id, { rawName: e.target.value })} placeholder="ชื่อบนใบเสร็จ" />{item.note && <div className="receipt-hint">{item.note}</div>}</div>
+              <div><select className="receipt-field" {...invFocusProps} style={{ ...invFieldStyle, borderColor: item.included !== false && !item.ingredientId ? INV.danger : INV.border }} value={item.ingredientId} onChange={(e) => patchLine(item.id, { ingredientId: e.target.value })}><option value="">— เลือกวัตถุดิบ —</option>{ingredients.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select>{item.confidence < .7 && item.ingredientId && <div className="receipt-hint" style={{ color: "#B45309" }}>AI ไม่มั่นใจ กรุณาตรวจสอบ</div>}</div>
+              <div><input className="receipt-field" {...invFocusProps} style={invFieldStyle} type="number" min="0" value={item.qty} onChange={(e) => patchLine(item.id, { qty: e.target.value })} placeholder="0" /><div className="receipt-hint">{ing ? UNITS[ing.unit] : "หน่วยสต็อก"}</div></div>
+              <div><input className="receipt-field" {...invFocusProps} style={invFieldStyle} type="number" min="0" value={item.total} onChange={(e) => patchLine(item.id, { total: e.target.value })} placeholder="0.00" /><div className="receipt-hint">บาท</div></div>
+              <button className="inv-icon-btn" style={{ width: 34, height: 34, marginTop: 3 }} onClick={() => setItems((rows) => rows.filter((row) => row.id !== item.id))} aria-label="ลบบรรทัด"><Icon name="trash" size={14} /></button>
+            </div>;
+          })}
+
+          <div className="receipt-summary"><div><div style={{ fontSize: 11.5, color: INV.gray }}>จะเพิ่มสต็อก</div><b style={{ fontSize: 15, color: INV.ink }}>{included.length} รายการ</b></div><div style={{ textAlign: "right" }}><div style={{ fontSize: 11.5, color: INV.gray }}>รวมรายจ่ายจากรายการ</div><b style={{ fontSize: 18, color: INV.ink }}>฿{money(linesTotal)}</b>{receiptTotal > 0 && Math.abs(receiptTotal - linesTotal) > .01 && <div style={{ fontSize: 10.5, color: "#B45309" }}>ยอดทั้งใบ ฿{money(receiptTotal)} · ต่าง ฿{money(receiptTotal - linesTotal)}</div>}</div></div>
+          {error && <div style={{ background: INV.dangerSoft, color: INV.danger, borderRadius: 10, padding: "9px 11px", fontSize: 12.5, marginTop: 10, lineHeight: 1.45 }}>{error}</div>}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}><button className="inv-btn-ghost" style={{ height: 44 }} onClick={onClose} disabled={scanning || saving}>ยกเลิก</button><button className="inv-btn-primary" style={{ justifyContent: "center", minWidth: 190, opacity: canSave ? 1 : .55 }} onClick={submit} disabled={!canSave}>{saving ? <><Icon className="receipt-spin" name="loader-2" size={15} /> กำลังบันทึก...</> : <><Icon name="package-import" size={15} /> รับเข้าและลงรายจ่าย</>}</button></div>
+        </div>
+      </div>
+    </InvModalShell>
   );
 }
 

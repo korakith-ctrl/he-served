@@ -9,8 +9,36 @@ const db = admin.database();
 
 const SLIPOK_API_KEY = defineSecret("SLIPOK_API_KEY");
 const SLIPOK_BRANCH_ID = defineString("SLIPOK_BRANCH_ID");
+const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
+const GEMINI_RECEIPT_MODEL = defineString("GEMINI_RECEIPT_MODEL", { default: "gemini-2.5-flash" });
 
 const REGION = "asia-southeast1";
+
+const RECEIPT_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    vendorName: { type: "STRING" },
+    purchaseDate: { type: "STRING", description: "YYYY-MM-DD, empty when unreadable" },
+    receiptNumber: { type: "STRING" },
+    grandTotal: { type: "NUMBER" },
+    items: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          rawName: { type: "STRING" },
+          ingredientId: { type: "STRING", description: "Exact catalog id, or empty when no confident match" },
+          stockQty: { type: "NUMBER", description: "Quantity converted to the catalog base unit" },
+          lineTotal: { type: "NUMBER" },
+          confidence: { type: "NUMBER", description: "0 to 1" },
+          note: { type: "STRING" },
+        },
+        required: ["rawName", "ingredientId", "stockQty", "lineTotal", "confidence", "note"],
+      },
+    },
+  },
+  required: ["vendorName", "purchaseDate", "receiptNumber", "grandTotal", "items"],
+};
 
 function normalizeThaiPhone(value) {
   const digits = String(value || "").replace(/\D/g, "");
@@ -198,4 +226,58 @@ exports.verifySlip = onCall({ region: REGION, secrets: [SLIPOK_API_KEY] }, async
   });
 
   return { verified: true, amount: slip.amount, transRef: slip.transRef, testMode };
+});
+
+// Owner-only receipt OCR. The image is sent inline to Gemini and is not stored in Firebase.
+exports.scanPurchaseReceipt = onCall({ region: REGION, secrets: [GEMINI_API_KEY], timeoutSeconds: 60, memory: "512MiB" }, async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "กรุณาเข้าสู่ระบบก่อนสแกนใบเสร็จ");
+  const { shopUid, imageBase64, mimeType, ingredients } = request.data || {};
+  if (!shopUid || request.auth.uid !== shopUid) throw new HttpsError("permission-denied", "ไม่มีสิทธิ์อ่านใบเสร็จของร้านนี้");
+  if (!imageBase64 || typeof imageBase64 !== "string" || imageBase64.length > 9_000_000) {
+    throw new HttpsError("invalid-argument", "รูปใบเสร็จไม่ถูกต้องหรือมีขนาดใหญ่เกินไป");
+  }
+  if (!Array.isArray(ingredients) || ingredients.length > 500) throw new HttpsError("invalid-argument", "รายการวัตถุดิบไม่ถูกต้อง");
+
+  const catalog = ingredients.map((item) => ({
+    id: String(item.id || "").slice(0, 160),
+    name: String(item.name || "").slice(0, 200),
+    unit: ["g", "ml", "piece"].includes(item.unit) ? item.unit : "piece",
+  })).filter((item) => item.id && item.name);
+  const prompt = `Read this Thai or English purchase receipt for a coffee shop. Return every purchased product line, excluding subtotal, VAT, discounts and payment lines. Match each product to the supplied inventory catalog only when reasonably confident. Convert package sizes into the matched inventory base unit: g for grams, ml for milliliters, piece for pieces (example: 2 cartons of 12 x 1L milk = 24000 ml). lineTotal is the final amount paid for that line after its line discount. Never invent unreadable values; use empty id, 0 quantity, or 0 price and a short note. Dates in Buddhist Era must be converted to Gregorian YYYY-MM-DD. Catalog: ${JSON.stringify(catalog)}`;
+  const rawImage = imageBase64.includes(",") ? imageBase64.split(",").pop() : imageBase64;
+
+  try {
+    const response = await axios.post(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_RECEIPT_MODEL.value())}:generateContent`,
+      {
+        contents: [{ parts: [
+          { inlineData: { mimeType: /^image\/(jpeg|png|webp)$/.test(mimeType || "") ? mimeType : "image/jpeg", data: rawImage } },
+          { text: prompt },
+        ] }],
+        generationConfig: { responseMimeType: "application/json", responseSchema: RECEIPT_SCHEMA, temperature: 0.1 },
+      },
+      { headers: { "x-goog-api-key": GEMINI_API_KEY.value(), "Content-Type": "application/json" }, timeout: 55000 }
+    );
+    const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) throw new Error("empty model response");
+    const parsed = JSON.parse(text);
+    return {
+      vendorName: String(parsed.vendorName || "").slice(0, 200),
+      purchaseDate: /^\d{4}-\d{2}-\d{2}$/.test(parsed.purchaseDate || "") ? parsed.purchaseDate : "",
+      receiptNumber: String(parsed.receiptNumber || "").slice(0, 120),
+      grandTotal: Math.max(0, Number(parsed.grandTotal) || 0),
+      items: (Array.isArray(parsed.items) ? parsed.items : []).slice(0, 100).map((item) => ({
+        rawName: String(item.rawName || "").slice(0, 240),
+        ingredientId: catalog.some((entry) => entry.id === item.ingredientId) ? item.ingredientId : "",
+        stockQty: Math.max(0, Number(item.stockQty) || 0),
+        lineTotal: Math.max(0, Number(item.lineTotal) || 0),
+        confidence: Math.min(1, Math.max(0, Number(item.confidence) || 0)),
+        note: String(item.note || "").slice(0, 240),
+      })),
+    };
+  } catch (error) {
+    logger.error("purchase receipt OCR failed", { uid: request.auth.uid, status: error.response?.status, data: error.response?.data, message: error.message });
+    if (error.response?.status === 429) throw new HttpsError("resource-exhausted", "ระบบอ่านใบเสร็จกำลังถูกใช้งานมาก กรุณาลองใหม่อีกครั้ง");
+    throw new HttpsError("internal", "อ่านใบเสร็จไม่สำเร็จ กรุณาถ่ายใหม่ให้เห็นทั้งใบและตัวหนังสือชัดเจน");
+  }
 });

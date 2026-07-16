@@ -78,6 +78,22 @@ npm run dev
 
 ---
 
+## เปิดใช้ AI อ่านใบเสร็จรับของเข้า
+
+ฟังก์ชัน **Inventory & Stock > รับของจากใบเสร็จ** ใช้ Gemini API ผ่าน Firebase Cloud Functions โดย API key จะอยู่ฝั่งเซิร์ฟเวอร์และไม่ถูกส่งไปที่ browser
+
+1. สร้าง Gemini API key ที่ Google AI Studio
+2. ตั้ง secret และ deploy functions:
+   ```
+   firebase functions:secrets:set GEMINI_API_KEY
+   firebase deploy --only functions:scanPurchaseReceipt
+   ```
+3. หากยังไม่เคยใช้ Cloud Functions โปรเจกต์ Firebase ต้องเปิด billing (Blaze) ก่อน ทั้งนี้ Gemini API อาจมีโควตาหรือค่าใช้จ่ายตามบัญชี Google ที่ใช้สร้าง key
+
+รูปใบเสร็จจะถูกย่อใน browser แล้วส่งไปอ่านเฉพาะครั้งนั้น ระบบไม่เก็บไฟล์รูปไว้ใน Firebase ผู้ใช้ต้องตรวจการจับคู่วัตถุดิบ จำนวน และราคาก่อนกดยืนยันทุกครั้ง
+
+---
+
 ## ข้อจำกัดที่ควรรู้
 
 - แผนฟรีของ Firebase (Spark plan) และ Vercel (Hobby plan) เพียงพอสำหรับร้านกาแฟร้านเดียวสบาย ๆ — จะมีค่าใช้จ่ายก็ต่อเมื่อมีการอ่าน/เขียนข้อมูลปริมาณสูงมากในระดับหลักหมื่นครั้งต่อวันขึ้นไป
