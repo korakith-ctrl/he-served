@@ -1160,9 +1160,16 @@ function ShopApp({ uid, user, theme, onToggleTheme }) {
     const grossRevenue = unitPrice * qty;
     const platform = channel === "delivery" ? data.settings.platforms.find((p) => p.id === opts.platformId) : null;
     const gpPercent = platform ? platform.gpPercent : 0;
-    const gpAmount = channel === "delivery" ? round4(grossRevenue * (gpPercent / 100)) : 0;
-    const promoDiscount = opts.promoDiscount || 0;
-    const netRevenue = grossRevenue - gpAmount - promoDiscount;
+    const enteredNetRevenue = channel === "delivery" && Number.isFinite(opts.netRevenueOverride)
+      ? Math.max(0, round4(opts.netRevenueOverride))
+      : null;
+    // โปรของแพลตฟอร์มมักไม่ได้หักจากราคาขายตามสูตรเดียวกับ GP จึงให้หน้า admin
+    // บันทึกยอดรับจริงได้โดยตรง ส่วนต่างทั้งหมดเก็บเป็นยอดหักของแพลตฟอร์มเพื่อให้รายงานยัง reconcile กับยอดสุทธิได้
+    const gpAmount = enteredNetRevenue !== null
+      ? Math.max(0, round4(grossRevenue - enteredNetRevenue))
+      : (channel === "delivery" ? round4(grossRevenue * (gpPercent / 100)) : 0);
+    const promoDiscount = enteredNetRevenue !== null ? 0 : (opts.promoDiscount || 0);
+    const netRevenue = enteredNetRevenue !== null ? enteredNetRevenue : grossRevenue - gpAmount - promoDiscount;
     const ingredientCostTotal = ingredientCost * qty;
     const overheadAllocated = overhead * qty;
     const totalCost = ingredientCostTotal + overheadAllocated;
@@ -1180,6 +1187,7 @@ function ShopApp({ uid, user, theme, onToggleTheme }) {
     const sale = {
       id: saleId, timestamp, menuId, menuName: menu.name,
       channel, qty, unitPrice, grossRevenue, gpAmount, gpPercent, promoDiscount, netRevenue,
+      netRevenueEntered: enteredNetRevenue !== null,
       ingredientCostTotal, overheadAllocated, totalCost, profit: netRevenue - totalCost,
       platformName: platform ? platform.name : null,
       milkNote: opts.milkLabel || null,
@@ -1199,7 +1207,12 @@ function ShopApp({ uid, user, theme, onToggleTheme }) {
     const items = cart.map((line) => ({
       menuId: line.menuId, name: line.menuName, unitPrice: line.unitPrice, qty: line.qty, options: line.options,
     }));
-    const total = round4(cart.reduce((s, l) => s + l.unitPrice * l.qty - (l.promo || 0), 0));
+    const total = round4(cart.reduce((sum, line) => {
+      const lineTotal = line.channel === "delivery" && Number.isFinite(line.netRevenueOverride)
+        ? line.netRevenueOverride
+        : line.unitPrice * line.qty;
+      return sum + lineTotal;
+    }, 0));
     const platformNames = [...new Set(cart.filter((l) => l.channel === "delivery" && l.platformName).map((l) => l.platformName))];
     const customerName = platformNames.length > 0 ? platformNames.join(", ") : "ขายหน้าร้าน";
     const newRef = push(ref(db, `orders/${uid}`));
@@ -1994,10 +2007,10 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
   const [cart, setCart] = useState([]);
   const [cartNote, setCartNote] = useState("");
   const [cartPhone, setCartPhone] = useState("");
-  // ช่องทางขาย/แพลตฟอร์ม/โปรโมชั่น ยกขึ้นมาเป็นตัวเลือกกลางตัวเดียวเหนือกริดสินค้า แทนที่จะให้ทุกการ์ดมีชุดของตัวเอง
+  // ช่องทางขาย/แพลตฟอร์มยกขึ้นมาเป็นตัวเลือกกลางตัวเดียวเหนือกริดสินค้า แทนที่จะให้ทุกการ์ดมีชุดของตัวเอง
   const [channel, setChannel] = useState("store");
   const [platformId, setPlatformId] = useState(data.settings.platforms[0]?.id || "");
-  const [promo, setPromo] = useState(0);
+  const [deliveryNetReceived, setDeliveryNetReceived] = useState("");
   const [infoFor, setInfoFor] = useState(null);
   const [warnOpen, setWarnOpen] = useState({});
   const [advOpen, setAdvOpen] = useState({});
@@ -2035,7 +2048,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
   }
 
   function addToCart(menu, cfg) {
-    const { qty, channel, options, platformId, promo } = cfg;
+    const { qty, channel, options, platformId } = cfg;
     const optionsArr = Object.values(options);
     const substitutions = resolveIngredientAdjustmentsFromOptions(menu, optionsArr, ingredientsById);
     const upcharge = optionsArr.reduce((s, o) => s + (o.priceDelta || 0), 0);
@@ -2048,7 +2061,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
       platformId: channel === "delivery" ? platformId : null,
       platformName: platform ? platform.name : null,
       options: optionsArr, optionsLabel,
-      substitutions, upcharge, unitPrice, promo: channel === "delivery" ? (promo || 0) : 0,
+      substitutions, upcharge, unitPrice,
     }]);
     set(menu.id, { qty: 1 });
   }
@@ -2062,22 +2075,41 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
   }
 
   function checkout() {
-    const orderId = createInstoreOrder(cart, cartNote.trim(), cartPhone.trim());
-    for (const line of cart) {
+    const enteredDeliveryNet = Number(deliveryNetReceived);
+    let allocatedNet = 0;
+    let remainingDeliveryLines = cart.filter((line) => line.channel === "delivery").length;
+    const deliveryLineCount = remainingDeliveryLines;
+    const checkoutCart = cart.map((line) => {
+      if (line.channel !== "delivery") return line;
+      remainingDeliveryLines -= 1;
+      const gross = line.unitPrice * line.qty;
+      const netRevenueOverride = remainingDeliveryLines === 0
+        ? round4(enteredDeliveryNet - allocatedNet)
+        : round4(enteredDeliveryNet * (deliveryGrossTotal > 0 ? gross / deliveryGrossTotal : 1 / deliveryLineCount));
+      allocatedNet = round4(allocatedNet + netRevenueOverride);
+      return { ...line, netRevenueOverride };
+    });
+    const orderId = createInstoreOrder(checkoutCart, cartNote.trim(), cartPhone.trim());
+    for (const line of checkoutCart) {
       recordSale(line.menuId, line.qty, line.channel, {
         substitutions: line.substitutions, upcharge: line.upcharge,
-        promoDiscount: line.promo, platformId: line.platformId, milkLabel: line.optionsLabel,
+        platformId: line.platformId, milkLabel: line.optionsLabel,
+        netRevenueOverride: line.netRevenueOverride,
         note: cartNote.trim() || null, orderId, paymentMethod: "cash",
       });
     }
     setCart([]);
     setCartNote("");
     setCartPhone("");
-    setPromo(0);
+    setDeliveryNetReceived("");
   }
 
   const cartCups = cart.reduce((s, l) => s + l.qty, 0);
-  const cartTotal = cart.reduce((s, l) => s + l.unitPrice * l.qty - (l.promo || 0), 0);
+  const deliveryGrossTotal = cart.reduce((sum, line) => sum + (line.channel === "delivery" ? line.unitPrice * line.qty : 0), 0);
+  const nonDeliveryTotal = cart.reduce((sum, line) => sum + (line.channel !== "delivery" ? line.unitPrice * line.qty : 0), 0);
+  const hasDeliveryItems = cart.some((line) => line.channel === "delivery");
+  const deliveryNetIsValid = !hasDeliveryItems || (deliveryNetReceived !== "" && Number.isFinite(Number(deliveryNetReceived)) && Number(deliveryNetReceived) >= 0);
+  const cartTotal = nonDeliveryTotal + (deliveryNetIsValid && hasDeliveryItems ? Number(deliveryNetReceived) : 0);
 
   const today = todayStr();
   const todaySales = data.sales.filter((s) => s.timestamp.slice(0, 10) === today);
@@ -2152,11 +2184,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
             }}>
               {data.settings.platforms.map((p) => <option key={p.id} value={p.id}>{p.name} (GP {p.gpPercent}%)</option>)}
             </select>
-            <input
-              type="number" placeholder="ส่วนลดโปร (บาท)" value={promo || ""} onChange={(e) => setPromo(Number(e.target.value) || 0)}
-              style={{ width: 160, padding: "9px 12px", borderRadius: 12, border: `1px solid ${POS.border}`, fontSize: 13.5 }}
-            />
-            {platform && <span style={{ fontSize: 11, color: POS.gray }}>หัก GP {platform.gpPercent}% อัตโนมัติ</span>}
+            {platform && <span style={{ fontSize: 11, color: POS.gray }}>กรอกยอดรับจริงในตะกร้าหลังรวมออเดอร์</span>}
           </div>
         )}
       </div>
@@ -2251,7 +2279,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
                   </div>
                   <button
                     className="pos-add-btn" disabled={missingRequired}
-                    onClick={() => addToCart(menu, { qty, channel, options, platformId, promo })}
+                    onClick={() => addToCart(menu, { qty, channel, options, platformId })}
                   >
                     <Icon name="shopping-cart-plus" size={16} /> เพิ่มลงตะกร้า
                   </button>
@@ -2291,7 +2319,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
                       <span style={{ minWidth: 16, textAlign: "center", fontSize: 13, fontWeight: 600 }}>{line.qty}</span>
                       <button className="cbtn" style={{ padding: "2px 9px", fontSize: 13 }} onClick={() => updateCartQty(line.cartId, line.qty + 1)}>+</button>
                     </div>
-                    <span style={{ fontWeight: 700, fontFamily: "var(--f-body)", fontSize: 14, color: POS.primary }}>฿{money(line.unitPrice * line.qty - (line.promo || 0))}</span>
+                    <span style={{ fontWeight: 700, fontFamily: "var(--f-body)", fontSize: 14, color: POS.primary }}>฿{money(line.unitPrice * line.qty)}</span>
                   </div>
                 </div>
               ))}
@@ -2312,10 +2340,29 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
             style={{ resize: "vertical", minHeight: 50, marginBottom: 10, fontFamily: "inherit", padding: "9px 11px", borderRadius: 12, border: `1px solid ${POS.border}`, fontSize: 13.5 }}
           />
 
+          {hasDeliveryItems && (
+            <div style={{ background: POS.chipBg, border: `1px solid ${POS.border}`, borderRadius: 14, padding: 12, marginBottom: 12 }}>
+              <label style={{ display: "block", fontSize: 12, color: POS.navy, marginBottom: 5, fontWeight: 700 }}>
+                ยอดสุทธิที่ได้รับจากแพลตฟอร์ม (บาท)
+              </label>
+              <input
+                type="number" min="0" step="0.01" inputMode="decimal"
+                value={deliveryNetReceived}
+                onChange={(e) => setDeliveryNetReceived(e.target.value)}
+                placeholder="กรอกยอดรับจริงทั้งออเดอร์"
+                style={{ width: "100%", boxSizing: "border-box", padding: "10px 11px", borderRadius: 11, border: `1px solid ${deliveryNetIsValid ? POS.border : "var(--danger)"}`, fontSize: 14, fontWeight: 600 }}
+              />
+              <div style={{ fontSize: 10.5, color: POS.gray, marginTop: 5, lineHeight: 1.45 }}>
+                ราคาหน้าแอปรวม ฿{money(deliveryGrossTotal)} · กรอกยอดหลังหัก GP และโปรทั้งหมดแล้ว
+              </div>
+              {!deliveryNetIsValid && <div style={{ fontSize: 10.5, color: "var(--danger)", marginTop: 4 }}>กรุณากรอกยอดสุทธิที่ได้รับก่อนยืนยันออเดอร์</div>}
+            </div>
+          )}
+
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontWeight: 700, fontSize: 20, fontFamily: "var(--f-body)", borderTop: `1px solid ${POS.border}`, paddingTop: 12, marginBottom: 12 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: POS.gray }}>รวมทั้งหมด</span><span style={{ color: POS.navy }}>฿{money(cartTotal)}</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: POS.gray }}>ยอดรับสุทธิรวม</span><span style={{ color: POS.navy }}>{deliveryNetIsValid ? `฿${money(cartTotal)}` : "—"}</span>
           </div>
-          <button className="pos-add-btn" style={{ width: "100%", opacity: cart.length === 0 ? 0.5 : 1 }} disabled={cart.length === 0} onClick={checkout}>
+          <button className="pos-add-btn" style={{ width: "100%", opacity: cart.length === 0 || !deliveryNetIsValid ? 0.5 : 1 }} disabled={cart.length === 0 || !deliveryNetIsValid} onClick={checkout}>
             <Icon name="check" size={16} /> ยืนยันออเดอร์ / ชำระเงิน
           </button>
         </div>
@@ -7430,7 +7477,7 @@ function ReportsPanel({ data, orders, shopName, showToast }) {
       </div>
 
       <div className="rep-kpi-grid">
-        <RepKpiCard icon="cash" label="รายได้สุทธิ" value={"฿" + money(revenue)} sub={`หัก GP ฿${money(gpTotal)} · ส่วนลด ฿${money(discountTotal)}`} delta={prevStats ? pctDelta(revenue, prevStats.revenue) : null} tone="primary" big />
+        <RepKpiCard icon="cash" label="รายได้สุทธิ" value={"฿" + money(revenue)} sub={`หักแพลตฟอร์ม/โปร ฿${money(gpTotal + discountTotal)}`} delta={prevStats ? pctDelta(revenue, prevStats.revenue) : null} tone="primary" big />
         <RepKpiCard icon="receipt-2" label="ต้นทุนรวม" value={"฿" + money(cost)} delta={prevStats ? pctDelta(cost, prevStats.cost) : null} tone="neutral" />
         <RepKpiCard icon="trending-up" label="กำไรสุทธิ" value={"฿" + money(profit)} sub={`margin ${margin.toFixed(1)}%`} delta={prevStats ? pctDelta(profit, prevStats.profit) : null} tone={profit >= 0 ? "success" : "danger"} />
         <RepKpiCard icon="cup" label="จำนวนแก้วที่ขาย" value={cups} delta={prevStats ? pctDelta(cups, prevStats.cups) : null} tone="neutral" />
