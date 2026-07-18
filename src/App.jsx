@@ -228,8 +228,8 @@ function seedOptionGroups() {
       name: "เมล็ดกาแฟ",
       required: true,
       choices: [
-        { id: genId("choice"), label: "Classic - Medium Dark", note: "fruity, Caramel, Chocolate, Nutty", priceDelta: 0 },
-        { id: genId("choice"), label: "Brazil Blend - Medium", note: "caramel Candy, Rich Milk Chocolate", priceDelta: 20 },
+        { id: genId("choice"), label: "Classic - Medium Dark", note: "fruity, Caramel, Chocolate, Nutty", priceDelta: 0, ingredientId: "coffee_bluekoff", qtyPercent: 100 },
+        { id: genId("choice"), label: "Brazil Blend - Medium", note: "caramel Candy, Rich Milk Chocolate", priceDelta: 20, ingredientId: "coffee_pacamara", qtyPercent: 100 },
       ],
     },
     {
@@ -286,6 +286,10 @@ function normalizeData(raw) {
     || ingredients.find((i) => /นมสด|fresh\s*milk/i.test(i.name || ""));
   const milkOat = ingredients.find((i) => i.id === "milk_oat")
     || ingredients.find((i) => /oat|โอ๊ต/i.test(i.name || ""));
+  const coffeeBluekoff = ingredients.find((i) => i.id === "coffee_bluekoff")
+    || ingredients.find((i) => /bluekoff/i.test(i.name || ""));
+  const coffeePacamara = ingredients.find((i) => i.id === "coffee_pacamara")
+    || ingredients.find((i) => /pacamara/i.test(i.name || ""));
 
   function normalizeOptionChoice(group, choice) {
     let ingredientId = choice.ingredientId || null;
@@ -293,6 +297,7 @@ function normalizeData(raw) {
     // ข้อมูลร้านรุ่นแรกมีตัวเลือกนม Oat/ไม่ใส่นมเป็นเพียงข้อความและราคาเพิ่ม แต่ไม่ได้ผูกวัตถุดิบ
     // ทำให้ขายแล้วตัดนมสดตามสูตรเดิมแทน Migration นี้ซ่อมข้อมูลเดิมเมื่อโหลด และ autosave จะบันทึกค่าที่ซ่อมแล้วกลับไป
     const isMilkGroup = /นม|milk/i.test(group.name || "");
+    const isBeanGroup = /เมล็ด|bean|coffee/i.test(group.name || "");
     if (!ingredientId && isMilkGroup) {
       if (/oat|โอ๊ต/i.test(choice.label || "") && milkOat) ingredientId = milkOat.id;
       else if (/ไม่ใส่นม|no\s*milk/i.test(choice.label || "") && milkFresh) {
@@ -301,6 +306,10 @@ function normalizeData(raw) {
       } else if (/นมสด|fresh\s*milk/i.test(choice.label || "") && milkFresh) {
         ingredientId = milkFresh.id;
       }
+    }
+    if (!ingredientId && isBeanGroup) {
+      if (/classic/i.test(choice.label || "") && coffeeBluekoff) ingredientId = coffeeBluekoff.id;
+      else if (/brazil/i.test(choice.label || "") && coffeePacamara) ingredientId = coffeePacamara.id;
     }
     return {
       ...choice, ingredientId, qtyPercent, isDefault: choice.isDefault || false,
@@ -5896,6 +5905,23 @@ function IngredientsPanel({ uid, data, updateData, showToast, onSaveAccounting, 
   }
 
   function deleteIngredient(id) {
+    const menuRefs = data.menus.filter((menu) => menu.ingredients.some((line) => line.ingredientId === id));
+    const optionRefs = data.optionGroups.filter((group) => group.choices.some((choice) =>
+      choice.ingredientId === id || (choice.extraAdjustments || []).some((adjustment) => adjustment.ingredientId === id)
+    ));
+    const mixRefs = data.ingredients.filter((ingredient) => (ingredient.components || []).some((component) => component.ingredientId === id));
+    const usedByDefaultPackaging = (data.settings.defaultPackagingLines || []).some((line) => line.ingredientId === id);
+    const references = [
+      menuRefs.length ? `สูตรเมนู ${menuRefs.map((menu) => menu.name).join(", ")}` : "",
+      optionRefs.length ? `ตัวเลือกเสริม ${optionRefs.map((group) => group.name).join(", ")}` : "",
+      mixRefs.length ? `สูตรวัตถุดิบผสม ${mixRefs.map((ingredient) => ingredient.name).join(", ")}` : "",
+      usedByDefaultPackaging ? "บรรจุภัณฑ์เริ่มต้นสำหรับเมนูใหม่" : "",
+    ].filter(Boolean);
+    if (references.length > 0) {
+      showToast(`ลบไม่ได้: วัตถุดิบนี้ยังถูกใช้ใน ${references.join(" · ")}`);
+      setConfirmDel(null);
+      return;
+    }
     updateData((next) => { next.ingredients = next.ingredients.filter((i) => i.id !== id); });
     setConfirmDel(null);
     showToast("ลบวัตถุดิบแล้ว");
