@@ -248,9 +248,9 @@ function seedOptionGroups() {
       name: "นมที่ใช้",
       required: false,
       choices: [
-        { id: genId("choice"), label: "นมสด", note: "", priceDelta: 0 },
-        { id: genId("choice"), label: "นม Oat", note: "", priceDelta: 10 },
-        { id: genId("choice"), label: "ไม่ใส่นม", note: "", priceDelta: 0 },
+        { id: genId("choice"), label: "นมสด", note: "", priceDelta: 0, ingredientId: "milk_fresh", qtyPercent: 100 },
+        { id: genId("choice"), label: "นม Oat", note: "", priceDelta: 10, ingredientId: "milk_oat", qtyPercent: 100 },
+        { id: genId("choice"), label: "ไม่ใส่นม", note: "", priceDelta: 0, ingredientId: "milk_fresh", qtyPercent: 0 },
       ],
     },
   ];
@@ -281,10 +281,37 @@ function defaultState() {
 }
 
 function normalizeData(raw) {
+  const ingredients = (raw.ingredients || []).filter(Boolean).map((i) => ({ ...i, components: i.components || [], unlimited: i.unlimited || false }));
+  const milkFresh = ingredients.find((i) => i.id === "milk_fresh")
+    || ingredients.find((i) => /นมสด|fresh\s*milk/i.test(i.name || ""));
+  const milkOat = ingredients.find((i) => i.id === "milk_oat")
+    || ingredients.find((i) => /oat|โอ๊ต/i.test(i.name || ""));
+
+  function normalizeOptionChoice(group, choice) {
+    let ingredientId = choice.ingredientId || null;
+    let qtyPercent = choice.qtyPercent != null ? choice.qtyPercent : 100;
+    // ข้อมูลร้านรุ่นแรกมีตัวเลือกนม Oat/ไม่ใส่นมเป็นเพียงข้อความและราคาเพิ่ม แต่ไม่ได้ผูกวัตถุดิบ
+    // ทำให้ขายแล้วตัดนมสดตามสูตรเดิมแทน Migration นี้ซ่อมข้อมูลเดิมเมื่อโหลด และ autosave จะบันทึกค่าที่ซ่อมแล้วกลับไป
+    const isMilkGroup = /นม|milk/i.test(group.name || "");
+    if (!ingredientId && isMilkGroup) {
+      if (/oat|โอ๊ต/i.test(choice.label || "") && milkOat) ingredientId = milkOat.id;
+      else if (/ไม่ใส่นม|no\s*milk/i.test(choice.label || "") && milkFresh) {
+        ingredientId = milkFresh.id;
+        qtyPercent = 0;
+      } else if (/นมสด|fresh\s*milk/i.test(choice.label || "") && milkFresh) {
+        ingredientId = milkFresh.id;
+      }
+    }
+    return {
+      ...choice, ingredientId, qtyPercent, isDefault: choice.isDefault || false,
+      extraAdjustments: (choice.extraAdjustments || []).filter(Boolean).map((a) => ({ ingredientId: a.ingredientId || null, qtyPercent: a.qtyPercent != null ? a.qtyPercent : 100 })),
+    };
+  }
+
   return {
     // Firebase คืนอาเรย์ที่มี index ขาดหายเป็นช่องว่าง null ได้ (เช่นลบ element กลางอาเรย์) — กรอง null/undefined
     // ทิ้งก่อนเสมอ ไม่งั้น .map()/for-of ตัวไหนก็ตายเมื่อเจอ element ที่หายไปกลางอาเรย์
-    ingredients: (raw.ingredients || []).filter(Boolean).map((i) => ({ ...i, components: i.components || [], unlimited: i.unlimited || false })),
+    ingredients,
     menus: (raw.menus || []).filter(Boolean).map((m) => ({
       ...m, ingredients: (m.ingredients || []).filter(Boolean), optionGroupIds: (m.optionGroupIds || []).filter(Boolean),
       available: m.available ?? true, category: m.category || "อื่นๆ", imageUrl: m.imageUrl || "",
@@ -308,10 +335,7 @@ function normalizeData(raw) {
     },
     optionGroups: (raw.optionGroups || []).filter(Boolean).map((g) => ({
       ...g,
-      choices: (g.choices || []).filter(Boolean).map((c) => ({
-        ...c, ingredientId: c.ingredientId || null, qtyPercent: c.qtyPercent != null ? c.qtyPercent : 100, isDefault: c.isDefault || false,
-        extraAdjustments: (c.extraAdjustments || []).filter(Boolean).map((a) => ({ ingredientId: a.ingredientId || null, qtyPercent: a.qtyPercent != null ? a.qtyPercent : 100 })),
-      })),
+      choices: (g.choices || []).filter(Boolean).map((c) => normalizeOptionChoice(g, c)),
     })),
     promotions: (raw.promotions || []).filter(Boolean).map((p) => ({
       ...p,
