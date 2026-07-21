@@ -47,6 +47,12 @@ function normalizeThaiPhone(value) {
   return "";
 }
 
+function isFoodProduct(item) {
+  if (item && item.productType === "food") return true;
+  if (item && item.productType === "drink") return false;
+  return /ขนมปัง|เบเกอรี่|อาหาร|toast|bread|bakery/i.test((item && item.category) || "");
+}
+
 function validOrderDraft(order) {
   return order &&
     typeof order.customerName === "string" && order.customerName.trim().length > 0 && order.customerName.length <= 120 &&
@@ -57,6 +63,7 @@ function validOrderDraft(order) {
     Array.isArray(order.items) && order.items.length > 0 && order.items.length <= 100 &&
     order.items.every((item) =>
       item && typeof item.lineId === "string" && typeof item.name === "string" && item.name.length > 0 &&
+      (!item.productType || ["drink", "food"].includes(item.productType)) &&
       Number.isFinite(Number(item.unitPrice)) && Number(item.unitPrice) >= 0 &&
       Number.isInteger(Number(item.qty)) && Number(item.qty) > 0 && Number(item.qty) <= 100
     );
@@ -87,9 +94,16 @@ exports.checkoutWithReward = onCall({ region: REGION }, async (request) => {
   const selectedLine = draft.items.find((item) => item.lineId === selectedLineId);
   if (!selectedLine) throw new HttpsError("invalid-argument", "ไม่พบเครื่องดื่มที่เลือกแลกรางวัล");
 
-  const settingsSnap = await db.ref(`shops/${shopUid}/settings`).once("value");
+  const [settingsSnap, selectedMenuSnap] = await Promise.all([
+    db.ref(`shops/${shopUid}/settings`).once("value"),
+    db.ref(`shops/${shopUid}/menus`).once("value"),
+  ]);
   const settings = settingsSnap.val() || {};
   if (settings.acceptingOrders === false) throw new HttpsError("failed-precondition", "ขณะนี้ร้านปิดรับออเดอร์");
+  const selectedMenu = Object.values(selectedMenuSnap.val() || {}).filter(Boolean).find((menu) => menu.id === selectedLine.menuId);
+  if (!selectedMenu || isFoodProduct(selectedMenu) || isFoodProduct(selectedLine)) {
+    throw new HttpsError("failed-precondition", "รางวัลนี้ใช้แลกได้เฉพาะเครื่องดื่ม");
+  }
   const beanGoal = Math.max(1, Math.floor(Number(settings.loyaltyBeanGoal) || 10));
   const proposedOrderId = db.ref(`orders/${shopUid}`).push().key;
   const customerRef = db.ref(`customers/${shopUid}/${orderPhone}`);

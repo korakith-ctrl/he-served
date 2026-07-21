@@ -25,7 +25,7 @@ const functions = getFunctions(customerApp, "asia-southeast1");
 const STATUS_TEXT = {
   pending: "รอร้านยืนยันการรับเงิน...",
   paid: "ร้านได้รับเงินแล้ว กำลังเตรียมคิว...",
-  preparing: "กำลังชงเครื่องดื่มของคุณ...",
+  preparing: "กำลังเตรียมออเดอร์ของคุณ...",
   ready: "พร้อมรับแล้ว! มารับที่หน้าร้านได้เลย",
   done: "รับออเดอร์เรียบร้อยแล้ว ขอบคุณที่ใช้บริการ",
   cancelled: "ออเดอร์นี้ถูกยกเลิก",
@@ -88,6 +88,7 @@ function RewardTermsSheet({ goal, onClose }) {
         <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 18, margin: "0 0 12px", color: COLORS.espresso5 }}>เงื่อนไขการสะสมเมล็ด</h2>
         <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: COLORS.espresso3, lineHeight: 1.9 }}>
           <li>ได้รับ 1 เมล็ดต่อเครื่องดื่ม 1 แก้วที่สั่งซื้อ ไม่ว่าจะสั่งกี่แก้วในออเดอร์เดียวก็นับครบทุกแก้ว</li>
+          <li>ขนมปัง อาหาร และสินค้าอื่นที่ไม่ใช่เครื่องดื่ม ไม่ร่วมสะสมเมล็ดและไม่สามารถใช้เป็นเมนูแลกรางวัลได้</li>
           <li>เมล็ดเข้าบัญชีเมื่อร้านส่งมอบเครื่องดื่มให้คุณเรียบร้อยแล้ว (ไม่ใช่ตอนชำระเงิน)</li>
           <li>สะสมครบ {goal} เมล็ด แลกเครื่องดื่มฟรีได้ 1 แก้ว เลือกได้จากเมนูที่มีในตะกร้าตอนนั้น</li>
           <li>เมล็ดและรางวัลผูกกับเบอร์โทรศัพท์ที่ใช้สั่งซื้อ ไม่มีวันหมดอายุ</li>
@@ -101,7 +102,7 @@ function RewardTermsSheet({ goal, onClose }) {
 const STATUS_ICON = {
   pending: { icon: "clock", color: COLORS.pending, bg: COLORS.pendingLight, anim: "statusPulse 1.6s ease-in-out infinite" },
   paid: { icon: "checks", color: COLORS.espresso4, bg: "rgba(11,74,122,0.14)", anim: "cartBump .5s ease" },
-  preparing: { icon: "coffee", color: COLORS.sage, bg: COLORS.sageLight, anim: "pulseCup 1.3s ease-in-out infinite" },
+  preparing: { icon: "chef-hat", color: COLORS.sage, bg: COLORS.sageLight, anim: "pulseCup 1.3s ease-in-out infinite" },
   ready: { icon: "bell", color: COLORS.success, bg: COLORS.successLight, anim: "successPop .5s cubic-bezier(.34,1.56,.64,1)" },
   done: { icon: "circle-check", color: COLORS.successDark, bg: COLORS.successLight, anim: "successPop .5s cubic-bezier(.34,1.56,.64,1)" },
   cancelled: { icon: "x", color: COLORS.danger, bg: "rgba(178,58,46,0.14)", anim: "none" },
@@ -147,6 +148,16 @@ function genLineId() {
 }
 
 const HOT_DEAL_CATEGORY = "HOT DEAL";
+
+function productTypeOf(item) {
+  if (item?.productType === "food") return "food";
+  if (item?.productType === "drink") return "drink";
+  return /ขนมปัง|เบเกอรี่|อาหาร|toast|bread|bakery/i.test(item?.category || "") ? "food" : "drink";
+}
+
+function productUnitLabel(item) {
+  return productTypeOf(item) === "food" ? "ชิ้น" : "แก้ว";
+}
 
 function singlePromoPrice(promo, menu) {
   if (!menu) return 0;
@@ -538,7 +549,7 @@ function useSheetTransition(visible, duration = 300) {
   return { mounted, shown };
 }
 
-function MenuThumb({ imageUrl, size = 60 }) {
+function MenuThumb({ imageUrl, size = 60, productType = "drink" }) {
   const [failed, setFailed] = useState(false);
   return (
     <div style={{
@@ -548,7 +559,7 @@ function MenuThumb({ imageUrl, size = 60 }) {
       {imageUrl && !failed ? (
         <img src={imageUrl} alt="" onError={() => setFailed(true)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
       ) : (
-        <i className="ti ti-cup" style={{ fontSize: size * 0.4, color: COLORS.sageDark }} aria-hidden="true"></i>
+        <i className={`ti ti-${productType === "food" ? "bread" : "cup"}`} style={{ fontSize: size * 0.4, color: COLORS.sageDark }} aria-hidden="true"></i>
       )}
     </div>
   );
@@ -1156,7 +1167,7 @@ export default function CustomerOrder({ shopUid }) {
     const base = priceOverride !== undefined ? priceOverride : menu.priceStore;
     const unitPrice = base + optionDelta;
     setCart((c) => [...c, {
-      lineId: genLineId(), menuId: menu.id, name: menu.name, unitPrice, originalUnitPrice: menu.priceStore + optionDelta,
+      lineId: genLineId(), menuId: menu.id, name: menu.name, productType: productTypeOf(menu), unitPrice, originalUnitPrice: menu.priceStore + optionDelta,
       qty, options, promoId: promoId || null, promoGroupId: promoId || null, promoKind: promoKind || null,
     }]);
   }
@@ -1181,7 +1192,7 @@ export default function CustomerOrder({ shopUid }) {
         const optionDelta = opts.reduce((s, o) => s + (o.priceDelta || 0), 0);
         return {
           lineId: existing ? existing.lineId : genLineId(),
-          menuId: p.menuId, name: p.name, unitPrice: p.unitPrice + optionDelta,
+          menuId: p.menuId, name: p.name, productType: productTypeOf(menusById[p.menuId]), unitPrice: p.unitPrice + optionDelta,
           originalUnitPrice: (Number(menusById[p.menuId]?.priceStore) || 0) + optionDelta,
           qty, options: opts, promoId: promo.id, promoGroupId: promo.id, promoKind: "bundle",
         };
@@ -1244,7 +1255,7 @@ export default function CustomerOrder({ shopUid }) {
         const opts = (optionsByMenuId && optionsByMenuId[p.menuId]) || [];
         const optionDelta = opts.reduce((s, o) => s + (o.priceDelta || 0), 0);
         return {
-          lineId: genLineId(), menuId: p.menuId, name: p.name, unitPrice: p.unitPrice + optionDelta, options: opts, qty: 1,
+          lineId: genLineId(), menuId: p.menuId, name: p.name, productType: productTypeOf(menusById[p.menuId]), unitPrice: p.unitPrice + optionDelta, options: opts, qty: 1,
           originalUnitPrice: (Number(menusById[p.menuId]?.priceStore) || 0) + optionDelta,
           promoId: setId, promoKind: "choice", promoGroupId: promo.id,
         };
@@ -1330,14 +1341,15 @@ export default function CustomerOrder({ shopUid }) {
     rewardVerification.attemptId === redemptionAttemptId,
   );
   const beanGoalMet = (beanRecord?.beans || 0) >= loyaltyBeanGoal;
-  const redeemLine = redeemLineId ? cart.find((l) => l.lineId === redeemLineId) : null;
+  const redeemLine = redeemLineId ? cart.find((l) => l.lineId === redeemLineId && productTypeOf(l) === "drink") : null;
   const redeemDiscount = beanGoalMet && redeemLine && rewardVerified ? redeemLine.unitPrice : 0;
   const total = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0) - redeemDiscount;
   const cartCount = cart.reduce((s, l) => s + l.qty, 0);
+  const loyaltyCartCount = cart.reduce((sum, line) => sum + (productTypeOf(line) === "drink" ? line.qty : 0), 0);
 
   // ถ้าเมล็ดไม่พอ/ลบรายการที่เลือกแลกออกจากตะกร้าไปแล้ว ต้องเคลียร์การแลกทิ้งกันตัวเลขค้างผิด
   useEffect(() => {
-    if (redeemLineId && (!beanGoalMet || !cart.some((l) => l.lineId === redeemLineId))) {
+    if (redeemLineId && (!beanGoalMet || !cart.some((l) => l.lineId === redeemLineId && productTypeOf(l) === "drink"))) {
       setRedeemLineId(null);
       setRewardVerification(null);
       setRedemptionAttemptId("");
@@ -1802,7 +1814,7 @@ export default function CustomerOrder({ shopUid }) {
             loyaltyBeanGoal={loyaltyBeanGoal}
             onRetry={() => setLoyaltyRetryTick((t) => t + 1)}
             cart={cart}
-            cartCount={cartCount}
+            cartCount={loyaltyCartCount}
             redeemMode={redeemMode}
             setRedeemMode={setRedeemMode}
             redeemLineId={redeemLineId}
@@ -2129,12 +2141,12 @@ export default function CustomerOrder({ shopUid }) {
                           opacity: soldOut ? 0.5 : 1, cursor: soldOut || singleLine ? "default" : "pointer",
                         }}>
                           <div ref={(el) => { menuThumbRefs.current[m.id] = el; }}>
-                            <MenuThumb imageUrl={m.imageUrl} />
+                            <MenuThumb imageUrl={m.imageUrl} productType={productTypeOf(m)} />
                           </div>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontWeight: 500, fontSize: 14, color: COLORS.espresso5 }}>{m.name}</div>
                             <div style={{ fontSize: 13, color: soldOut ? COLORS.danger : COLORS.gold, fontWeight: 600, marginTop: 3 }}>
-                              {soldOut ? "หมดวันนี้" : money(m.priceStore)}
+                              {soldOut ? "หมดวันนี้" : `${money(m.priceStore)} / ${productUnitLabel(m)}`}
                             </div>
                           </div>
                           {singleLine ? (

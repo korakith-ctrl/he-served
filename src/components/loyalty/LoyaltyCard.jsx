@@ -98,6 +98,7 @@ export default function LoyaltyCard({
   const pending = Math.max(0, Math.floor(Number(cartCount) || 0));
   const remaining = Math.max(target - earned - pending, 0);
   const rewardReady = earned >= target;
+  const rewardEligibleCart = cart.filter((line) => line.productType !== "food");
   const tier = loyaltyTierFor(beanRecord?.lifetimeBeans);
   const recordPhone = String(beanRecord?.phone || "").replace(/\D/g, "");
   const recordIdentity = recordPhone || (beanRecord?.isNew ? `new:${digits}` : digits);
@@ -165,7 +166,7 @@ export default function LoyaltyCard({
 
   if (!beanRecord) return null;
 
-  const redeemLine = redeemLineId ? cart.find((line) => line.lineId === redeemLineId) : null;
+  const redeemLine = redeemLineId ? rewardEligibleCart.find((line) => line.lineId === redeemLineId) : null;
 
   return (
     <CardShell state={rewardReady ? "reward" : "default"}>
@@ -208,7 +209,7 @@ export default function LoyaltyCard({
               <button
                 type="button"
                 className="loyalty-button loyalty-button--reward"
-                disabled={cart.length === 0}
+                disabled={rewardEligibleCart.length === 0}
                 onClick={() => setRedeemMode(true)}
               >
                 ใช้รางวัลกับออเดอร์นี้
@@ -220,7 +221,7 @@ export default function LoyaltyCard({
           ) : (
             <fieldset className="loyalty-redeem__choices">
               <legend>เลือกแก้วที่อยากแลกฟรี</legend>
-              {cart.map((line) => (
+              {rewardEligibleCart.map((line) => (
                 <label key={line.lineId}>
                   <input
                     type="radio"
@@ -257,7 +258,7 @@ export default function LoyaltyCard({
               </div>
             </fieldset>
           )}
-          {cart.length === 0 && <p className="loyalty-card__helper">เพิ่มเครื่องดื่มลงตะกร้าก่อนใช้รางวัล</p>}
+          {rewardEligibleCart.length === 0 && <p className="loyalty-card__helper">เพิ่มเครื่องดื่มลงตะกร้าก่อนใช้รางวัล ขนมปังและอาหารไม่ร่วมรายการ</p>}
         </div>
       )}
 

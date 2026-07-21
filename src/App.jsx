@@ -13,10 +13,33 @@ const CATEGORIES = [
   { id: "matcha", label: "มัทฉะ" },
   { id: "cocoa_tea", label: "โกโก้ / ชา" },
   { id: "milk", label: "นม" },
+  { id: "bread_bakery", label: "ขนมปัง / เบเกอรี่" },
+  { id: "spread_topping", label: "เนย / ซอส / ท็อปปิ้ง" },
   { id: "juice_water", label: "น้ำผลไม้ / น้ำ-น้ำแข็ง" },
   { id: "packaging", label: "บรรจุภัณฑ์" },
 ];
 const CHANNELS = { store: "หน้าร้าน", delivery: "เดลิเวอรี่", online: "สั่งออนไลน์" };
+const PRODUCT_TYPES = [
+  { id: "drink", label: "เครื่องดื่ม", unit: "แก้ว", icon: "cup" },
+  { id: "food", label: "อาหาร / ขนมปัง", unit: "ชิ้น", icon: "bread" },
+];
+
+function productTypeOf(item) {
+  if (item?.productType === "food") return "food";
+  if (item?.productType === "drink") return "drink";
+  return /ขนมปัง|เบเกอรี่|อาหาร|toast|bread|bakery/i.test(item?.category || "") ? "food" : "drink";
+}
+
+function productTypeMeta(item) {
+  return PRODUCT_TYPES.find((type) => type.id === productTypeOf(item)) || PRODUCT_TYPES[0];
+}
+
+function loyaltyUnitsInOrder(order, menus = []) {
+  return (order?.items || []).reduce((sum, item) => {
+    const menu = menus.find((candidate) => candidate.id === item.menuId);
+    return sum + (productTypeOf(item.productType ? item : menu) === "drink" ? Number(item.qty) || 0 : 0);
+  }, 0);
+}
 
 // หมวดบัญชีพื้นฐานใช้ id คงที่ เพื่อให้รายงานย้อนหลังไม่เปลี่ยนเมื่อแก้ข้อความที่แสดงในอนาคต
 const ACCOUNTING_CATEGORIES = {
@@ -196,8 +219,9 @@ function seedIngredients() {
 }
 
 function seedMenus() {
-  const mk = (name, priceStore, priceDelivery, ings, category) => ({
+  const mk = (name, priceStore, priceDelivery, ings, category, productType = "drink") => ({
     id: genId("menu"), name, priceStore, priceDelivery, available: true, category: category || "กาแฟ", imageUrl: "",
+    productType,
     ingredients: ings.map(([ingredientId, qty]) => ({ ingredientId, qty })),
   });
   const pack = [["cup_16", 1], ["lid_98", 1], ["straw_black", 1], ["zipbag_drink", 1], ["sticker", 1]];
@@ -323,7 +347,7 @@ function normalizeData(raw) {
     ingredients,
     menus: (raw.menus || []).filter(Boolean).map((m) => ({
       ...m, ingredients: (m.ingredients || []).filter(Boolean), optionGroupIds: (m.optionGroupIds || []).filter(Boolean),
-      available: m.available ?? true, category: m.category || "อื่นๆ", imageUrl: m.imageUrl || "",
+      available: m.available ?? true, category: m.category || "อื่นๆ", imageUrl: m.imageUrl || "", productType: productTypeOf(m),
     })),
     // sales ย้ายไปอยู่โหนดแยก sales/{uid} แล้ว (ดู useEffect ที่ subscribe ใน ShopApp) — เหลือ field นี้ไว้เป็น [] เฉยๆ
     // เพื่อไม่ต้องแก้ shape ของ data ทั้งระบบ ของจริงมาจาก dataForDisplay.sales ที่ override ทับอีกที
@@ -1219,6 +1243,7 @@ function ShopApp({ uid, user, theme, onToggleTheme }) {
     const timestamp = new Date().toISOString();
     const sale = {
       id: saleId, timestamp, menuId, menuName: menu.name,
+      productType: productTypeOf(menu),
       channel, qty, unitPrice, grossRevenue, gpAmount, gpPercent, promoDiscount, netRevenue,
       netRevenueEntered: enteredNetRevenue !== null,
       ingredientCostTotal, overheadAllocated, totalCost, profit: netRevenue - totalCost,
@@ -1238,7 +1263,7 @@ function ShopApp({ uid, user, theme, onToggleTheme }) {
   // จ่ายเงินแล้วที่หน้าร้านตอนกดขาย จึงเข้าคอลัมน์ "กำลังดำเนินการ" ทันที ข้ามสถานะ "รอยืนยัน" (เหมือนสลิปยืนยันอัตโนมัติ)
   function createInstoreOrder(cart, note, customerPhone) {
     const items = cart.map((line) => ({
-      menuId: line.menuId, name: line.menuName, unitPrice: line.unitPrice, qty: line.qty, options: line.options,
+      menuId: line.menuId, name: line.menuName, productType: productTypeOf(line), unitPrice: line.unitPrice, qty: line.qty, options: line.options,
     }));
     const total = round4(cart.reduce((sum, line) => {
       const lineTotal = line.channel === "delivery" && Number.isFinite(line.netRevenueOverride)
@@ -1317,13 +1342,13 @@ function ShopApp({ uid, user, theme, onToggleTheme }) {
     showToast(order.saleRecorded ? "ยกเลิกออเดอร์แล้ว คืนสต็อกและตัดยอดขายออกให้อัตโนมัติ" : "ยกเลิกออเดอร์แล้ว");
   }
 
-  // ให้เมล็ดสะสมตอนออเดอร์ถึงสถานะ "เสร็จ" (done) เท่านั้น — ไม่ใช่ตอนยืนยันจ่ายเงิน เพราะกว่าจะถึงมือลูกค้าจริงๆ
-  // คือตอนรับแก้วที่หน้าร้าน กันเคสยกเลิก/พลาดหลังจ่ายเงินแล้วนับแต้มไปก่อน — เมล็ด 1 แก้ว = 1 หน่วย นับตาม qty รวมในออเดอร์
+  // ให้เมล็ดสะสมตอนออเดอร์ถึงสถานะ "เสร็จ" (done) เท่านั้น และนับเฉพาะเครื่องดื่ม
+  // อาหาร/ขนมปังยังขายและตัดสต็อกตามปกติ แต่ไม่เพิ่มเมล็ดและไม่สามารถนำมาแลกรางวัลเครื่องดื่มได้
   async function awardLoyaltyBeans(order) {
     const phoneKey = normalizeThaiPhone(order.customerPhone);
     if (!phoneKey) return { cups: 0, skipped: "invalid-phone" };
-    const cups = (order.items || []).reduce((s, it) => s + (it.qty || 0), 0);
-    if (cups <= 0) return { cups: 0, skipped: "no-items" };
+    const cups = loyaltyUnitsInOrder(order, data.menus);
+    if (cups <= 0) return { cups: 0, skipped: "no-drinks" };
     const awardedAt = new Date().toISOString();
     const customerRef = ref(db, `customers/${uid}/${phoneKey}`);
     const transaction = await runTransaction(customerRef, (cur) => {
@@ -1424,7 +1449,7 @@ function ShopApp({ uid, user, theme, onToggleTheme }) {
   // ให้เมล็ดย้อนหลังสำหรับออเดอร์ "เสร็จ" เก่าที่มีมาก่อนระบบสะสมเมล็ดจะเปิดใช้งาน (ยังไม่เคยติดแฟลก beansAwarded)
   // ใช้ awardLoyaltyBeans ตัวเดียวกับที่ทำงานสด กันตรรกะนับเมล็ดเพี้ยนไปคนละทางกับของจริง — กดซ้ำได้ปลอดภัย
   // เพราะออเดอร์ที่เคยติดแฟลกไปแล้วจะไม่ถูกนับซ้ำอีก
-  const backfillEligibleOrders = orders.filter((o) => o.status === "done" && !o.beansAwarded && normalizeThaiPhone(o.customerPhone));
+  const backfillEligibleOrders = orders.filter((o) => o.status === "done" && !o.beansAwarded && normalizeThaiPhone(o.customerPhone) && loyaltyUnitsInOrder(o, data.menus) > 0);
   async function backfillLoyaltyBeans() {
     if (backfillEligibleOrders.length === 0) { showToast("ไม่มีออเดอร์เก่าที่ต้องคำนวณเพิ่มแล้ว"); return; }
     const results = await Promise.allSettled(backfillEligibleOrders.map((order) => awardLoyaltyBeans(order)));
@@ -1762,7 +1787,7 @@ function DashRankCard({ rank, name, qty, maxQty }) {
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 13.5, fontWeight: 600, color: "var(--espresso-4)", marginBottom: 5 }}>
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
-          <span style={{ color: DASH.gray, fontWeight: 500, fontSize: 12, flexShrink: 0, marginLeft: 8 }}>{qty} แก้ว</span>
+          <span style={{ color: DASH.gray, fontWeight: 500, fontSize: 12, flexShrink: 0, marginLeft: 8 }}>{qty} หน่วย</span>
         </div>
         <div style={{ height: 7, borderRadius: 999, background: DASH.neutralSoft, overflow: "hidden" }}>
           <div style={{ height: "100%", width: pct + "%", borderRadius: 999, background: barTones[rank] || "#C7D2E8", transition: "width 400ms ease" }} />
@@ -1832,7 +1857,7 @@ function Dashboard({ data, setTab }) {
       `}</style>
 
       <div className="dash-kpi-grid">
-        <DashKpiCard icon="cash" label="ยอดขายวันนี้ (สุทธิ)" value={"฿" + money(revenue)} sub={`${cups} แก้ว · เฉลี่ย ฿${money(avgPerCup)}/แก้ว`} tone="primary" big />
+        <DashKpiCard icon="cash" label="ยอดขายวันนี้ (สุทธิ)" value={"฿" + money(revenue)} sub={`${cups} หน่วย · เฉลี่ย ฿${money(avgPerCup)}/หน่วย`} tone="primary" big />
         <DashKpiCard icon="receipt-2" label="ต้นทุนวันนี้" value={"฿" + money(cost)} tone="neutral" />
         <DashKpiCard icon="trending-up" label="กำไรวันนี้" value={"฿" + money(profit)} tone={profit >= 0 ? "success" : "danger"} />
         <DashKpiCard icon="alert-triangle" label="วัตถุดิบใกล้หมด" value={lowStock.length} sub={lowStock.length ? "ต้องเติมสต็อก" : "สต็อกปกติ"} tone={lowStock.length ? "warning" : "neutral"} />
@@ -1970,7 +1995,7 @@ function Segmented({ options, value, onChange, dense }) {
   );
 }
 
-function PosProductThumb({ src, size = 84 }) {
+function PosProductThumb({ src, size = 84, productType = "drink" }) {
   const [failed, setFailed] = useState(false);
   return (
     <div style={{
@@ -1981,7 +2006,7 @@ function PosProductThumb({ src, size = 84 }) {
       {src && !failed ? (
         <img src={src} alt="" onError={() => setFailed(true)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
       ) : (
-        <Icon name="cup" size={Math.round(size * 0.4)} style={{ color: POS.primary, opacity: 0.6 }} />
+        <Icon name={productType === "food" ? "bread" : "cup"} size={Math.round(size * 0.4)} style={{ color: POS.primary, opacity: 0.6 }} />
       )}
     </div>
   );
@@ -2090,7 +2115,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
     const platform = channel === "delivery" ? data.settings.platforms.find((p) => p.id === platformId) : null;
     const optionsLabel = optionsArr.map((o) => o.label).join(", ") || null;
     setCart((c) => [...c, {
-      cartId: genId("cart"), menuId: menu.id, menuName: menu.name, qty, channel,
+      cartId: genId("cart"), menuId: menu.id, menuName: menu.name, productType: productTypeOf(menu), qty, channel,
       platformId: channel === "delivery" ? platformId : null,
       platformName: platform ? platform.name : null,
       options: optionsArr, optionsLabel,
@@ -2191,12 +2216,12 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
       }}>
         <div>
           <div style={{ fontSize: 13, color: POS.gray, fontWeight: 600 }}>วันนี้</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: POS.navy, marginTop: 2, fontFamily: "var(--f-display)" }}>ขายเครื่องดื่ม</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: POS.navy, marginTop: 2, fontFamily: "var(--f-display)" }}>ขายหน้าร้าน</div>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <PosStatPill icon="receipt" label="ออเดอร์วันนี้" value={`${todayOrderCount} รายการ`} />
           <PosStatPill icon="cash" label="ยอดขายวันนี้" value={`฿${money(todayRevenue)}`} accent />
-          <PosStatPill icon="shopping-cart" label="ในตะกร้า" value={`${cartCups} แก้ว`} />
+          <PosStatPill icon="shopping-cart" label="ในตะกร้า" value={`${cartCups} หน่วย`} />
         </div>
       </div>
 
@@ -2265,7 +2290,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
                 )}
 
                 <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
-                  <PosProductThumb src={menu.imageUrl} />
+                  <PosProductThumb src={menu.imageUrl} productType={productTypeOf(menu)} />
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 17, fontWeight: 700, color: POS.navy, lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{menu.name}</div>
                     <div style={{ fontSize: 16, fontWeight: 600, color: POS.primary, marginTop: 3 }}>฿{money(unitPrice)}</div>
@@ -2327,7 +2352,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
             <Icon name="shopping-cart" size={18} style={{ color: POS.primary }} />
             <span style={{ fontWeight: 700, fontSize: 16, color: POS.navy }}>ตะกร้า</span>
             {cartCups > 0 && (
-              <span style={{ fontSize: 11, fontWeight: 700, color: POS.navy, background: POS.chipBg, borderRadius: 999, padding: "2px 10px" }}>{cartCups} แก้ว</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: POS.navy, background: POS.chipBg, borderRadius: 999, padding: "2px 10px" }}>{cartCups} หน่วย</span>
             )}
           </div>
 
@@ -2349,7 +2374,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <button className="cbtn" style={{ padding: "2px 9px", fontSize: 13 }} onClick={() => updateCartQty(line.cartId, line.qty - 1)}>−</button>
-                      <span style={{ minWidth: 16, textAlign: "center", fontSize: 13, fontWeight: 600 }}>{line.qty}</span>
+                      <span style={{ minWidth: 36, textAlign: "center", fontSize: 13, fontWeight: 600 }}>{line.qty} <small style={{ color: POS.gray, fontSize: 9.5 }}>{productTypeMeta(line).unit}</small></span>
                       <button className="cbtn" style={{ padding: "2px 9px", fontSize: 13 }} onClick={() => updateCartQty(line.cartId, line.qty + 1)}>+</button>
                     </div>
                     <span style={{ fontWeight: 700, fontFamily: "var(--f-body)", fontSize: 14, color: POS.primary }}>฿{money(line.unitPrice * line.qty)}</span>
@@ -2359,7 +2384,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
             </div>
           )}
 
-          <label style={{ fontSize: 11, color: POS.gray, marginBottom: 4, fontWeight: 600 }}>เบอร์โทรลูกค้า (ถ้ามี — สะสมเมล็ดให้อัตโนมัติ)</label>
+          <label style={{ fontSize: 11, color: POS.gray, marginBottom: 4, fontWeight: 600 }}>เบอร์โทรลูกค้า (ถ้ามี — เมล็ดนับเฉพาะเครื่องดื่ม)</label>
           <input
             value={cartPhone} onChange={(e) => setCartPhone(e.target.value)}
             placeholder="เช่น 0812345678" inputMode="tel"
@@ -2690,7 +2715,7 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans,
       if (!metric.lastAt || new Date(timestamp) > new Date(metric.lastAt)) metric.lastAt = timestamp;
       if (order.status === "done") {
         metric.doneOrders += 1;
-        metric.cups += (order.items || []).reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+        metric.cups += loyaltyUnitsInOrder(order);
       }
     }
     return map;
@@ -2881,7 +2906,7 @@ function LoyaltyDetailDrawer({ customer, orders, loyaltyBeanGoal, onClose, onAdj
 
   const exact = matches.filter((entry) => entry.normalized === normalizedPhone);
   const variants = matches.filter((entry) => entry.normalized !== normalizedPhone);
-  const cupsOf = (order) => (order.items || []).reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+  const cupsOf = (order) => loyaltyUnitsInOrder(order);
   const completedOrders = exact.filter((entry) => entry.order.status === "done");
   const completedCups = completedOrders.reduce((sum, entry) => sum + cupsOf(entry.order), 0);
   const countedCups = exact.filter((entry) => entry.order.beansAwarded === true).reduce((sum, entry) => sum + cupsOf(entry.order), 0);
@@ -2973,7 +2998,7 @@ function LoyaltyDetailDrawer({ customer, orders, loyaltyBeanGoal, onClose, onAdj
 // เวิร์กโฟลว์การ์ด 4 สถานะหลัก (คอลัมน์ Kanban) — "ยกเลิก" เป็นสถานะพิเศษนอกบอร์ด
 const KANBAN_COLUMNS = [
   { id: "pending", label: "รอยืนยัน", icon: "receipt" },
-  { id: "preparing", label: "กำลังดำเนินการ", icon: "cup" },
+  { id: "preparing", label: "กำลังดำเนินการ", icon: "chef-hat" },
   { id: "ready", label: "พร้อมเสิร์ฟ", icon: "bell" },
   { id: "done", label: "เสร็จ", icon: "circle-check" },
 ];
@@ -3111,7 +3136,8 @@ function buildOrderStickerData(order) {
     for (let unit = 0; unit < qty; unit += 1) {
       cupNumber += 1;
       stickers.push({
-        menuName: item.name || "เครื่องดื่ม",
+        menuName: item.name || "สินค้า",
+        productType: productTypeOf(item),
         options,
         note: order.note || "",
         customer: order.customerName || order.customerPhone || "ลูกค้า",
@@ -3855,7 +3881,7 @@ function MnuStatCard({ icon, label, value, tone }) {
   );
 }
 
-function MenuCardImage({ src, available }) {
+function MenuCardImage({ src, available, productType }) {
   const [failed, setFailed] = useState(false);
   return (
     <div style={{ position: "relative", width: "100%", aspectRatio: "4 / 3", borderRadius: "20px 20px 0 0", overflow: "hidden", background: `linear-gradient(135deg, ${POS.primarySoft}, ${POS.warm})`, flexShrink: 0 }}>
@@ -3863,7 +3889,7 @@ function MenuCardImage({ src, available }) {
         <img src={src} alt="" onError={() => setFailed(true)} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
       ) : (
         <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <Icon name="cup" size={34} style={{ color: POS.primary, opacity: .5 }} />
+          <Icon name={productType === "food" ? "bread" : "cup"} size={34} style={{ color: POS.primary, opacity: .5 }} />
         </div>
       )}
       <div style={{ position: "absolute", top: 10, right: 10 }}><MnuAvailBadge available={available} /></div>
@@ -3873,10 +3899,11 @@ function MenuCardImage({ src, available }) {
 
 // เมนูการ์ดแบบ Shopify-style: รูปเต็มความกว้างด้านบน สถานะซ้อนมุม, ชื่อ/ราคา/มาร์จิ้นตรงกลาง, action ด้านล่างไม่เกิน 3 ปุ่ม (ที่เหลืออยู่ในเมนู ⋮)
 function MenuCard({ menu, totalCost, margin, stockFlag, selected, selectMode, onToggleSelect, onOpenOverview, onOpenRecipe, moreItems }) {
+  const typeMeta = productTypeMeta(menu);
   return (
     <div className="mnu-card" style={{ opacity: menu.available ? 1 : .72 }}>
       <div className="mnu-card-media" style={{ position: "relative" }}>
-        <MenuCardImage src={menu.imageUrl} available={menu.available} />
+        <MenuCardImage src={menu.imageUrl} available={menu.available} productType={typeMeta.id} />
         <button
           type="button"
           className={"mnu-select-chk" + (selected ? " checked" : "") + (selectMode ? " force-show" : "")}
@@ -3893,13 +3920,13 @@ function MenuCard({ menu, totalCost, margin, stockFlag, selected, selectMode, on
         )}
       </div>
       <div style={{ padding: "14px 16px 16px", display: "flex", flexDirection: "column", flex: 1 }}>
-        <div style={{ fontSize: 12, color: "#9C9690", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{menu.category}</div>
+        <div style={{ fontSize: 12, color: "#9C9690", letterSpacing: ".02em", marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><Icon name={typeMeta.icon} size={12} style={{ marginRight: 4, verticalAlign: -2 }} />{typeMeta.label} · {menu.category}</div>
         <div style={{ fontSize: 16.5, fontWeight: 700, color: POS.navy, lineHeight: 1.25, marginBottom: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{menu.name}</div>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4, gap: 8 }}>
           <span style={{ fontSize: 17, fontWeight: 700, color: "var(--espresso-4)" }}>฿{money(menu.priceStore)}</span>
           <MnuMarginTag pct={margin} />
         </div>
-        <div style={{ fontSize: 11.5, color: "#9C9690" }}>ต้นทุน ฿{money(totalCost)}/แก้ว · เดลิเวอรี่ ฿{money(menu.priceDelivery)}</div>
+        <div style={{ fontSize: 11.5, color: "#9C9690" }}>ต้นทุน ฿{money(totalCost)}/{typeMeta.unit} · เดลิเวอรี่ ฿{money(menu.priceDelivery)}</div>
 
         <div className="mnu-card-actions">
           <button className="mnu-act-btn" onClick={onOpenOverview}><Icon name="edit" size={13} /> แก้ไข</button>
@@ -4038,7 +4065,7 @@ function MenuSidebarWidgets({ topSelling, topMax, lowStockIngredients, recentlyE
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, fontWeight: 600, color: "var(--espresso-4)", marginBottom: 4, gap: 6 }}>
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
-                <span style={{ color: "#9C9690", fontWeight: 500, flexShrink: 0 }}>{qty} แก้ว</span>
+                <span style={{ color: "#9C9690", fontWeight: 500, flexShrink: 0 }}>{qty} หน่วย</span>
               </div>
               <div style={{ height: 5, borderRadius: 999, background: "var(--cream-2)", overflow: "hidden" }}>
                 <div style={{ height: "100%", width: `${topMax > 0 ? Math.max(8, (qty / topMax) * 100) : 0}%`, background: POS.primary, borderRadius: 999 }} />
@@ -4074,6 +4101,7 @@ function MenuSidebarWidgets({ topSelling, topMax, lowStockIngredients, recentlyE
 function MenusPanel({ data, ingredientsById, updateData, showToast }) {
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [productTypeFilter, setProductTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [sortBy, setSortBy] = useState("name");
   const [selectMode, setSelectMode] = useState(false);
@@ -4084,12 +4112,12 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
 
   function newMenu() {
     const defaultPackaging = (data.settings.defaultPackagingLines || []).map((l) => ({ ...l }));
-    setInspector({ mode: "add", tab: "overview", menu: { id: null, name: "", priceStore: 0, priceDelivery: 0, ingredients: defaultPackaging, optionGroupIds: [], available: true, category: categoryFilter !== "all" ? categoryFilter : "กาแฟ", imageUrl: "" } });
+    setInspector({ mode: "add", tab: "overview", menu: { id: null, name: "", productType: "drink", priceStore: 0, priceDelivery: 0, ingredients: defaultPackaging, optionGroupIds: [], available: true, category: categoryFilter !== "all" ? categoryFilter : "กาแฟ", imageUrl: "" } });
   }
 
   function saveMenu(menu) {
     const now = new Date().toISOString();
-    menu = { ...menu, category: menu.category.trim() || "อื่นๆ" };
+    menu = { ...menu, productType: productTypeOf(menu), category: menu.category.trim() || "อื่นๆ" };
     updateData((next) => {
       if (menu.id) {
         const idx = next.menus.findIndex((m) => m.id === menu.id);
@@ -4202,6 +4230,7 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
     if (statusFilter === "available" && !menu.available) return false;
     if (statusFilter === "hidden" && menu.available) return false;
     if (statusFilter === "lowstock" && !menuStatsById[menu.id]?.stockFlag) return false;
+    if (productTypeFilter !== "all" && productTypeOf(menu) !== productTypeFilter) return false;
     return true;
   }
   function sortMenus(list) {
@@ -4253,7 +4282,7 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
   const groupedView = categoryFilter === "all";
   const catsToRender = groupedView ? categories : [categoryFilter];
 
-  const noFiltersActive = !query.trim() && statusFilter === "all";
+  const noFiltersActive = !query.trim() && statusFilter === "all" && productTypeFilter === "all";
 
   return (
     <div className="mnu-wrap">
@@ -4364,6 +4393,11 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
           <option value="available">เปิดขาย</option>
           <option value="hidden">ปิดขาย</option>
           <option value="lowstock">วัตถุดิบใกล้หมด/หมด</option>
+        </select>
+        <select className="mnu-select" value={productTypeFilter} onChange={(e) => setProductTypeFilter(e.target.value)} aria-label="กรองตามประเภทสินค้า">
+          <option value="all">ทุกประเภทสินค้า</option>
+          <option value="drink">เครื่องดื่ม</option>
+          <option value="food">อาหาร / ขนมปัง</option>
         </select>
         <select className="mnu-select" value={sortBy} onChange={(e) => setSortBy(e.target.value)} aria-label="เรียงลำดับ">
           <option value="name">เรียง: ชื่อ</option>
@@ -4497,7 +4531,7 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
 function MenuInspector({ mode, initial, initialTab, ingredients, ingredientsById, optionGroups, categories, platforms, overheadPerCup, onSave, onClose, onDelete }) {
   const [form, setForm] = useState({
     ...initial, optionGroupIds: initial.optionGroupIds || [], available: initial.available ?? true,
-    category: initial.category || "", imageUrl: initial.imageUrl || "",
+    category: initial.category || "", imageUrl: initial.imageUrl || "", productType: productTypeOf(initial),
   });
   const [tab, setTab] = useState(initialTab || "overview");
   const [imageError, setImageError] = useState(false);
@@ -4512,6 +4546,19 @@ function MenuInspector({ mode, initial, initialTab, ingredients, ingredientsById
   function addLine() { setForm((f) => ({ ...f, ingredients: [...f.ingredients, { ingredientId: ingredients[0]?.id, qty: 0 }] })); }
   function updateLine(idx, patch) { setForm((f) => ({ ...f, ingredients: f.ingredients.map((l, i) => (i === idx ? { ...l, ...patch } : l)) })); }
   function removeLine(idx) { setForm((f) => ({ ...f, ingredients: f.ingredients.filter((_, i) => i !== idx) })); }
+  function changeProductType(productType) {
+    setForm((current) => {
+      if (productTypeOf(current) === productType) return current;
+      return {
+        ...current,
+        productType,
+        category: productType === "food" && (!current.category || current.category === "กาแฟ") ? "ขนมปังปิ้ง" : current.category,
+        ingredients: mode === "add" && productType === "food"
+          ? current.ingredients.filter((line) => ingredientsById[line.ingredientId]?.category !== "packaging")
+          : current.ingredients,
+      };
+    });
+  }
 
   const canSave = form.name.trim() !== "";
   const { totalCost, margin, breakdown } = menuCostAndMargin(form, ingredientsById, overheadPerCup);
@@ -4528,7 +4575,7 @@ function MenuInspector({ mode, initial, initialTab, ingredients, ingredientsById
       <div className="mnu-inspector" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={mode === "add" ? "เพิ่มเมนูใหม่" : "แก้ไขเมนู"}>
         <div className="mnu-insp-head">
           <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
-            <PosProductThumb src={form.imageUrl} size={44} />
+            <PosProductThumb src={form.imageUrl} size={44} productType={productTypeOf(form)} />
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 18, fontWeight: 700, color: POS.navy, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{form.name || (mode === "add" ? "เมนูใหม่" : "แก้ไขเมนู")}</div>
               <div style={{ fontSize: 11.5, color: "#9C9690", marginTop: 1 }}>
@@ -4548,7 +4595,7 @@ function MenuInspector({ mode, initial, initialTab, ingredients, ingredientsById
         </div>
 
         <div className="mnu-insp-body">
-          {tab === "overview" && <MenuOverviewTab form={form} setForm={setForm} categories={categories} imageError={imageError} setImageError={setImageError} totalCost={totalCost} margin={margin} />}
+          {tab === "overview" && <MenuOverviewTab form={form} setForm={setForm} onProductTypeChange={changeProductType} categories={categories} imageError={imageError} setImageError={setImageError} totalCost={totalCost} margin={margin} />}
           {tab === "recipe" && <MenuRecipeTab form={form} ingredients={ingredients} updateLine={updateLine} addLine={addLine} removeLine={removeLine} ingredientsById={ingredientsById} />}
           {tab === "pricing" && <MenuPricingTab form={form} setForm={setForm} totalCost={totalCost} platforms={platforms} />}
           {tab === "options" && <MenuOptionsTab form={form} optionGroups={optionGroups} toggleOptionGroup={toggleOptionGroup} />}
@@ -4565,14 +4612,34 @@ function MenuInspector({ mode, initial, initialTab, ingredients, ingredientsById
   );
 }
 
-function MenuOverviewTab({ form, setForm, categories, imageError, setImageError, totalCost, margin }) {
+function MenuOverviewTab({ form, setForm, onProductTypeChange, categories, imageError, setImageError, totalCost, margin }) {
   const lbl = { display: "block", fontSize: 12, fontWeight: 600, color: "#9C9690", marginBottom: 6 };
   const field = { width: "100%", height: 44, border: `1px solid ${POS.border}`, borderRadius: 10, background: "var(--surface)", padding: "0 12px", fontSize: 14, color: "var(--espresso-4)", boxSizing: "border-box", outline: "none" };
+  const typeMeta = productTypeMeta(form);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div>
+        <label style={lbl}>ประเภทสินค้า</label>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          {PRODUCT_TYPES.map((type) => {
+            const selected = productTypeOf(form) === type.id;
+            return (
+              <button
+                type="button"
+                key={type.id}
+                onClick={() => onProductTypeChange(type.id)}
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, minHeight: 44, borderRadius: 11, border: selected ? `1.5px solid ${POS.primary}` : `1px solid ${POS.border}`, background: selected ? POS.primarySoft : "var(--surface)", color: selected ? POS.primaryDark : "#6B7280", fontSize: 13, fontWeight: 700 }}
+              >
+                <Icon name={type.icon} size={16} /> {type.label}
+              </button>
+            );
+          })}
+        </div>
+        <p style={{ fontSize: 11, color: "#9C9690", margin: "6px 0 0", lineHeight: 1.45 }}>{typeMeta.id === "food" ? "ขนมปังและอาหารจะขายเป็นชิ้น และไม่นับเมล็ดสะสม" : "เครื่องดื่มขายเป็นแก้วและเข้าระบบสะสมเมล็ดตามปกติ"}</p>
+      </div>
+      <div>
         <label style={lbl}>ชื่อเมนู</label>
-        <input className="mnu-field" style={field} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="เช่น Latte, Thai Tea" />
+        <input className="mnu-field" style={field} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={typeMeta.id === "food" ? "เช่น ขนมปังปิ้งเนยนม" : "เช่น Latte, Thai Tea"} />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         <div>
@@ -4604,7 +4671,7 @@ function MenuOverviewTab({ form, setForm, categories, imageError, setImageError,
 
       <div style={{ background: "var(--cream-2)", border: `1px solid ${POS.border}`, borderRadius: 14, padding: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
-          <div style={{ fontSize: 11.5, color: "#9C9690" }}>ต้นทุน/แก้ว (รวมต้นทุนแฝง)</div>
+          <div style={{ fontSize: 11.5, color: "#9C9690" }}>ต้นทุน/{typeMeta.unit} (รวมต้นทุนแฝง)</div>
           <div style={{ fontSize: 18, fontWeight: 700, color: "var(--espresso-4)" }}>฿{money(totalCost)}</div>
         </div>
         <MnuMarginTag pct={margin} />
@@ -4654,6 +4721,7 @@ function MenuRecipeTab({ form, ingredients, updateLine, addLine, removeLine, ing
 function MenuPricingTab({ form, setForm, totalCost, platforms }) {
   const marginStore = form.priceStore > 0 ? ((form.priceStore - totalCost) / form.priceStore) * 100 : 0;
   const marginDelivery = form.priceDelivery > 0 ? ((form.priceDelivery - totalCost) / form.priceDelivery) * 100 : 0;
+  const unit = productTypeMeta(form).unit;
   const lbl = { display: "block", fontSize: 12, fontWeight: 600, color: "#9C9690", marginBottom: 6 };
   const field = { width: "100%", height: 44, border: `1px solid ${POS.border}`, borderRadius: 10, background: "var(--surface)", padding: "0 12px", fontSize: 14, color: "var(--espresso-4)", boxSizing: "border-box", outline: "none" };
   return (
@@ -4662,14 +4730,14 @@ function MenuPricingTab({ form, setForm, totalCost, platforms }) {
         <div className="mnu-price-card-head"><span><Icon name="building-store" size={14} /> หน้าร้าน (Walk-in)</span><MnuMarginTag pct={marginStore} /></div>
         <label style={lbl}>ราคาขาย (บาท)</label>
         <input className="mnu-field" style={field} type="number" min="0" value={form.priceStore} onChange={(e) => setForm({ ...form, priceStore: Number(e.target.value) })} />
-        <div className="mnu-price-breakdown"><span>ต้นทุน ฿{money(totalCost)}</span><span>กำไร ฿{money(form.priceStore - totalCost)}/แก้ว</span></div>
+        <div className="mnu-price-breakdown"><span>ต้นทุน ฿{money(totalCost)}</span><span>กำไร ฿{money(form.priceStore - totalCost)}/{unit}</span></div>
       </div>
 
       <div className="mnu-price-card">
         <div className="mnu-price-card-head"><span><Icon name="truck-delivery" size={14} /> เดลิเวอรี่ (ราคาฐาน)</span><MnuMarginTag pct={marginDelivery} /></div>
         <label style={lbl}>ราคาขาย (บาท)</label>
         <input className="mnu-field" style={field} type="number" min="0" value={form.priceDelivery} onChange={(e) => setForm({ ...form, priceDelivery: Number(e.target.value) })} />
-        <div className="mnu-price-breakdown"><span>ต้นทุน ฿{money(totalCost)}</span><span>กำไร ฿{money(form.priceDelivery - totalCost)}/แก้ว</span></div>
+        <div className="mnu-price-breakdown"><span>ต้นทุน ฿{money(totalCost)}</span><span>กำไร ฿{money(form.priceDelivery - totalCost)}/{unit}</span></div>
       </div>
 
       {platforms.length > 0 && (
@@ -6696,7 +6764,7 @@ function RepChannelCard({ channel, v, totalRevenue }) {
         <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: DASH.gray }}>{share}%</span>
       </div>
       <div style={{ fontSize: 22, fontWeight: 700, color: "var(--espresso-4)", fontFamily: "var(--f-body)" }}>฿{money(v.revenue)}</div>
-      <div style={{ fontSize: 12, color: DASH.gray, marginTop: 3 }}>กำไร ฿{money(v.profit)} · {v.cups} แก้ว</div>
+      <div style={{ fontSize: 12, color: DASH.gray, marginTop: 3 }}>กำไร ฿{money(v.profit)} · {v.cups} หน่วย</div>
       <div style={{ height: 5, borderRadius: 999, background: DASH.neutralSoft, marginTop: 10, overflow: "hidden" }}>
         <div style={{ height: "100%", width: share + "%", background: meta.color, borderRadius: 999 }} />
       </div>
@@ -6726,7 +6794,7 @@ function RepMenuTable({ rows }) {
             <span style={{ fontSize: 11.5, fontWeight: 700, color: DASH.gray }}>{i + 1}</span>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--espresso-4)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</div>
-              <div style={{ fontSize: 11, color: DASH.gray, marginTop: 1 }}>{r.qty} แก้ว · margin {r.margin.toFixed(0)}%</div>
+              <div style={{ fontSize: 11, color: DASH.gray, marginTop: 1 }}>{r.qty} หน่วย · margin {r.margin.toFixed(0)}%</div>
             </div>
             <div style={{ textAlign: "right", flexShrink: 0 }}>
               <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--espresso-4)" }}>฿{money(r.revenue)}</div>
@@ -7530,7 +7598,7 @@ function ReportsPanel({ data, orders, shopName, showToast }) {
         <RepKpiCard icon="cash" label="รายได้สุทธิ" value={"฿" + money(revenue)} sub={`หักแพลตฟอร์ม/โปร ฿${money(gpTotal + discountTotal)}`} delta={prevStats ? pctDelta(revenue, prevStats.revenue) : null} tone="primary" big />
         <RepKpiCard icon="receipt-2" label="ต้นทุนรวม" value={"฿" + money(cost)} delta={prevStats ? pctDelta(cost, prevStats.cost) : null} tone="neutral" />
         <RepKpiCard icon="trending-up" label="กำไรสุทธิ" value={"฿" + money(profit)} sub={`margin ${margin.toFixed(1)}%`} delta={prevStats ? pctDelta(profit, prevStats.profit) : null} tone={profit >= 0 ? "success" : "danger"} />
-        <RepKpiCard icon="cup" label="จำนวนแก้วที่ขาย" value={cups} delta={prevStats ? pctDelta(cups, prevStats.cups) : null} tone="neutral" />
+        <RepKpiCard icon="package" label="จำนวนสินค้าที่ขาย" value={cups} delta={prevStats ? pctDelta(cups, prevStats.cups) : null} tone="neutral" />
       </div>
 
       <div className="rep-channel-grid">
@@ -7553,7 +7621,7 @@ function ReportsPanel({ data, orders, shopName, showToast }) {
           <DashSectionHeader icon="truck-delivery" text="แยกตามแพลตฟอร์มเดลิเวอรี่" />
           <div className="table-scroll">
             <table className="rep-table">
-              <thead><tr><th>แพลตฟอร์ม</th><th>แก้ว</th><th>รายได้สุทธิ</th><th>กำไร</th></tr></thead>
+              <thead><tr><th>แพลตฟอร์ม</th><th>จำนวน</th><th>รายได้สุทธิ</th><th>กำไร</th></tr></thead>
               <tbody>
                 {Object.entries(byPlatform).map(([name, v]) => (
                   <tr key={name}>
@@ -8557,7 +8625,7 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
             <SettingsField label="ชื่อร้าน" error={shopNameError}>
               <TextField className="cfield" style={{ height: 42 }} value={shopName} onChange={setShopName} />
             </SettingsField>
-            <SettingsField label="ต้นทุนแฝงต่อแก้ว (ค่าไฟ + ค่าเสื่อมอุปกรณ์)" error={overheadError} suffix="บาท">
+            <SettingsField label="ต้นทุนแฝงต่อหน่วยสินค้า (ค่าไฟ + ค่าเสื่อมอุปกรณ์)" error={overheadError} suffix="บาท">
               <input className="cfield" style={{ height: 42, paddingRight: 44 }} type="number" min="0" step="0.01" value={overhead} onChange={(e) => setOverhead(e.target.value)} />
             </SettingsField>
           </SettingsCard>
