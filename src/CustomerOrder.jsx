@@ -379,8 +379,100 @@ const GLOBAL_CSS = `
   html[data-theme="dark"] .corder .customer-option-choice { background: #172333 !important; color: #E7ECF3 !important; border-color: #344256 !important; }
   html[data-theme="dark"] .corder .customer-option-choice.selected { background: rgba(206,86,13,.22) !important; color: #FFF4EA !important; border-color: #E9782F !important; }
   html[data-theme="dark"] .corder .customer-option-choice [style*="color"] { color: #B8C4D2 !important; }
+  .closed-order-page {
+    min-height: 100vh; min-height: 100dvh; position: relative; isolation: isolate; overflow: hidden;
+    display: grid; place-items: center; padding: 28px 18px; color: #F9F5EF;
+    background: radial-gradient(circle at 12% 12%, rgba(218,111,40,.22), transparent 31%), radial-gradient(circle at 88% 86%, rgba(56,118,158,.26), transparent 36%), linear-gradient(145deg, #061F39 0%, #082B4F 48%, #0B3D67 100%);
+  }
+  .closed-order-page::before {
+    content: ""; position: absolute; inset: 0; z-index: -2; opacity: .16;
+    background-image: radial-gradient(rgba(255,255,255,.9) .7px, transparent .7px); background-size: 22px 22px;
+    mask-image: linear-gradient(to bottom, black, transparent 82%); -webkit-mask-image: linear-gradient(to bottom, black, transparent 82%);
+  }
+  .closed-order-glow { position: absolute; border-radius: 50%; filter: blur(2px); pointer-events: none; animation: closedGlowFloat 9s ease-in-out infinite; }
+  .closed-order-panel {
+    width: min(100%, 460px); position: relative; overflow: hidden; padding: 26px 24px 22px;
+    border: 1px solid rgba(255,255,255,.16); border-radius: 32px; text-align: center;
+    background: linear-gradient(145deg, rgba(255,255,255,.12), rgba(255,255,255,.055));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.17), 0 28px 70px rgba(0,0,0,.28);
+    backdrop-filter: blur(24px) saturate(135%); -webkit-backdrop-filter: blur(24px) saturate(135%);
+    animation: closedPanelIn .75s cubic-bezier(.22,1,.36,1) both;
+  }
+  .closed-order-brand {
+    display: inline-flex; align-items: center; gap: 10px; max-width: 100%; padding: 7px 12px 7px 7px;
+    border: 1px solid rgba(255,255,255,.13); border-radius: 999px; background: rgba(3,18,34,.24);
+    animation: closedFadeUp .55s .08s ease both;
+  }
+  .closed-order-brand-logo { width: 34px; height: 34px; flex: 0 0 34px; display: grid; place-items: center; overflow: hidden; border-radius: 11px; background: #F8F6F2; }
+  .closed-order-art { width: 190px; height: 174px; position: relative; margin: 20px auto 4px; animation: closedFadeUp .65s .14s cubic-bezier(.22,1,.36,1) both; }
+  .closed-order-orbit { position: absolute; inset: 3px 12px 0; border: 1px solid rgba(255,255,255,.13); border-radius: 50%; animation: closedOrbitSpin 13s linear infinite; }
+  .closed-order-orbit::before, .closed-order-orbit::after {
+    content: ""; position: absolute; width: 9px; height: 13px; border-radius: 50%; background: #E6782F;
+    box-shadow: inset -2px -2px 0 rgba(84,32,8,.22), 0 0 18px rgba(230,120,47,.48);
+  }
+  .closed-order-orbit::before { top: 19px; right: 22px; transform: rotate(32deg); }
+  .closed-order-orbit::after { bottom: 12px; left: 30px; transform: rotate(-40deg); }
+  .closed-order-saucer { position: absolute; left: 40px; bottom: 19px; width: 112px; height: 17px; border-radius: 50%; background: linear-gradient(to bottom, #DDE8ED, #7895A7); box-shadow: 0 12px 25px rgba(0,0,0,.26); }
+  .closed-order-cup {
+    position: absolute; left: 49px; bottom: 29px; width: 93px; height: 80px; border-radius: 12px 12px 32px 32px;
+    background: linear-gradient(135deg, #FFFDFC, #D9E7EC 70%, #B4CBD6); box-shadow: inset 6px 0 8px rgba(255,255,255,.65), 0 14px 22px rgba(0,0,0,.18);
+    animation: closedCupBreathe 3.4s ease-in-out infinite;
+  }
+  .closed-order-cup::before {
+    content: ""; position: absolute; left: 5px; right: 5px; top: -7px; height: 17px; border-radius: 50%;
+    border: 4px solid #EAF1F3; background: radial-gradient(ellipse, #C97539 0 45%, #64361F 47% 65%, #EAF1F3 67%);
+  }
+  .closed-order-cup::after { content: ""; position: absolute; right: -29px; top: 16px; width: 36px; height: 40px; border: 9px solid #D9E7EC; border-left: 0; border-radius: 0 28px 28px 0; }
+  .closed-order-steam {
+    position: absolute; bottom: 111px; width: 14px; height: 54px; border-left: 3px solid rgba(255,255,255,.58);
+    border-radius: 50%; filter: blur(.3px); opacity: 0; animation: closedSteam 2.8s ease-in-out infinite;
+  }
+  .closed-order-steam.s1 { left: 78px; }
+  .closed-order-steam.s2 { left: 101px; height: 66px; animation-delay: .8s; }
+  .closed-order-steam.s3 { left: 122px; height: 48px; animation-delay: 1.55s; }
+  .closed-order-status {
+    display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border: 1px solid rgba(244,166,111,.22);
+    border-radius: 999px; color: #FFD2B2; background: rgba(206,86,13,.15); font-size: 11px; font-weight: 700; letter-spacing: .06em;
+    animation: closedFadeUp .55s .22s ease both;
+  }
+  .closed-order-status-dot { width: 7px; height: 7px; border-radius: 50%; background: #F18A42; box-shadow: 0 0 0 0 rgba(241,138,66,.55); animation: closedStatusPulse 2s ease-out infinite; }
+  .closed-order-title {
+    margin: 15px 0 8px; color: #FFFFFF; font-family: 'Space Grotesk', sans-serif; font-size: clamp(26px, 8vw, 36px);
+    line-height: 1.08; letter-spacing: -.035em; animation: closedFadeUp .6s .28s ease both;
+  }
+  .closed-order-copy { max-width: 340px; margin: 0 auto; color: rgba(235,242,248,.72); font-size: 13.5px; line-height: 1.7; animation: closedFadeUp .6s .35s ease both; }
+  .closed-order-live {
+    display: flex; align-items: center; justify-content: center; gap: 8px; margin: 19px 0 0; padding-top: 17px;
+    border-top: 1px solid rgba(255,255,255,.11); color: rgba(224,235,243,.67); font-size: 11.5px; animation: closedFadeUp .6s .42s ease both;
+  }
+  .closed-order-live i { color: #75B9DD; animation: closedRefresh 4s ease-in-out infinite; }
+  .closed-order-button {
+    width: 100%; min-height: 48px; margin-top: 14px; border: 1px solid rgba(255,255,255,.2); border-radius: 15px;
+    color: #082B4F; background: #F9F5EF; box-shadow: 0 10px 24px rgba(0,0,0,.18); font-size: 13px; font-weight: 700;
+    transition: transform .2s ease, box-shadow .2s ease, background .2s ease; animation: closedFadeUp .6s .48s ease both;
+  }
+  .closed-order-button:hover { transform: translateY(-2px); background: #FFFFFF; box-shadow: 0 14px 28px rgba(0,0,0,.24); }
+  .closed-order-button:active { transform: scale(.98) !important; }
+  @keyframes closedPanelIn { from { opacity: 0; transform: translateY(26px) scale(.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
+  @keyframes closedFadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes closedGlowFloat { 0%, 100% { transform: translate3d(0,0,0) scale(1); } 50% { transform: translate3d(16px,-18px,0) scale(1.08); } }
+  @keyframes closedOrbitSpin { to { transform: rotate(360deg); } }
+  @keyframes closedCupBreathe { 0%, 100% { transform: translateY(0) rotate(-1deg); } 50% { transform: translateY(-4px) rotate(1deg); } }
+  @keyframes closedSteam { 0% { opacity: 0; transform: translate(2px,12px) scaleY(.75); } 30% { opacity: .72; } 100% { opacity: 0; transform: translate(-7px,-18px) scaleY(1.18); } }
+  @keyframes closedStatusPulse { 0% { box-shadow: 0 0 0 0 rgba(241,138,66,.5); } 70%, 100% { box-shadow: 0 0 0 7px rgba(241,138,66,0); } }
+  @keyframes closedRefresh { 0%, 70%, 100% { transform: rotate(0); } 82% { transform: rotate(180deg); } 94% { transform: rotate(360deg); } }
+  @media (max-height: 680px) {
+    .closed-order-page { padding-block: 14px; }
+    .closed-order-panel { padding-block: 18px; }
+    .closed-order-art { height: 142px; margin-top: 12px; }
+    .closed-order-saucer { bottom: 2px; }
+    .closed-order-cup { bottom: 12px; }
+    .closed-order-steam { bottom: 94px; }
+    .closed-order-title { margin-top: 11px; }
+  }
   @media (prefers-reduced-motion: reduce) {
     .banner-slide { transition-duration: 0ms; }
+    .closed-order-page *, .closed-order-page *::before, .closed-order-page *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
   }
 `;
 
@@ -701,6 +793,50 @@ function LandingScreen() {
         </div>
       </div>
     </div>
+  );
+}
+
+function ClosedOrderScreen({ shopName, hasOrders, onOpenOrders }) {
+  return (
+    <main className="corder closed-order-page">
+      <style>{GLOBAL_CSS}</style>
+      <div className="closed-order-glow" aria-hidden="true" style={{ width: 240, height: 240, top: "-90px", right: "-90px", background: "rgba(225,116,42,.15)" }} />
+      <div className="closed-order-glow" aria-hidden="true" style={{ width: 310, height: 310, bottom: "-150px", left: "-130px", background: "rgba(86,161,202,.13)", animationDelay: "-4s" }} />
+
+      <section className="closed-order-panel" aria-labelledby="closed-order-title">
+        <div className="closed-order-brand">
+          <span className="closed-order-brand-logo"><BrandLogo height={27} /></span>
+          <span style={{ display: "block", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(255,255,255,.88)", fontSize: 11.5, fontWeight: 600, letterSpacing: ".025em" }}>
+            {shopName || "ZONE 2 RESERVE BAR"}
+          </span>
+        </div>
+
+        <div className="closed-order-art" aria-hidden="true">
+          <div className="closed-order-orbit" />
+          <span className="closed-order-steam s1" />
+          <span className="closed-order-steam s2" />
+          <span className="closed-order-steam s3" />
+          <div className="closed-order-saucer" />
+          <div className="closed-order-cup" />
+        </div>
+
+        <div className="closed-order-status"><span className="closed-order-status-dot" /> พักรับออเดอร์ชั่วคราว</div>
+        <h1 id="closed-order-title" className="closed-order-title">กำลังเตรียมร้าน<br />ให้พร้อมเสิร์ฟ</h1>
+        <p className="closed-order-copy">ตอนนี้ร้านขอพักรับออเดอร์ออนไลน์สักครู่ แล้วกลับมาแวะดูเมนูโปรดของคุณอีกครั้งนะ</p>
+
+        <div className="closed-order-live" role="status">
+          <i className="ti ti-refresh" aria-hidden="true" />
+          <span>สถานะจะอัปเดตอัตโนมัติเมื่อร้านเปิดรับออเดอร์</span>
+        </div>
+
+        {hasOrders && (
+          <button type="button" className="closed-order-button" onClick={onOpenOrders}>
+            <i className="ti ti-receipt" style={{ fontSize: 16, marginRight: 7, verticalAlign: -2 }} aria-hidden="true" />
+            ดูออเดอร์ของฉัน
+          </button>
+        )}
+      </section>
+    </main>
   );
 }
 
@@ -1756,21 +1892,7 @@ export default function CustomerOrder({ shopUid }) {
   }
 
   if (!acceptingOrders) {
-    return (
-      <div className="corder" style={centerWrap}>
-        <style>{GLOBAL_CSS}</style>
-        <GlassBackdrop />
-        <div style={{ ...centerCard, textAlign: "center" }}>
-          <div style={{ marginBottom: 14 }}><BrandLogo height={54} /></div>
-          <p style={{ fontSize: 34, margin: "0 0 10px" }}>🔒</p>
-          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 19, margin: "0 0 8px", color: COLORS.espresso5 }}>ร้านปิดรับออเดอร์ชั่วคราว</h1>
-          <p style={{ fontSize: 13, color: COLORS.espresso2 }}>ขออภัย ตอนนี้ร้านยังไม่เปิดรับออเดอร์ผ่านหน้านี้ กรุณาลองใหม่อีกครั้งภายหลัง</p>
-          {loadMyOrderIds(shopUid).length > 0 && (
-            <button style={{ ...btn, marginTop: 16 }} onClick={openMyOrders}>ดูออเดอร์ของฉัน</button>
-          )}
-        </div>
-      </div>
-    );
+    return <ClosedOrderScreen shopName={shopName} hasOrders={loadMyOrderIds(shopUid).length > 0} onOpenOrders={openMyOrders} />;
   }
 
   return (
