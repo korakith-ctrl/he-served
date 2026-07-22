@@ -3945,6 +3945,11 @@ function MnuIngredientPicker({ options, value, onChange }) {
   const [pos, setPos] = useState({ top: 0, left: 0, width: 220 });
   const btnRef = useRef(null);
   const current = options.find((o) => o.value === value);
+  // Mobile browsers scroll the inspector when an auto-focused search field opens the virtual keyboard.
+  // That scroll used to trigger the close listener immediately, so use the platform's reliable native picker instead.
+  const useNativePicker = typeof window !== "undefined" && (
+    window.matchMedia("(max-width: 760px)").matches || window.matchMedia("(pointer: coarse)").matches
+  );
 
   function toggle() {
     if (!open && btnRef.current) {
@@ -3962,6 +3967,21 @@ function MnuIngredientPicker({ options, value, onChange }) {
     window.addEventListener("keydown", onKey);
     return () => { window.removeEventListener("scroll", close, true); window.removeEventListener("keydown", onKey); };
   }, [open]);
+
+  if (useNativePicker) {
+    return (
+      <select
+        className="mnu-combo-btn"
+        value={value || ""}
+        onChange={(event) => onChange(event.target.value)}
+        aria-label="เลือกวัตถุดิบ"
+        style={{ appearance: "auto", WebkitAppearance: "menulist", paddingRight: 8 }}
+      >
+        {!value && <option value="" disabled>เลือกวัตถุดิบ</option>}
+        {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+    );
+  }
 
   const filtered = query.trim() ? options.filter((o) => o.label.toLowerCase().includes(query.trim().toLowerCase())) : options;
 
