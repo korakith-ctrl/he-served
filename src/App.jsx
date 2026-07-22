@@ -1213,7 +1213,9 @@ function ShopApp({ uid, user, theme, onToggleTheme }) {
     const lines = resolveLines(menu, substitutions, ingredientsById);
     const overhead = data.settings.overheadPerCup;
     const basePrice = channel === "delivery" ? menu.priceDelivery : menu.priceStore;
-    const unitPrice = basePrice + (opts.upcharge || 0);
+    const listedUnitPrice = basePrice + (opts.upcharge || 0);
+    const hasUnitPriceOverride = Number.isFinite(opts.unitPriceOverride);
+    const unitPrice = hasUnitPriceOverride ? Math.max(0, round4(opts.unitPriceOverride)) : listedUnitPrice;
     const grossRevenue = unitPrice * qty;
     const platform = channel === "delivery" ? data.settings.platforms.find((p) => p.id === opts.platformId) : null;
     const gpPercent = platform ? platform.gpPercent : 0;
@@ -1245,6 +1247,7 @@ function ShopApp({ uid, user, theme, onToggleTheme }) {
       id: saleId, timestamp, menuId, menuName: menu.name,
       productType: productTypeOf(menu),
       channel, qty, unitPrice, grossRevenue, gpAmount, gpPercent, promoDiscount, netRevenue,
+      listedUnitPrice, priceOverridden: hasUnitPriceOverride && Math.abs(unitPrice - listedUnitPrice) > 0.0001,
       netRevenueEntered: enteredNetRevenue !== null,
       ingredientCostTotal, overheadAllocated, totalCost, profit: netRevenue - totalCost,
       platformName: platform ? platform.name : null,
@@ -2119,7 +2122,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
       platformId: channel === "delivery" ? platformId : null,
       platformName: platform ? platform.name : null,
       options: optionsArr, optionsLabel,
-      substitutions, upcharge, unitPrice,
+      substitutions, upcharge, unitPrice, listedUnitPrice: unitPrice, unitPriceInput: String(unitPrice),
     }]);
     set(menu.id, { qty: 1 });
   }
@@ -2132,7 +2135,26 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
     setCart((c) => c.map((l) => (l.cartId === cartId ? { ...l, qty: Math.max(1, qty) } : l)));
   }
 
+  function updateCartUnitPrice(cartId, rawValue) {
+    const parsed = Number(rawValue);
+    const valid = rawValue.trim() !== "" && Number.isFinite(parsed) && parsed >= 0;
+    setCart((current) => current.map((line) => (
+      line.cartId === cartId
+        ? { ...line, unitPriceInput: rawValue, unitPrice: valid ? round4(parsed) : 0 }
+        : line
+    )));
+  }
+
+  function resetCartUnitPrice(cartId) {
+    setCart((current) => current.map((line) => (
+      line.cartId === cartId
+        ? { ...line, unitPrice: line.listedUnitPrice, unitPriceInput: String(line.listedUnitPrice) }
+        : line
+    )));
+  }
+
   function checkout() {
+    if (hasInvalidUnitPrice) return;
     const enteredDeliveryNet = Number(deliveryNetReceived);
     let allocatedNet = 0;
     let remainingDeliveryLines = cart.filter((line) => line.channel === "delivery").length;
@@ -2151,6 +2173,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
     for (const line of checkoutCart) {
       recordSale(line.menuId, line.qty, line.channel, {
         substitutions: line.substitutions, upcharge: line.upcharge,
+        unitPriceOverride: line.unitPrice,
         platformId: line.platformId, milkLabel: line.optionsLabel,
         netRevenueOverride: line.netRevenueOverride,
         note: cartNote.trim() || null, orderId, paymentMethod: "cash",
@@ -2166,7 +2189,12 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
   const deliveryGrossTotal = cart.reduce((sum, line) => sum + (line.channel === "delivery" ? line.unitPrice * line.qty : 0), 0);
   const nonDeliveryTotal = cart.reduce((sum, line) => sum + (line.channel !== "delivery" ? line.unitPrice * line.qty : 0), 0);
   const hasDeliveryItems = cart.some((line) => line.channel === "delivery");
+  const hasInvalidUnitPrice = cart.some((line) => {
+    const rawValue = String(line.unitPriceInput ?? line.unitPrice ?? "");
+    return rawValue.trim() === "" || !Number.isFinite(Number(rawValue)) || Number(rawValue) < 0;
+  });
   const deliveryNetIsValid = !hasDeliveryItems || (deliveryNetReceived !== "" && Number.isFinite(Number(deliveryNetReceived)) && Number(deliveryNetReceived) >= 0);
+  const checkoutIsValid = !hasInvalidUnitPrice && deliveryNetIsValid;
   const cartTotal = nonDeliveryTotal + (deliveryNetIsValid && hasDeliveryItems ? Number(deliveryNetReceived) : 0);
 
   const today = todayStr();
@@ -2371,6 +2399,29 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
                   <div style={{ fontSize: 11, color: POS.gray, marginTop: 2 }}>
                     {CHANNELS[line.channel]}{line.platformName ? ` · ${line.platformName}` : ""}{line.optionsLabel ? ` · ${line.optionsLabel}` : ""}
                   </div>
+                  <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 8, marginTop: 9, padding: "8px 9px", borderRadius: 10, background: POS.chipBg }}>
+                    <label style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: "block", marginBottom: 4, color: POS.gray, fontSize: 10.5, fontWeight: 600 }}>ราคาขาย / {productTypeMeta(line).unit}</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 5, color: POS.navy, fontSize: 13, fontWeight: 700 }}>
+                        ฿
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          inputMode="decimal"
+                          value={line.unitPriceInput ?? String(line.unitPrice)}
+                          onChange={(event) => updateCartUnitPrice(line.cartId, event.target.value)}
+                          aria-label={`ราคาขาย ${line.menuName} ต่อ${productTypeMeta(line).unit}`}
+                          style={{ width: "100%", minWidth: 0, height: 34, padding: "0 8px", border: `1px solid ${String(line.unitPriceInput ?? line.unitPrice).trim() !== "" && Number(line.unitPriceInput ?? line.unitPrice) >= 0 ? POS.border : "var(--danger)"}`, borderRadius: 8, background: "var(--surface)", color: POS.navy, fontSize: 14, fontWeight: 700, boxSizing: "border-box" }}
+                        />
+                      </span>
+                    </label>
+                    {Math.abs(Number(line.unitPrice) - Number(line.listedUnitPrice)) > 0.0001 && (
+                      <button type="button" className="cbtn" onClick={() => resetCartUnitPrice(line.cartId)} style={{ flexShrink: 0, height: 34, padding: "0 8px", fontSize: 10.5 }} title={`คืนราคาจากเมนู ฿${money(line.listedUnitPrice)}`}>
+                        <Icon name="restore" size={12} /> คืนราคาเดิม
+                      </button>
+                    )}
+                  </div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <button className="cbtn" style={{ padding: "2px 9px", fontSize: 13 }} onClick={() => updateCartQty(line.cartId, line.qty - 1)}>−</button>
@@ -2418,9 +2469,10 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
           )}
 
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontWeight: 700, fontSize: 20, fontFamily: "var(--f-body)", borderTop: `1px solid ${POS.border}`, paddingTop: 12, marginBottom: 12 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: POS.gray }}>ยอดรับสุทธิรวม</span><span style={{ color: POS.navy }}>{deliveryNetIsValid ? `฿${money(cartTotal)}` : "—"}</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: POS.gray }}>ยอดรับสุทธิรวม</span><span style={{ color: POS.navy }}>{checkoutIsValid ? `฿${money(cartTotal)}` : "—"}</span>
           </div>
-          <button className="pos-add-btn" style={{ width: "100%", opacity: cart.length === 0 || !deliveryNetIsValid ? 0.5 : 1 }} disabled={cart.length === 0 || !deliveryNetIsValid} onClick={checkout}>
+          {hasInvalidUnitPrice && <div style={{ margin: "-5px 0 9px", color: "var(--danger)", fontSize: 10.5 }}>กรุณากรอกราคาขายให้ถูกต้องก่อนยืนยันออเดอร์</div>}
+          <button className="pos-add-btn" style={{ width: "100%", opacity: cart.length === 0 || !checkoutIsValid ? 0.5 : 1 }} disabled={cart.length === 0 || !checkoutIsValid} onClick={checkout}>
             <Icon name="check" size={16} /> ยืนยันออเดอร์ / ชำระเงิน
           </button>
         </div>
