@@ -3178,6 +3178,12 @@ function escapePrintHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+function maskPhoneForPrint(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (digits.length <= 3) return digits;
+  return `${"X".repeat(digits.length - 3)}${digits.slice(-3)}`;
+}
+
 function buildOrderStickerData(order) {
   const stickers = [];
   const totalCups = (order.items || []).reduce((sum, item) => sum + Math.max(1, Number(item.qty) || 1), 0);
@@ -3192,8 +3198,8 @@ function buildOrderStickerData(order) {
         productType: productTypeOf(item),
         options,
         note: order.note || "",
-        customer: order.customerName || order.customerPhone || "ลูกค้า",
-        phone: order.customerName && order.customerPhone ? order.customerPhone : "",
+        customer: order.customerName || maskPhoneForPrint(order.customerPhone) || "ลูกค้า",
+        phone: order.customerName && order.customerPhone ? maskPhoneForPrint(order.customerPhone) : "",
         orderCode: String(order.id || "").slice(-6).toUpperCase(),
         pickupDate: formatPickupDateTH(order.pickupDate),
         cupNumber,
