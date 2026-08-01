@@ -914,6 +914,7 @@ export default function CustomerOrder({ shopUid }) {
   const mainRef = useRef(null);
   const sectionRefs = useRef({});
   const offerCarouselRef = useRef(null);
+  const offerInteractionAtRef = useRef(0);
   const [offerRippleId, setOfferRippleId] = useState(null);
 
   useEffect(() => {
@@ -1085,6 +1086,47 @@ export default function CustomerOrder({ shopUid }) {
     if (categories.length > 0 && !activeCategory) setActiveCategory(categories[0]);
   }, [categories, activeCategory]);
 
+  // เลื่อนการ์ดโปรโมชันให้ลูกค้าเห็นว่ามีรายการถัดไป โดยเว้นช่วงหลังลูกค้าแตะ/ลากเอง
+  // และปิด animation อัตโนมัติตาม accessibility preference ของเครื่อง
+  useEffect(() => {
+    const carousel = offerCarouselRef.current;
+    if (step !== "menu" || activePromotions.length <= 1 || !carousel) return undefined;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return undefined;
+
+    let timer;
+    const markInteraction = () => { offerInteractionAtRef.current = Date.now(); };
+    const schedule = (delay = 3600) => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        const elapsedSinceInteraction = Date.now() - offerInteractionAtRef.current;
+        if (elapsedSinceInteraction < 5000) {
+          schedule(5000 - elapsedSinceInteraction);
+          return;
+        }
+
+        if (carousel.scrollWidth > carousel.clientWidth + 2) {
+          const firstCard = carousel.firstElementChild;
+          const stepWidth = firstCard ? firstCard.getBoundingClientRect().width + 14 : carousel.clientWidth;
+          const isAtEnd = carousel.scrollLeft + carousel.clientWidth >= carousel.scrollWidth - 8;
+          carousel.scrollTo({
+            left: isAtEnd ? 0 : Math.min(carousel.scrollLeft + stepWidth, carousel.scrollWidth - carousel.clientWidth),
+            behavior: "smooth",
+          });
+        }
+        schedule();
+      }, delay);
+    };
+
+    carousel.addEventListener("pointerdown", markInteraction, { passive: true });
+    carousel.addEventListener("wheel", markInteraction, { passive: true });
+    schedule();
+    return () => {
+      window.clearTimeout(timer);
+      carousel.removeEventListener("pointerdown", markInteraction);
+      carousel.removeEventListener("wheel", markInteraction);
+    };
+  }, [step, activePromotions]);
+
   useEffect(() => {
     if (step !== "menu" || !mainRef.current || categories.length === 0) return;
     const observer = new IntersectionObserver(
@@ -1133,6 +1175,7 @@ export default function CustomerOrder({ shopUid }) {
   function scrollOfferCarousel(dir) {
     const el = offerCarouselRef.current;
     if (!el) return;
+    offerInteractionAtRef.current = Date.now();
     const card = el.firstElementChild;
     const step = card ? card.getBoundingClientRect().width + 14 : el.clientWidth;
     el.scrollBy({ left: dir * step, behavior: "smooth" });
