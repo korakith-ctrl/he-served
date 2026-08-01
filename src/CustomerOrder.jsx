@@ -1090,7 +1090,7 @@ export default function CustomerOrder({ shopUid }) {
   // และปิด animation อัตโนมัติตาม accessibility preference ของเครื่อง
   useEffect(() => {
     const carousel = offerCarouselRef.current;
-    if (step !== "menu" || activePromotions.length <= 1 || !carousel) return undefined;
+    if (!splashDone || !acceptingOrders || step !== "menu" || activePromotions.length <= 1 || !carousel) return undefined;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return undefined;
 
     let timer;
@@ -1125,7 +1125,7 @@ export default function CustomerOrder({ shopUid }) {
       carousel.removeEventListener("pointerdown", markInteraction);
       carousel.removeEventListener("wheel", markInteraction);
     };
-  }, [step, activePromotions]);
+  }, [splashDone, acceptingOrders, step, activePromotions]);
 
   useEffect(() => {
     if (step !== "menu" || !mainRef.current || categories.length === 0) return;
