@@ -39,8 +39,8 @@
   height: min(52dvh, 512px);
   place-items: center;
   font-size: 84px;
-  color: #ffd09c;
-  background: radial-gradient(circle at 50% 35%, #174f78, #071c33 70%);
+  color: #d9f3fc;
+  background: radial-gradient(circle at 50% 35%, #00a3e0, #003b5c 72%);
 }
 
 .promotion-takeover__close {

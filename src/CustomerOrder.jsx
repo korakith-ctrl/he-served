@@ -66,12 +66,13 @@ function rewardOtpErrorMessage(error) {
   return "ยืนยันเบอร์โทรศัพท์ไม่สำเร็จ กรุณาลองใหม่";
 }
 
+const PANTONE_299C = "#00A3E0";
 const COLORS = {
-  cream: "#F5F0EA", cream2: "#EDE3D2", surface: "#FFFFFF",
-  espresso5: "#063360", espresso4: "#0B4A7A", espresso3: "#3A5570", espresso2: "#7189A3",
-  sage: "#CE560D", sageDark: "#A8440A", sageLight: "#F7E0CC",
-  gold: "#CE560D", goldLight: "#F7E0CC",
-  danger: "#B23A2E", line: "#E2D8C7",
+  cream: "#F7FCFE", cream2: "#E8F7FC", surface: "#FFFFFF",
+  espresso5: "#003B5C", espresso4: "#005B85", espresso3: "#35657D", espresso2: "#718A99",
+  sage: PANTONE_299C, sageDark: "#0077A8", sageLight: "#D9F3FC",
+  gold: PANTONE_299C, goldLight: "#D9F3FC",
+  danger: "#B23A2E", line: "#CDEAF5",
   success: "#2E9E4F", successDark: "#1F7A38", successLight: "#DFF3E3",
   pending: "#B8860B", pendingLight: "#FCEFD1",
 };
@@ -101,7 +102,7 @@ function RewardTermsSheet({ goal, onClose }) {
 
 const STATUS_ICON = {
   pending: { icon: "clock", color: COLORS.pending, bg: COLORS.pendingLight, anim: "statusPulse 1.6s ease-in-out infinite" },
-  paid: { icon: "checks", color: COLORS.espresso4, bg: "rgba(11,74,122,0.14)", anim: "cartBump .5s ease" },
+  paid: { icon: "checks", color: COLORS.sageDark, bg: "rgba(0,163,224,0.16)", anim: "cartBump .5s ease" },
   preparing: { icon: "chef-hat", color: COLORS.sage, bg: COLORS.sageLight, anim: "pulseCup 1.3s ease-in-out infinite" },
   ready: { icon: "bell", color: COLORS.success, bg: COLORS.successLight, anim: "successPop .5s cubic-bezier(.34,1.56,.64,1)" },
   done: { icon: "circle-check", color: COLORS.successDark, bg: COLORS.successLight, anim: "successPop .5s cubic-bezier(.34,1.56,.64,1)" },
@@ -122,19 +123,19 @@ function OrderStatusIcon({ status, size = 20 }) {
 }
 
 const GLASS_PANEL = {
-  background: "rgba(255,255,255,0.42)",
+  background: "rgba(255,255,255,0.82)",
   backdropFilter: "blur(20px) saturate(180%)",
   WebkitBackdropFilter: "blur(20px) saturate(180%)",
-  border: "1px solid rgba(255,255,255,0.55)",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.6), 0 8px 24px rgba(43,29,20,0.10)",
+  border: "1px solid rgba(0,163,224,0.14)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9), 0 8px 24px rgba(0,91,133,0.10)",
 };
 
 function GlassBackdrop() {
   return (
-    <div className="customer-backdrop" style={{ position: "fixed", inset: 0, zIndex: -1, overflow: "hidden", background: "linear-gradient(160deg, #F7F1E7, #ECE1CE)" }}>
-      <div style={{ position: "absolute", top: "-10%", left: "-10%", width: "55%", height: "45%", borderRadius: "50%", background: "#0B4A7A", opacity: 0.35, filter: "blur(70px)", animation: "blobFloat1 16s ease-in-out infinite" }} />
-      <div style={{ position: "absolute", top: "-5%", right: "-12%", width: "45%", height: "40%", borderRadius: "50%", background: "#CE560D", opacity: 0.3, filter: "blur(70px)", animation: "blobFloat2 18s ease-in-out infinite" }} />
-      <div style={{ position: "absolute", bottom: "-15%", left: "20%", width: "60%", height: "50%", borderRadius: "50%", background: "#A66F42", opacity: 0.28, filter: "blur(80px)", animation: "blobFloat3 20s ease-in-out infinite" }} />
+    <div className="customer-backdrop" style={{ position: "fixed", inset: 0, zIndex: -1, overflow: "hidden", background: "linear-gradient(160deg, #FFFFFF, #EDF9FD)" }}>
+      <div style={{ position: "absolute", top: "-10%", left: "-10%", width: "55%", height: "45%", borderRadius: "50%", background: PANTONE_299C, opacity: 0.2, filter: "blur(70px)", animation: "blobFloat1 16s ease-in-out infinite" }} />
+      <div style={{ position: "absolute", top: "-5%", right: "-12%", width: "45%", height: "40%", borderRadius: "50%", background: "#74D1EE", opacity: 0.22, filter: "blur(70px)", animation: "blobFloat2 18s ease-in-out infinite" }} />
+      <div style={{ position: "absolute", bottom: "-15%", left: "20%", width: "60%", height: "50%", borderRadius: "50%", background: "#BFEAF8", opacity: 0.38, filter: "blur(80px)", animation: "blobFloat3 20s ease-in-out infinite" }} />
     </div>
   );
 }
@@ -264,23 +265,23 @@ function saveMyOrderId(shopUid, orderId) {
 }
 
 const btn = {
-  border: "1px solid rgba(255,255,255,0.6)",
-  background: "rgba(255,255,255,0.5)",
+  border: "1px solid rgba(0,163,224,0.22)",
+  background: "rgba(255,255,255,0.82)",
   backdropFilter: "blur(14px) saturate(180%)",
   WebkitBackdropFilter: "blur(14px) saturate(180%)",
   color: COLORS.espresso4, borderRadius: 11,
   padding: "9px 14px", fontSize: 13.5, fontWeight: 500, cursor: "pointer",
 };
 const btnAccent = {
-  ...btn, background: COLORS.sage, color: "#fff", borderColor: COLORS.sage, width: "100%",
+  ...btn, background: COLORS.sageDark, color: "#fff", borderColor: COLORS.sageDark, width: "100%",
   backdropFilter: "none", WebkitBackdropFilter: "none",
 };
 const field = {
-  width: "100%", border: "1px solid rgba(255,255,255,0.65)", background: "rgba(255,255,255,0.55)",
+  width: "100%", border: "1px solid rgba(0,163,224,0.22)", background: "rgba(255,255,255,0.86)",
   borderRadius: 10, padding: "9px 10px", fontSize: 14, boxSizing: "border-box", marginTop: 4,
 };
 const overlay = {
-  position: "fixed", inset: 0, background: "rgba(43,29,20,0.35)",
+  position: "fixed", inset: 0, background: "rgba(0,59,92,0.38)",
   backdropFilter: "blur(3px)", WebkitBackdropFilter: "blur(3px)",
   display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 50,
 };
@@ -301,16 +302,16 @@ const GLOBAL_CSS = `
   .corder { scrollbar-width: none; }
   .offer-carousel { -webkit-overflow-scrolling: touch; }
   .offer-card { transition: transform .25s ease, box-shadow .25s ease; }
-  .offer-card:hover { transform: translateY(-2px) scale(1.02); box-shadow: 0 14px 32px rgba(43,29,20,0.18); }
+  .offer-card:hover { transform: translateY(-2px) scale(1.02); box-shadow: 0 14px 32px rgba(0,91,133,0.18); }
   .offer-card:active { transform: scale(0.98); }
   .offer-arrow-btn { transition: transform .2s ease, background .2s ease; }
-  .offer-arrow-btn:hover { transform: scale(1.08); background: #d8f0de; }
+  .offer-arrow-btn:hover { transform: scale(1.08); background: #C5EDFA; }
   .offer-arrow-btn:active { transform: scale(0.94); }
   .banner-carousel { touch-action: pan-y; }
   .banner-slide { transition: opacity .45s ease; }
-  .banner-carousel:focus-visible { outline: 3px solid rgba(6,51,96,.42); outline-offset: 2px; }
+  .banner-carousel:focus-visible { outline: 3px solid rgba(0,163,224,.42); outline-offset: 2px; }
   @keyframes offerRipple { 0% { transform: scale(0); opacity: .5; } 100% { transform: scale(2.4); opacity: 0; } }
-  .offer-ripple { position: absolute; inset: 0; border-radius: inherit; background: rgba(6,51,96,0.18); animation: offerRipple .5s ease-out; pointer-events: none; }
+  .offer-ripple { position: absolute; inset: 0; border-radius: inherit; background: rgba(0,163,224,0.22); animation: offerRipple .5s ease-out; pointer-events: none; }
   .zone-header { transition: box-shadow .25s ease; }
   .zone-icon-btn { transition: transform .25s ease, box-shadow .25s ease; }
   .zone-icon-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,0.14); }
@@ -368,32 +369,32 @@ const GLOBAL_CSS = `
   }
   .corder button:active { transform: scale(0.94); }
   html[data-theme="dark"] .corder { color-scheme: dark; color: #E7ECF3 !important; }
-  html[data-theme="dark"] .customer-backdrop { background: linear-gradient(160deg, #08111D, #111B28) !important; }
+  html[data-theme="dark"] .customer-backdrop { background: linear-gradient(160deg, #00263A, #003B5C) !important; }
   html[data-theme="dark"] .customer-backdrop > div { opacity: .16 !important; }
   html[data-theme="dark"] .corder input,
   html[data-theme="dark"] .corder select,
   html[data-theme="dark"] .corder textarea { background: rgba(16,26,39,.92) !important; color: #E7ECF3 !important; border-color: #344256 !important; }
   html[data-theme="dark"] .corder [style*="background: rgb(255, 255, 255)"],
   html[data-theme="dark"] .corder [style*="background: rgba(255, 255, 255"] { background: rgba(18,28,41,.88) !important; border-color: rgba(148,163,184,.20) !important; }
-  html[data-theme="dark"] .corder [style*="color: rgb(6, 51, 96)"],
-  html[data-theme="dark"] .corder [style*="color: rgb(11, 74, 122)"],
-  html[data-theme="dark"] .corder [style*="color: rgb(58, 85, 112)"] { color: #E7ECF3 !important; }
-  html[data-theme="dark"] .corder [style*="color: rgb(113, 137, 163)"] { color: #A9B5C5 !important; }
-  html[data-theme="dark"] .corder [style*="background: rgb(245, 240, 234)"],
-  html[data-theme="dark"] .corder [style*="background: rgb(237, 227, 210)"] { background: #111B28 !important; }
+  html[data-theme="dark"] .corder [style*="color: rgb(0, 59, 92)"],
+  html[data-theme="dark"] .corder [style*="color: rgb(0, 91, 133)"],
+  html[data-theme="dark"] .corder [style*="color: rgb(53, 101, 125)"] { color: #E7F7FC !important; }
+  html[data-theme="dark"] .corder [style*="color: rgb(113, 138, 153)"] { color: #B7D2DF !important; }
+  html[data-theme="dark"] .corder [style*="background: rgb(247, 252, 254)"],
+  html[data-theme="dark"] .corder [style*="background: rgb(232, 247, 252)"] { background: #003B5C !important; }
   html[data-theme="dark"] .corder .zone-header { background: rgba(15,24,36,.94) !important; border: 1px solid rgba(148,163,184,.16); box-shadow: 0 10px 30px rgba(0,0,0,.28) !important; }
-  html[data-theme="dark"] .corder .zone-logo-shell { background: #F8F6F2 !important; border-color: rgba(255,255,255,.16) !important; }
-  html[data-theme="dark"] .corder .zone-logo-shell div { color: #163B73 !important; }
+  html[data-theme="dark"] .corder .zone-logo-shell { background: #FFFFFF !important; border-color: rgba(0,163,224,.28) !important; }
+  html[data-theme="dark"] .corder .zone-logo-shell div { color: #003B5C !important; }
   html[data-theme="dark"] .corder .customer-category-nav { background: rgba(15,24,36,.82) !important; border-color: rgba(148,163,184,.16) !important; }
   html[data-theme="dark"] .corder .customer-category-tab { color: #A9B5C5 !important; }
   html[data-theme="dark"] .corder .customer-category-tab.active { background: #26364A !important; color: #F4F7FB !important; box-shadow: 0 3px 10px rgba(0,0,0,.28) !important; }
   html[data-theme="dark"] .corder .customer-option-choice { background: #172333 !important; color: #E7ECF3 !important; border-color: #344256 !important; }
-  html[data-theme="dark"] .corder .customer-option-choice.selected { background: rgba(206,86,13,.22) !important; color: #FFF4EA !important; border-color: #E9782F !important; }
+  html[data-theme="dark"] .corder .customer-option-choice.selected { background: rgba(0,163,224,.24) !important; color: #E9F9FE !important; border-color: #00A3E0 !important; }
   html[data-theme="dark"] .corder .customer-option-choice [style*="color"] { color: #B8C4D2 !important; }
   .closed-order-page {
     min-height: 100vh; min-height: 100dvh; position: relative; isolation: isolate; overflow: hidden;
-    display: grid; place-items: center; padding: 28px 18px; color: #F9F5EF;
-    background: radial-gradient(circle at 12% 12%, rgba(218,111,40,.22), transparent 31%), radial-gradient(circle at 88% 86%, rgba(56,118,158,.26), transparent 36%), linear-gradient(145deg, #061F39 0%, #082B4F 48%, #0B3D67 100%);
+    display: grid; place-items: center; padding: 28px 18px; color: #FFFFFF;
+    background: radial-gradient(circle at 12% 12%, rgba(255,255,255,.18), transparent 31%), radial-gradient(circle at 88% 86%, rgba(0,163,224,.30), transparent 36%), linear-gradient(145deg, #003B5C 0%, #006A96 52%, #00A3E0 100%);
   }
   .closed-order-page::before {
     content: ""; position: absolute; inset: 0; z-index: -2; opacity: .16;
@@ -404,22 +405,22 @@ const GLOBAL_CSS = `
   .closed-order-panel {
     width: min(100%, 460px); position: relative; overflow: hidden; padding: 26px 24px 22px;
     border: 1px solid rgba(255,255,255,.16); border-radius: 32px; text-align: center;
-    background: linear-gradient(145deg, rgba(255,255,255,.12), rgba(255,255,255,.055));
+    background: linear-gradient(145deg, rgba(255,255,255,.18), rgba(255,255,255,.08));
     box-shadow: inset 0 1px 0 rgba(255,255,255,.17), 0 28px 70px rgba(0,0,0,.28);
     backdrop-filter: blur(24px) saturate(135%); -webkit-backdrop-filter: blur(24px) saturate(135%);
     animation: closedPanelIn .75s cubic-bezier(.22,1,.36,1) both;
   }
   .closed-order-brand {
     display: inline-flex; align-items: center; gap: 10px; max-width: 100%; padding: 7px 12px 7px 7px;
-    border: 1px solid rgba(255,255,255,.13); border-radius: 999px; background: rgba(3,18,34,.24);
+    border: 1px solid rgba(255,255,255,.22); border-radius: 999px; background: rgba(0,59,92,.28);
     animation: closedFadeUp .55s .08s ease both;
   }
-  .closed-order-brand-logo { width: 34px; height: 34px; flex: 0 0 34px; display: grid; place-items: center; overflow: hidden; border-radius: 11px; background: #F8F6F2; }
+  .closed-order-brand-logo { width: 34px; height: 34px; flex: 0 0 34px; display: grid; place-items: center; overflow: hidden; border-radius: 11px; background: #FFFFFF; }
   .closed-order-art { width: 190px; height: 174px; position: relative; margin: 20px auto 4px; animation: closedFadeUp .65s .14s cubic-bezier(.22,1,.36,1) both; }
   .closed-order-orbit { position: absolute; inset: 3px 12px 0; border: 1px solid rgba(255,255,255,.13); border-radius: 50%; animation: closedOrbitSpin 13s linear infinite; }
   .closed-order-orbit::before, .closed-order-orbit::after {
-    content: ""; position: absolute; width: 9px; height: 13px; border-radius: 50%; background: #E6782F;
-    box-shadow: inset -2px -2px 0 rgba(84,32,8,.22), 0 0 18px rgba(230,120,47,.48);
+    content: ""; position: absolute; width: 9px; height: 13px; border-radius: 50%; background: #74D1EE;
+    box-shadow: inset -2px -2px 0 rgba(0,59,92,.2), 0 0 18px rgba(116,209,238,.55);
   }
   .closed-order-orbit::before { top: 19px; right: 22px; transform: rotate(32deg); }
   .closed-order-orbit::after { bottom: 12px; left: 30px; transform: rotate(-40deg); }
@@ -442,11 +443,11 @@ const GLOBAL_CSS = `
   .closed-order-steam.s2 { left: 101px; height: 66px; animation-delay: .8s; }
   .closed-order-steam.s3 { left: 122px; height: 48px; animation-delay: 1.55s; }
   .closed-order-status {
-    display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border: 1px solid rgba(244,166,111,.22);
-    border-radius: 999px; color: #FFD2B2; background: rgba(206,86,13,.15); font-size: 11px; font-weight: 700; letter-spacing: .06em;
+    display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border: 1px solid rgba(255,255,255,.26);
+    border-radius: 999px; color: #FFFFFF; background: rgba(0,163,224,.22); font-size: 11px; font-weight: 700; letter-spacing: .06em;
     animation: closedFadeUp .55s .22s ease both;
   }
-  .closed-order-status-dot { width: 7px; height: 7px; border-radius: 50%; background: #F18A42; box-shadow: 0 0 0 0 rgba(241,138,66,.55); animation: closedStatusPulse 2s ease-out infinite; }
+  .closed-order-status-dot { width: 7px; height: 7px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 0 0 0 rgba(255,255,255,.55); animation: closedStatusPulse 2s ease-out infinite; }
   .closed-order-title {
     margin: 15px 0 8px; color: #FFFFFF; font-family: 'Space Grotesk', sans-serif; font-size: clamp(26px, 8vw, 36px);
     line-height: 1.08; letter-spacing: -.035em; animation: closedFadeUp .6s .28s ease both;
@@ -456,10 +457,10 @@ const GLOBAL_CSS = `
     display: flex; align-items: center; justify-content: center; gap: 8px; margin: 19px 0 0; padding-top: 17px;
     border-top: 1px solid rgba(255,255,255,.11); color: rgba(224,235,243,.67); font-size: 11.5px; animation: closedFadeUp .6s .42s ease both;
   }
-  .closed-order-live i { color: #75B9DD; animation: closedRefresh 4s ease-in-out infinite; }
+  .closed-order-live i { color: #BFEAF8; animation: closedRefresh 4s ease-in-out infinite; }
   .closed-order-button {
     width: 100%; min-height: 48px; margin-top: 14px; border: 1px solid rgba(255,255,255,.2); border-radius: 15px;
-    color: #082B4F; background: #F9F5EF; box-shadow: 0 10px 24px rgba(0,0,0,.18); font-size: 13px; font-weight: 700;
+    color: #003B5C; background: #FFFFFF; box-shadow: 0 10px 24px rgba(0,59,92,.2); font-size: 13px; font-weight: 700;
     transition: transform .2s ease, box-shadow .2s ease, background .2s ease; animation: closedFadeUp .6s .48s ease both;
   }
   .closed-order-button:hover { transform: translateY(-2px); background: #FFFFFF; box-shadow: 0 14px 28px rgba(0,0,0,.24); }
@@ -470,7 +471,7 @@ const GLOBAL_CSS = `
   @keyframes closedOrbitSpin { to { transform: rotate(360deg); } }
   @keyframes closedCupBreathe { 0%, 100% { transform: translateY(0) rotate(-1deg); } 50% { transform: translateY(-4px) rotate(1deg); } }
   @keyframes closedSteam { 0% { opacity: 0; transform: translate(2px,12px) scaleY(.75); } 30% { opacity: .72; } 100% { opacity: 0; transform: translate(-7px,-18px) scaleY(1.18); } }
-  @keyframes closedStatusPulse { 0% { box-shadow: 0 0 0 0 rgba(241,138,66,.5); } 70%, 100% { box-shadow: 0 0 0 7px rgba(241,138,66,0); } }
+  @keyframes closedStatusPulse { 0% { box-shadow: 0 0 0 0 rgba(255,255,255,.5); } 70%, 100% { box-shadow: 0 0 0 7px rgba(255,255,255,0); } }
   @keyframes closedRefresh { 0%, 70%, 100% { transform: rotate(0); } 82% { transform: rotate(180deg); } 94% { transform: rotate(360deg); } }
   @media (max-height: 680px) {
     .closed-order-page { padding-block: 14px; }
@@ -633,7 +634,7 @@ function OfferCard({ images, label, title, subtitle, priceNode, qty, rippling, o
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{
-          fontSize: 10.5, fontWeight: 600, color: "#F97316", textTransform: "uppercase", letterSpacing: ".03em",
+          fontSize: 10.5, fontWeight: 700, color: COLORS.sageDark, textTransform: "uppercase", letterSpacing: ".03em",
           whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
         }}>{label}</div>
         <div style={{
@@ -737,7 +738,7 @@ function BannerCarousel({ images }) {
       onPointerCancel={() => { pointerStartRef.current = null; }}
       style={{
       margin: "10px 10px 0", borderRadius: 16, overflow: "hidden", position: "relative", height: 84,
-      border: "1px solid rgba(255,255,255,0.55)", boxShadow: "0 8px 24px rgba(43,29,20,0.10)", flexShrink: 0,
+      border: "1px solid rgba(0,163,224,0.16)", boxShadow: "0 8px 24px rgba(0,91,133,0.10)", flexShrink: 0,
       cursor: validImages.length > 1 ? "pointer" : "default",
     }}>
       {validImages.map((url, i) => (
@@ -752,7 +753,7 @@ function BannerCarousel({ images }) {
                 boxShadow: "0 1px 3px rgba(0,0,0,.2)",
               }} />
             )) : (
-              <span style={{ padding: "2px 7px", borderRadius: 999, color: "#fff", background: "rgba(6,51,96,.58)", fontSize: 9.5, fontWeight: 700 }}>
+              <span style={{ padding: "2px 7px", borderRadius: 999, color: "#fff", background: "rgba(0,59,92,.68)", fontSize: 9.5, fontWeight: 700 }}>
                 {index + 1} / {validImages.length}
               </span>
             )}
@@ -772,7 +773,19 @@ function BrandLogo({ height = 64 }) {
       </div>
     );
   }
-  return <img src="/logo.png" alt="Zone 2 Reserve Bar" onError={() => setFailed(true)} style={{ height, width: "auto", display: "block" }} />;
+  // ไฟล์ต้นฉบับเป็น canvas จัตุรัสที่มีพื้นที่โปร่งใสรอบโลโก้ จึง crop ด้วย container
+  // เพื่อให้สัญลักษณ์มีขนาดชัดเจนทั้งใน splash และ header โดยไม่แก้คุณภาพไฟล์ต้นฉบับ
+  const sourceScale = height / 1352;
+  return (
+    <span style={{ position: "relative", display: "block", width: 1058 * sourceScale, height, overflow: "hidden", flexShrink: 0 }}>
+      <img
+        src="/logo-zone2.png"
+        alt="Zone 2"
+        onError={() => setFailed(true)}
+        style={{ position: "absolute", width: 2048 * sourceScale, height: 2048 * sourceScale, left: -495 * sourceScale, top: -348 * sourceScale, display: "block" }}
+      />
+    </span>
+  );
 }
 
 function LandingScreen() {
@@ -800,7 +813,7 @@ function LandingScreen() {
           position: "relative", zIndex: 1,
           animation: "logoReveal 1.4s cubic-bezier(0.22, 1, 0.36, 1) both, logoBreathe 3.2s ease-in-out 1.4s infinite",
         }}>
-          <BrandLogo height={330} />
+          <BrandLogo height={250} />
         </div>
       </div>
     </div>
@@ -811,8 +824,8 @@ function ClosedOrderScreen({ shopName, hasOrders, onOpenOrders }) {
   return (
     <main className="corder closed-order-page">
       <style>{GLOBAL_CSS}</style>
-      <div className="closed-order-glow" aria-hidden="true" style={{ width: 240, height: 240, top: "-90px", right: "-90px", background: "rgba(225,116,42,.15)" }} />
-      <div className="closed-order-glow" aria-hidden="true" style={{ width: 310, height: 310, bottom: "-150px", left: "-130px", background: "rgba(86,161,202,.13)", animationDelay: "-4s" }} />
+      <div className="closed-order-glow" aria-hidden="true" style={{ width: 240, height: 240, top: "-90px", right: "-90px", background: "rgba(255,255,255,.16)" }} />
+      <div className="closed-order-glow" aria-hidden="true" style={{ width: 310, height: 310, bottom: "-150px", left: "-130px", background: "rgba(0,163,224,.2)", animationDelay: "-4s" }} />
 
       <section className="closed-order-panel" aria-labelledby="closed-order-title">
         <div className="closed-order-brand">
@@ -1970,7 +1983,7 @@ export default function CustomerOrder({ shopUid }) {
           style={{
             position: "fixed", left: f.startX - 20, top: f.startY - 20, width: 40, height: 40,
             borderRadius: "50%", overflow: "hidden", zIndex: 999, pointerEvents: "none",
-            boxShadow: "0 4px 14px rgba(43,29,20,0.3)", border: "2px solid #fff",
+            boxShadow: "0 4px 14px rgba(0,59,92,0.28)", border: "2px solid #fff",
             background: f.imageUrl ? `url(${f.imageUrl}) center/cover` : `linear-gradient(135deg, ${COLORS.sage}, ${COLORS.espresso5})`,
             "--dx": `${f.dx}px`, "--dy": `${f.dy}px`,
             animation: "flyToCart .65s cubic-bezier(.3,.8,.4,1) forwards",
@@ -1980,24 +1993,24 @@ export default function CustomerOrder({ shopUid }) {
 
       <div className="zone-header" style={{
         margin: "10px 10px 0", height: 74, padding: "0 16px", borderRadius: 28,
-        background: "#F8F6F2", boxShadow: "0 8px 30px rgba(0,0,0,0.08)",
+        background: "#FFFFFF", border: "1px solid rgba(0,163,224,.16)", boxShadow: "0 8px 30px rgba(0,91,133,0.10)",
         display: "flex", alignItems: "center", justifyContent: "space-between",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
           <div className="zone-logo-shell" style={{
-            width: 44, height: 44, borderRadius: 14, background: "#fff", border: "1px solid #ECE8E2",
+            width: 44, height: 44, borderRadius: 14, background: "#fff", border: `1px solid ${COLORS.line}`,
             display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden",
           }}>
-            <BrandLogo height={28} />
+            <BrandLogo height={34} />
           </div>
           <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", lineHeight: 1.15, minWidth: 0 }}>
             <span style={{
-              fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 700, color: "#163B73",
+              fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 700, color: COLORS.espresso5,
               whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
             }}>{shopNameParts[0]}</span>
             {shopNameParts[1] && (
               <span style={{
-                fontSize: 12, letterSpacing: "0.12em", fontWeight: 500, color: "#7B7B7B", textTransform: "uppercase",
+                fontSize: 12, letterSpacing: "0.12em", fontWeight: 500, color: COLORS.espresso2, textTransform: "uppercase",
                 whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
               }}>{shopNameParts[1]}</span>
             )}
@@ -2008,16 +2021,16 @@ export default function CustomerOrder({ shopUid }) {
             className="zone-icon-btn"
             onClick={() => { triggerHeaderRipple(); openMyOrders(); }}
             style={{
-              width: 44, height: 44, borderRadius: 22, background: "#fff", border: "1px solid #ECE8E2",
-              boxShadow: "0 4px 14px rgba(0,0,0,0.06)", display: "flex", alignItems: "center", justifyContent: "center",
+              width: 44, height: 44, borderRadius: 22, background: "#fff", border: `1px solid ${COLORS.line}`,
+              boxShadow: "0 4px 14px rgba(0,91,133,0.08)", display: "flex", alignItems: "center", justifyContent: "center",
               position: "relative", flexShrink: 0,
             }}
           >
-            <i className="ti ti-receipt" style={{ fontSize: 19, color: "#163B73" }} aria-hidden="true"></i>
+            <i className="ti ti-receipt" style={{ fontSize: 19, color: COLORS.sageDark }} aria-hidden="true"></i>
             {hasActiveOrder && (
               <span style={{
                 position: "absolute", top: 3, right: 3, width: 11, height: 11, borderRadius: "50%",
-                background: "#FF7A00", border: "2px solid #fff",
+                background: PANTONE_299C, border: "2px solid #fff",
               }} />
             )}
             {headerRipple && <span className="offer-ripple" />}
@@ -2043,7 +2056,7 @@ export default function CustomerOrder({ shopUid }) {
                     display: "block", width: "calc(100% - 12px)", margin: "0 6px 6px", textAlign: "center", padding: "10px 6px", fontSize: 12.5,
                     lineHeight: 1.3, borderRadius: 11, background: active ? "rgba(255,255,255,0.75)" : "transparent",
                     color: active ? COLORS.espresso5 : COLORS.espresso2, fontWeight: active ? 600 : 500, border: "none",
-                    boxShadow: active ? "0 2px 8px rgba(43,29,20,0.10)" : "none",
+                    boxShadow: active ? "0 2px 8px rgba(0,91,133,0.10)" : "none",
                   }}
                 >
                   {cat}
@@ -2063,11 +2076,11 @@ export default function CustomerOrder({ shopUid }) {
                         className="offer-arrow-btn"
                         onClick={() => { triggerOfferRipple("__nav__"); scrollOfferCarousel(1); }}
                         style={{
-                          width: 40, height: 40, borderRadius: "50%", background: "#E4F5E8", border: "none",
+                          width: 40, height: 40, borderRadius: "50%", background: COLORS.sageLight, border: "none",
                           display: "flex", alignItems: "center", justifyContent: "center", position: "relative", overflow: "hidden", flexShrink: 0,
                         }}
                       >
-                        <i className="ti ti-arrow-right" style={{ fontSize: 18, color: COLORS.success }} aria-hidden="true"></i>
+                        <i className="ti ti-arrow-right" style={{ fontSize: 18, color: COLORS.sageDark }} aria-hidden="true"></i>
                         {offerRippleId === "__nav__" && <span className="offer-ripple" />}
                       </button>
                     </div>
@@ -2244,10 +2257,10 @@ export default function CustomerOrder({ shopUid }) {
       {cartCount > 0 && (
         <div style={{
           position: "fixed", left: 16, right: 16, bottom: 16, maxWidth: 420, margin: "0 auto",
-          background: "rgba(43,29,20,0.62)", backdropFilter: "blur(20px) saturate(180%)", WebkitBackdropFilter: "blur(20px) saturate(180%)",
+          background: "rgba(0,59,92,0.92)", backdropFilter: "blur(20px) saturate(180%)", WebkitBackdropFilter: "blur(20px) saturate(180%)",
           border: "1px solid rgba(255,255,255,0.15)", color: "#fff", borderRadius: 16,
           padding: "12px 14px 12px 18px", display: "flex", alignItems: "center", justifyContent: "space-between",
-          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.15), 0 8px 24px rgba(43,29,20,0.35)", animation: "fadeIn .2s ease",
+          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.18), 0 8px 24px rgba(0,59,92,0.3)", animation: "fadeIn .2s ease",
         }}>
           <button
             onClick={() => setShowCart(true)}
@@ -2265,7 +2278,7 @@ export default function CustomerOrder({ shopUid }) {
           </button>
           <button
             onClick={() => { setError(""); setStep("phone"); }}
-            style={{ background: COLORS.sage, color: "#fff", border: "none", borderRadius: 10, padding: "10px 22px", fontSize: 13.5, fontWeight: 600 }}
+            style={{ background: COLORS.sage, color: COLORS.espresso5, border: "none", borderRadius: 10, padding: "10px 22px", fontSize: 13.5, fontWeight: 700 }}
           >
             สั่งซื้อ
           </button>
