@@ -487,7 +487,7 @@ const GLOBAL_CSS = `
   html[data-theme="dark"] .corder .zone-logo-shell div { color: #003B5C !important; }
   html[data-theme="dark"] .corder .customer-category-nav { background: rgba(15,24,36,.82) !important; border-color: rgba(148,163,184,.16) !important; }
   html[data-theme="dark"] .corder .customer-category-tab { color: #A9B5C5 !important; }
-  html[data-theme="dark"] .corder .customer-category-tab.active { background: #26364A !important; color: #F4F7FB !important; box-shadow: 0 3px 10px rgba(0,0,0,.28) !important; }
+  html[data-theme="dark"] .corder .customer-category-tab.active { background: #00A3E0 !important; color: #FFFFFF !important; box-shadow: 0 5px 14px rgba(0,163,224,.28) !important; }
   html[data-theme="dark"] .corder .customer-option-choice { background: #172333 !important; color: #E7ECF3 !important; border-color: #344256 !important; }
   html[data-theme="dark"] .corder .customer-option-choice.selected { background: rgba(0,163,224,.24) !important; color: #E9F9FE !important; border-color: #00A3E0 !important; }
   html[data-theme="dark"] .corder .customer-option-choice [style*="color"] { color: #B8C4D2 !important; }
@@ -2542,9 +2542,9 @@ export default function CustomerOrder({ shopUid }) {
                   onClick={() => scrollToCategory(cat)}
                   style={{
                     display: "block", width: "calc(100% - 12px)", margin: "0 6px 6px", textAlign: "center", padding: "10px 6px", fontSize: 12.5,
-                    lineHeight: 1.3, borderRadius: 11, background: active ? "rgba(255,255,255,0.75)" : "transparent",
-                    color: active ? COLORS.espresso5 : COLORS.espresso2, fontWeight: active ? 600 : 500, border: "none",
-                    boxShadow: active ? "0 2px 8px rgba(0,91,133,0.10)" : "none",
+                    lineHeight: 1.3, borderRadius: 11, background: active ? COLORS.sage : "transparent",
+                    color: active ? "#FFFFFF" : COLORS.espresso2, fontWeight: active ? 700 : 500, border: "none",
+                    boxShadow: active ? "0 5px 14px rgba(0,163,224,0.28)" : "none",
                   }}
                 >
                   {cat}
@@ -2596,12 +2596,6 @@ export default function CustomerOrder({ shopUid }) {
                             <div style={{ marginTop:3, fontSize:9.5, opacity:.76 }}>ราคา Pass ทั้งแพ็ก</div>
                             <strong style={{ display:"block", marginTop:1, fontSize:27, lineHeight:1, whiteSpace:"nowrap" }}>฿{money(coffeePassBenefit.passPrice)}</strong>
                           </div>
-                          {coffeePassBenefit.savingsMax > 0 && (
-                            <div style={{ flex:"0 0 auto", marginLeft:"auto", paddingLeft:10, borderLeft:"1px solid rgba(255,255,255,.2)", textAlign:"right" }}>
-                              <div style={{ fontSize:9.5, opacity:.75 }}>ประหยัดสูงสุด</div>
-                              <strong style={{ display:"block", marginTop:1, color:"#fff", fontSize:17, whiteSpace:"nowrap" }}>฿{money(coffeePassBenefit.savingsMax)}</strong>
-                            </div>
-                          )}
                         </div>
 
                         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(68px, 1fr))", gap:6, marginTop:9 }}>
@@ -2637,9 +2631,6 @@ export default function CustomerOrder({ shopUid }) {
                       <div style={{ ...GLASS_PANEL, margin:"0 10px 14px", padding:14, borderRadius:16 }}>
                         <div style={{ color:COLORS.espresso5, fontSize:14, fontWeight:800 }}>สิทธิประโยชน์</div>
                         <ul style={{ margin:"8px 0 0", paddingLeft:20, color:COLORS.espresso4, fontSize:11.5, lineHeight:1.65 }}>
-                          {coffeePassBenefit.savingsMax > 0 && (
-                            <li><strong>ประหยัดสูงสุด {money(coffeePassBenefit.savingsMax)} บาท</strong> เทียบกับซื้อเมนูที่ร่วมรายการครบ {coffeePassBenefit.uses} แก้วในราคาปกติ</li>
-                          )}
                           <li>เฉลี่ยเพียง <strong>{money(coffeePassBenefit.perCup)} บาทต่อแก้ว</strong></li>
                           <li>รับเครื่องดื่ม {coffeePass.uses} แก้ว ภายใน {coffeePass.validityDays} วันหลังร้านเปิดใช้งาน</li>
                           <li>ใช้ได้ครั้งละ 1 แก้วกับเมนูที่ร่วมรายการ</li>
