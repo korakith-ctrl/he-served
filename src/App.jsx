@@ -25,6 +25,7 @@ const PRODUCT_TYPES = [
 ];
 
 function productTypeOf(item) {
+  if (item?.productType === "pass") return "pass";
   if (item?.productType === "food") return "food";
   if (item?.productType === "drink") return "drink";
   return /ขนมปัง|เบเกอรี่|อาหาร|toast|bread|bakery/i.test(item?.category || "") ? "food" : "drink";
@@ -299,7 +300,7 @@ function defaultState() {
     menus,
     sales: [],
     purchases: [],
-    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true, slipTestMode: false, bannerImageUrl: "", bannerImageUrls: [], categoryOrder: [], defaultPackagingLines: [], loyaltyBeanGoal: 10, seasonalEffect: "auto", coffeePass: { name: "Coffee Pass", enabled: false, days: 5, discountPercent: 10, menuIds: [] } },
+    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true, slipTestMode: false, bannerImageUrl: "", bannerImageUrls: [], categoryOrder: [], defaultPackagingLines: [], loyaltyBeanGoal: 10, seasonalEffect: "auto", coffeePass: { name: "Coffee Pass", enabled: false, uses: 5, price: 250, validityDays: 30, menuIds: [] } },
     optionGroups,
     promotions: [],
   };
@@ -370,9 +371,10 @@ function normalizeData(raw) {
       coffeePass: {
         name: String(raw.settings?.coffeePass?.name || "Coffee Pass"),
         enabled: raw.settings?.coffeePass?.enabled === true,
-        days: Math.min(30, Math.max(2, Number(raw.settings?.coffeePass?.days) || 5)),
-        discountPercent: Math.min(50, Math.max(1, Number(raw.settings?.coffeePass?.discountPercent) || 10)),
-        menuIds: (raw.settings?.coffeePass?.menuIds || []).filter(Boolean),
+        uses: Math.min(100, Math.max(1, Number(raw.settings?.coffeePass?.uses ?? raw.settings?.coffeePass?.days) || 5)),
+        price: Math.max(0, Number.isFinite(Number(raw.settings?.coffeePass?.price)) ? Number(raw.settings.coffeePass.price) : 250),
+        validityDays: Math.min(365, Math.max(1, Number(raw.settings?.coffeePass?.validityDays) || 30)),
+        menuIds: (Array.isArray(raw.settings?.coffeePass?.menuIds) ? raw.settings.coffeePass.menuIds : Object.values(raw.settings?.coffeePass?.menuIds || {})).filter(Boolean),
       },
     },
     optionGroups: (raw.optionGroups || []).filter(Boolean).map((g) => ({
@@ -1300,6 +1302,26 @@ function ShopApp({ uid, user, theme, onToggleTheme }) {
   // กลับมา "รอยืนยัน" ก่อนกดยกเลิกก็ตาม) ต้องคืนสต็อกและลบยอดขายที่ผูกกับออเดอร์นี้ออกด้วย ไม่งั้นยอดขาย/สต็อกจะเพี้ยนค้างอยู่
   // ทั้งที่ออเดอร์ถูกยกเลิกไปแล้ว — ถ้ายังไม่เคยบันทึกยอดขาย (ยังไม่ผ่าน preparing) ก็แค่เปลี่ยนสถานะเฉยๆ เหมือนเดิม
   function cancelOrder(order) {
+    if (order.passRedemption?.passId) {
+      const phoneKey = normalizeThaiPhone(order.customerPhone);
+      if (phoneKey) {
+        const passRef = ref(db, `customers/${uid}/${phoneKey}/passes/${order.passRedemption.passId}`);
+        runTransaction(passRef, (current) => {
+          if (!current) return current;
+          const restoredRedemptions = current.restoredRedemptions || {};
+          if (restoredRedemptions[order.id]) return current;
+          const totalUses = Math.max(1, Number(current.totalUses) || 1);
+          const remainingUses = Math.min(totalUses, (Number(current.remainingUses) || 0) + 1);
+          return {
+            ...current,
+            remainingUses,
+            status: remainingUses > 0 ? "active" : current.status,
+            restoredRedemptions: { ...restoredRedemptions, [order.id]: { restoredAt: Date.now(), restoredBy: uid } },
+            updatedAt: Date.now(),
+          };
+        }).catch((err) => showToast("คืนสิทธิ์ Pass ไม่สำเร็จ: " + err.message));
+      }
+    }
     if (order.saleRecorded) {
       updateData((next) => {
         const nextIngredientsById = {};
@@ -1453,6 +1475,11 @@ function ShopApp({ uid, user, theme, onToggleTheme }) {
     });
     if (!result.committed) throw new Error("เพิ่มลูกค้าไม่สำเร็จ");
     return result.snapshot.val();
+  }
+
+  async function resetCustomerPasscode(customerPhone, passId, newPasscode) {
+    const resetPasscode = httpsCallable(cloudFunctions, "resetCoffeePassPasscode");
+    await resetPasscode({ shopUid: uid, customerPhone, passId, newPasscode });
   }
 
   function updateLoyaltyGoal(goal) {
@@ -1690,7 +1717,7 @@ function ShopApp({ uid, user, theme, onToggleTheme }) {
           {tab === "ingredients" && <IngredientsPanel uid={uid} data={data} updateData={updateData} showToast={showToast} onSaveAccounting={saveAccountingTransaction} isAccountingPeriodClosed={isAccountingPeriodClosed} />}
           {tab === "reports" && <ReportsPanel data={dataForDisplay} orders={orders} shopName={data.settings.shopName} showToast={showToast} />}
           {tab === "accounting" && <AccountingPanel transactions={accountingTransactions} assets={accountingAssets} recurringExpenses={recurringExpenses} accounts={accountingAccounts} reconciliations={accountReconciliations} ownerReimbursements={ownerReimbursements} ownerCapitalMovements={ownerCapitalMovements} accountingSettings={accountingSettings} periodClosings={accountingPeriodClosings} sales={dataForDisplay.sales} overheadPerCup={data.settings.overheadPerCup} onSave={saveAccountingTransaction} onDelete={deleteAccountingTransaction} onSaveAsset={saveAccountingAsset} onDeleteAsset={deleteAccountingAsset} onSaveRecurring={saveRecurringExpense} onDeleteRecurring={deleteRecurringExpense} onUpdateOccurrence={updateRecurringOccurrence} onUpdateAccount={updateAccountingAccount} onSaveReconciliation={saveAccountReconciliation} onSaveOwnerReimbursement={saveOwnerReimbursement} onDeleteOwnerReimbursement={deleteOwnerReimbursement} onSaveOwnerCapitalMovement={saveOwnerCapitalMovement} onDeleteOwnerCapitalMovement={deleteOwnerCapitalMovement} onSaveSettings={saveAccountingSettings} onSetPeriodClosed={setAccountingPeriodClosed} showToast={showToast} />}
-          {tab === "loyalty" && <LoyaltyPanel customers={customers} orders={orders} loyaltyBeanGoal={data.settings.loyaltyBeanGoal} adjustCustomerBeans={adjustCustomerBeans} createLoyaltyCustomer={createLoyaltyCustomer} updateLoyaltyGoal={updateLoyaltyGoal} showToast={showToast} backfillEligibleCount={backfillEligibleOrders.length} backfillLoyaltyBeans={backfillLoyaltyBeans} />}
+          {tab === "loyalty" && <LoyaltyPanel customers={customers} orders={orders} loyaltyBeanGoal={data.settings.loyaltyBeanGoal} adjustCustomerBeans={adjustCustomerBeans} createLoyaltyCustomer={createLoyaltyCustomer} resetCustomerPasscode={resetCustomerPasscode} updateLoyaltyGoal={updateLoyaltyGoal} showToast={showToast} backfillEligibleCount={backfillEligibleOrders.length} backfillLoyaltyBeans={backfillLoyaltyBeans} />}
           {tab === "options" && <OptionGroupsPanel data={data} updateData={updateData} showToast={showToast} />}
           {tab === "settings" && <SettingsPanel data={data} updateData={updateData} showToast={showToast} uid={uid} />}
         </main>
@@ -2749,7 +2776,7 @@ function TierBadge({ lifetimeBeans, size }) {
   );
 }
 
-function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans, createLoyaltyCustomer, updateLoyaltyGoal, showToast, backfillEligibleCount, backfillLoyaltyBeans }) {
+function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans, createLoyaltyCustomer, resetCustomerPasscode, updateLoyaltyGoal, showToast, backfillEligibleCount, backfillLoyaltyBeans }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [tierFilter, setTierFilter] = useState("all");
@@ -2944,7 +2971,7 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans,
         </div>
       )}
 
-      {detailCustomer && <LoyaltyDetailDrawer customer={detailCustomer} orders={orders} loyaltyBeanGoal={loyaltyBeanGoal} onClose={()=>setDetailPhone(null)} onAdjust={()=>{setDetailPhone(null);setAdjustFor(detailCustomer);}} />}
+      {detailCustomer && <LoyaltyDetailDrawer customer={detailCustomer} orders={orders} loyaltyBeanGoal={loyaltyBeanGoal} onResetPasscode={resetCustomerPasscode} showToast={showToast} onClose={()=>setDetailPhone(null)} onAdjust={()=>{setDetailPhone(null);setAdjustFor(detailCustomer);}} />}
 
       {adjustFor && <div className="loy-modal-backdrop" onClick={()=>setAdjustFor(null)}><div className="loy-modal" role="dialog" aria-modal="true" aria-label={`ปรับเมล็ด ${adjustFor.name||adjustFor.phone}`} onClick={(e)=>e.stopPropagation()}><h3 style={{margin:"0 0 4px",color:POS.navy}}>ปรับเมล็ด — {adjustFor.name||adjustFor.phone}</h3><p style={{margin:"0 0 14px",fontSize:12,color:POS.gray}}>ปัจจุบัน {adjustFor.beans||0} เมล็ด</p><input className="loy-field" value={adjustAmount} onChange={(e)=>setAdjustAmount(e.target.value)} inputMode="numeric"/><div style={{display:"flex",gap:8,marginTop:14}}><button className="cbtn cbtn-accent" style={{flex:1}} onClick={()=>submitAdjust(1)}>+ เพิ่ม</button><button className="cbtn cbtn-danger" style={{flex:1}} onClick={()=>submitAdjust(-1)}>− หัก</button></div></div></div>}
 
@@ -2958,8 +2985,13 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans,
 }
 
 // Drawer โปรไฟล์ลูกค้า — เก็บข้อมูลสำคัญและ audit trail ไว้ในหน้าเดียวโดยไม่พาผู้ใช้หลุดจากตาราง CRM
-function LoyaltyDetailDrawer({ customer, orders, loyaltyBeanGoal, onClose, onAdjust }) {
+function LoyaltyDetailDrawer({ customer, orders, loyaltyBeanGoal, onResetPasscode, showToast, onClose, onAdjust }) {
   useEscape(onClose);
+  const [resetPassId, setResetPassId] = useState(null);
+  const [newPasscode, setNewPasscode] = useState("");
+  const [confirmPasscode, setConfirmPasscode] = useState("");
+  const [passcodeError, setPasscodeError] = useState("");
+  const [resettingPasscode, setResettingPasscode] = useState(false);
   const normalizedPhone = normalizeThaiPhone(customer.phone);
   const last9 = normalizedPhone.slice(-9);
   const matches = useMemo(() => (orders || [])
@@ -2979,6 +3011,26 @@ function LoyaltyDetailDrawer({ customer, orders, loyaltyBeanGoal, onClose, onAdj
   const progress = Math.min(100, (beans / Math.max(1, loyaltyBeanGoal)) * 100);
   const redeemedCount = Number(customer.redeemedCount || customer.rewardsRedeemed) || 0;
   const nextTier = loyaltyNextTier(lifetimeBeans);
+  const customerPasses = Object.entries(customer.passes || {}).map(([id, pass]) => ({ ...(pass || {}), id: pass?.id || id }))
+    .sort((a, b) => (Number(b.activatedAt) || 0) - (Number(a.activatedAt) || 0));
+
+  async function submitPasscodeReset(passId) {
+    setPasscodeError("");
+    if (!/^\d{6}$/.test(newPasscode)) { setPasscodeError("กรุณากรอก Passcode เป็นตัวเลข 6 หลัก"); return; }
+    if (newPasscode !== confirmPasscode) { setPasscodeError("Passcode และรหัสยืนยันไม่ตรงกัน"); return; }
+    setResettingPasscode(true);
+    try {
+      await onResetPasscode(normalizedPhone, passId, newPasscode);
+      setResetPassId(null);
+      setNewPasscode("");
+      setConfirmPasscode("");
+      showToast("ตั้ง Passcode ใหม่ให้ลูกค้าแล้ว");
+    } catch (error) {
+      setPasscodeError(error.message || "รีเซ็ต Passcode ไม่สำเร็จ");
+    } finally {
+      setResettingPasscode(false);
+    }
+  }
 
   return (
     <div className="loy-drawer-backdrop" onClick={onClose}>
@@ -3025,6 +3077,34 @@ function LoyaltyDetailDrawer({ customer, orders, loyaltyBeanGoal, onClose, onAdj
             <div className="loy-profile-stat"><div style={{ fontSize:10.5, color:POS.gray }}>ซื้อสำเร็จ</div><b style={{ display:"block", marginTop:3, color:POS.navy, fontSize:17 }}>{completedCups} แก้ว</b></div>
             <div className="loy-profile-stat"><div style={{ fontSize:10.5, color:POS.gray }}>แลกแล้ว</div><b style={{ display:"block", marginTop:3, color:POS.navy, fontSize:17 }}>{redeemedCount} ครั้ง</b></div>
           </div>
+
+          <section style={{ marginBottom:20 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:10, marginBottom:9 }}>
+              <h4 style={{ margin:0, color:POS.navy, fontSize:14 }}>Coffee Pass</h4>
+              <span style={{ color:POS.gray, fontSize:11.5 }}>{customerPasses.length} รายการ</span>
+            </div>
+            {customerPasses.length === 0 ? <EmptyNote text="ลูกค้ายังไม่มี Coffee Pass" /> : customerPasses.map((pass) => {
+              const expired = Number(pass.expiresAt) < Date.now();
+              const exhausted = Number(pass.remainingUses) <= 0;
+              const active = !expired && !exhausted && pass.status !== "cancelled";
+              const editing = resetPassId === pass.id;
+              return <div key={pass.id} style={{ marginBottom:8, padding:"11px 12px", border:`1px solid ${active ? "var(--sage)" : POS.border}`, borderRadius:12, background:active ? "var(--sage-light)" : "var(--cream-2)", opacity:active ? 1 : .62 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", gap:10, alignItems:"flex-start" }}>
+                  <div><b style={{ display:"block", color:POS.navy, fontSize:12.5 }}>{pass.packageName || "Coffee Pass"}</b><div style={{ marginTop:3, color:POS.gray, fontSize:10.5 }}>หมดอายุ {pass.expiresAt ? new Date(Number(pass.expiresAt)).toLocaleDateString("th-TH", { day:"numeric", month:"short", year:"numeric" }) : "-"}</div></div>
+                  <div style={{ textAlign:"right" }}><b style={{ color:active ? "var(--sage-dark)" : POS.gray, fontSize:13 }}>{Number(pass.remainingUses) || 0}/{Number(pass.totalUses) || 0} สิทธิ์</b><div style={{ marginTop:2, color:active ? "#15803D" : POS.gray, fontSize:10, fontWeight:700 }}>{active ? "ใช้งานได้" : expired ? "หมดอายุ" : exhausted ? "ใช้ครบแล้ว" : "ยกเลิก"}</div></div>
+                </div>
+                {!editing ? <button type="button" className="cbtn" style={{ width:"100%", marginTop:9, fontSize:11.5 }} onClick={() => { setResetPassId(pass.id); setNewPasscode(""); setConfirmPasscode(""); setPasscodeError(""); }}>ตั้ง Passcode ใหม่</button> : <div style={{ marginTop:9, paddingTop:9, borderTop:`1px solid ${POS.border}` }}>
+                  <div style={{ color:POS.gray, fontSize:10.5, marginBottom:6 }}>แอดมินดูรหัสเดิมไม่ได้ สามารถกำหนดรหัสใหม่ให้ลูกค้าได้เท่านั้น</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:7 }}>
+                    <input className="loy-field" style={{ textAlign:"center", letterSpacing:".18em" }} type="password" inputMode="numeric" maxLength={6} value={newPasscode} onChange={(event)=>setNewPasscode(event.target.value.replace(/\D/g, "").slice(0,6))} placeholder="รหัสใหม่" />
+                    <input className="loy-field" style={{ textAlign:"center", letterSpacing:".18em" }} type="password" inputMode="numeric" maxLength={6} value={confirmPasscode} onChange={(event)=>setConfirmPasscode(event.target.value.replace(/\D/g, "").slice(0,6))} placeholder="ยืนยันรหัส" />
+                  </div>
+                  {passcodeError && <div style={{ marginTop:6, color:"var(--danger)", fontSize:10.5 }}>{passcodeError}</div>}
+                  <div style={{ display:"flex", gap:7, marginTop:8 }}><button type="button" className="cbtn" style={{ flex:1 }} disabled={resettingPasscode} onClick={()=>setResetPassId(null)}>ยกเลิก</button><button type="button" className="cbtn cbtn-accent" style={{ flex:1 }} disabled={resettingPasscode} onClick={()=>submitPasscodeReset(pass.id)}>{resettingPasscode ? "กำลังบันทึก..." : "บันทึกรหัสใหม่"}</button></div>
+                </div>}
+              </div>;
+            })}
+          </section>
 
           {variants.length > 0 && <div style={{ marginBottom:16, padding:"10px 12px", borderRadius:11, background:"var(--warning-light)", border:"1px solid #FBD5B5", color:"var(--warning-text)", fontSize:11.5 }}><b>พบ {variants.length} ออเดอร์ที่ใช้รูปแบบเบอร์ต่างกัน</b><div style={{ marginTop:3 }}>ตรวจสอบก่อนปรับเมล็ดด้วยตนเอง เพื่อป้องกันการนับผิดคน</div></div>}
 
@@ -3075,9 +3155,9 @@ const STATUS_COLORS = {
   done: { dot: "#16A34A", bg: "#16A34A", color: "#fff", solid: true },
   cancelled: { dot: "#DC2626", bg: "rgba(220,38,38,0.16)", color: "var(--danger)" },
 };
-const PAYMENT_METHOD_LABEL = { cash: "เงินสด", promptpay: "พร้อมเพย์", thaihelpthai: "ไทยช่วยไทย" };
+const PAYMENT_METHOD_LABEL = { cash: "เงินสด", promptpay: "พร้อมเพย์", thaihelpthai: "ไทยช่วยไทย", "coffee-pass": "Coffee Pass" };
 // วิธีชำระที่จ่ายหน้าร้านโดยตรง ไม่มีสลิปให้ตรวจสอบ — พฤติกรรมเหมือนเงินสดทุกอย่าง
-const CASH_LIKE_PAYMENT_METHODS = new Set(["cash", "thaihelpthai"]);
+const CASH_LIKE_PAYMENT_METHODS = new Set(["cash", "thaihelpthai", "coffee-pass"]);
 
 function StatusBadge({ status, big }) {
   const c = STATUS_COLORS[status] || { dot: "#8B98A5", bg: "var(--cream-2)", color: "var(--espresso-3)" };
@@ -3451,7 +3531,17 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, 
     }
   }
 
-  function confirmPaid(order) {
+  async function confirmPaid(order) {
+    if (order.coffeePassPurchase) {
+      try {
+        const activatePass = httpsCallable(cloudFunctions, "activateCoffeePassPurchase");
+        await activatePass({ shopUid: uid, orderId: order.id });
+        showToast(`เปิดใช้งาน ${order.coffeePassPurchase.name || "Coffee Pass"} ให้ ${order.customerName || order.customerPhone} แล้ว`);
+      } catch (error) {
+        showToast("เปิดใช้งาน Pass ไม่สำเร็จ: " + (error.message || error));
+      }
+      return;
+    }
     // ถ้าเคยบันทึกยอดขายไปแล้ว (ลากการ์ดออกจาก "รอยืนยัน" แล้วลากกลับมาใหม่โดยไม่ได้กดยกเลิก) แค่เปลี่ยนสถานะเฉยๆ
     // ห้ามบันทึกยอดขาย/ตัดสต็อกซ้ำอีกรอบ ไม่งั้นยอดขายจะเพี้ยนสูงเกินจริง
     if (order.saleRecorded) {
@@ -3738,7 +3828,9 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, 
                         {new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}
                       </div>
                     )}
-                    <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} paymentVerified={o.paymentVerified} paymentVerifiedBy={o.paymentVerifiedBy} compact={compact} onEditPickupDate={o.coffeePass ? undefined : () => setEditingPickupDate(o)} />
+                    <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.coffeePassPurchase ? null : o.pickupDate} paymentVerified={o.paymentVerified} paymentVerifiedBy={o.paymentVerifiedBy} compact={compact} onEditPickupDate={o.coffeePass || o.coffeePassPurchase ? undefined : () => setEditingPickupDate(o)} />
+                    {o.coffeePassPurchase && <div style={{ margin:compact ? "4px 0" : "7px 0", padding:compact ? 6 : 9, borderRadius:9, background:"var(--sage-light)", color:"var(--espresso-4)", fontSize:compact ? 9.5 : 11.5, fontWeight:700 }}>{o.coffeePassPurchase.uses} สิทธิ์ · อายุ {o.coffeePassPurchase.validityDays} วัน · ยืนยันแล้วสิทธิ์เข้าตามเบอร์โทร</div>}
+                    {o.passRedemption && <div style={{ margin:compact ? "4px 0" : "7px 0", padding:compact ? 6 : 9, borderRadius:9, background:"var(--sage-light)", color:"var(--espresso-4)", fontSize:compact ? 9.5 : 11.5, fontWeight:700 }}>ใช้ {o.passRedemption.packageName || "Coffee Pass"} 1 สิทธิ์{Number(o.passRedemption.optionTotal) > 0 ? ` · ค่าส่วนเพิ่ม ฿${money(o.passRedemption.optionTotal)}` : ""}</div>}
                     <OrderItemLines
                       items={o.items} note={o.note} compact={compact}
                       onEditItem={col.id === "pending" ? (idx) => setEditingItem({ order: o, itemIdx: idx }) : undefined}
@@ -3746,7 +3838,7 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, 
                     {o.coffeePass?.deliveryDates && (
                       <div style={{ margin: compact ? "5px 0" : "8px 0", padding: compact ? 6 : 9, borderRadius: 9, background: "var(--sage-light)", border: "1px solid var(--sage)" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 5, color: "var(--espresso-4)", fontSize: compact ? 9.5 : 11, fontWeight: 700 }}>
-                          <span>{o.coffeePass.name || "Coffee Pass"} {o.coffeePass.days} วัน</span>
+                          <span>{o.coffeePass.name || "Coffee Pass"} {o.coffeePass.days} วัน{o.coffeePass.skipWeekends ? " · จ.–ศ." : ""}</span>
                           <span>ลด {o.coffeePass.discountPercent}%</span>
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>
@@ -8426,30 +8518,26 @@ function SettingsField({ label, error, suffix, children }) {
 }
 
 function CoffeePassPanel({ data, orders, updateData, showToast }) {
-  const saved = data.settings.coffeePass || { name: "Coffee Pass", enabled: false, days: 5, discountPercent: 10, menuIds: [] };
+  const saved = data.settings.coffeePass || { name: "Coffee Pass", enabled: false, uses: 5, price: 250, validityDays: 30, menuIds: [] };
   const drinkMenus = useMemo(() => data.menus.filter((menu) => productTypeOf(menu) === "drink"), [data.menus]);
   const [name, setName] = useState(saved.name || "Coffee Pass");
   const [enabled, setEnabled] = useState(saved.enabled === true);
-  const [days, setDays] = useState(String(saved.days || 5));
-  const [discount, setDiscount] = useState(String(saved.discountPercent || 10));
+  const [uses, setUses] = useState(String(saved.uses || 5));
+  const [price, setPrice] = useState(String(saved.price ?? 250));
+  const [validityDays, setValidityDays] = useState(String(saved.validityDays || 30));
   const [allMenus, setAllMenus] = useState((saved.menuIds || []).length === 0);
   const [menuIds, setMenuIds] = useState(saved.menuIds || []);
 
-  const daysNum = Number(days);
-  const discountNum = Number(discount);
-  const valid = name.trim() && Number.isInteger(daysNum) && daysNum >= 2 && daysNum <= 30 && Number.isFinite(discountNum) && discountNum >= 1 && discountNum <= 50 && (allMenus || menuIds.length > 0);
+  const usesNum = Number(uses);
+  const priceNum = Number(price);
+  const validityNum = Number(validityDays);
+  const valid = name.trim() && Number.isInteger(usesNum) && usesNum >= 1 && usesNum <= 100 && Number.isFinite(priceNum) && priceNum >= 0 && Number.isInteger(validityNum) && validityNum >= 1 && validityNum <= 365 && (allMenus || menuIds.length > 0);
   const normalizedMenuIds = allMenus ? [] : menuIds;
-  const dirty = name.trim() !== (saved.name || "Coffee Pass") || enabled !== (saved.enabled === true) || days !== String(saved.days || 5) || discount !== String(saved.discountPercent || 10) || JSON.stringify(normalizedMenuIds) !== JSON.stringify(saved.menuIds || []);
+  const dirty = name.trim() !== (saved.name || "Coffee Pass") || enabled !== (saved.enabled === true) || uses !== String(saved.uses || 5) || price !== String(saved.price ?? 250) || validityDays !== String(saved.validityDays || 30) || JSON.stringify(normalizedMenuIds) !== JSON.stringify(saved.menuIds || []);
 
-  const passOrders = (orders || []).filter((order) => order.coffeePass);
-  const activePasses = passOrders.filter((order) => !["done", "cancelled"].includes(order.status));
-  const collectedCount = passOrders.reduce((sum, order) => {
-    const entries = Array.isArray(order.coffeePass?.deliveryDates) ? order.coffeePass.deliveryDates : Object.values(order.coffeePass?.deliveryDates || {});
-    return sum + entries.filter((entry) => entry.status === "collected").length;
-  }, 0);
-  const sampleMenu = drinkMenus.find((menu) => allMenus || menuIds.includes(menu.id)) || drinkMenus[0];
-  const sampleUnitPrice = sampleMenu ? Math.round(sampleMenu.priceStore * (1 - (discountNum || 0) / 100) * 100) / 100 : 0;
-  const sampleTotal = Math.round(sampleUnitPrice * (daysNum || 0) * 100) / 100;
+  const passOrders = (orders || []).filter((order) => order.coffeePassPurchase);
+  const activatedPasses = passOrders.filter((order) => order.coffeePassActivated && order.status !== "cancelled");
+  const redemptionCount = (orders || []).filter((order) => order.passRedemption && order.status !== "cancelled").length;
 
   function toggleMenu(menuId) {
     setMenuIds((ids) => ids.includes(menuId) ? ids.filter((id) => id !== menuId) : [...ids, menuId]);
@@ -8459,7 +8547,7 @@ function CoffeePassPanel({ data, orders, updateData, showToast }) {
     if (!valid) return;
     updateData((next) => {
       next.settings.coffeePass = {
-        name: name.trim(), enabled, days: daysNum, discountPercent: discountNum, menuIds: normalizedMenuIds,
+        name: name.trim(), enabled, uses: usesNum, price: priceNum, validityDays: validityNum, menuIds: normalizedMenuIds,
       };
     });
     showToast(enabled ? "บันทึกและเปิดขายแพ็กเกจแล้ว" : "บันทึกแพ็กเกจแล้ว");
@@ -8486,9 +8574,9 @@ function CoffeePassPanel({ data, orders, updateData, showToast }) {
 
       <div className="pkg-head">
         <div>
-          <p style={{ margin:0, color:"var(--sage-dark)", fontSize:11.5, fontWeight:800, letterSpacing:".08em", textTransform:"uppercase" }}>Subscriptions</p>
+          <p style={{ margin:0, color:"var(--sage-dark)", fontSize:11.5, fontWeight:800, letterSpacing:".08em", textTransform:"uppercase" }}>Stored-use passes</p>
           <h1 style={{ margin:"3px 0 4px", color:"var(--espresso-5)", fontFamily:"var(--f-display)", fontSize:26 }}>สร้างแพ็กเกจ Coffee Pass</h1>
-          <p style={{ margin:0, color:"var(--espresso-2)", fontSize:13 }}>ลูกค้าชำระล่วงหน้าครั้งเดียว รับเมนูและตัวเลือกเดิมวันละ 1 แก้ว</p>
+          <p style={{ margin:0, color:"var(--espresso-2)", fontSize:13 }}>ลูกค้าซื้อสิทธิ์ล่วงหน้า แล้วกดใช้ครั้งละ 1 สิทธิ์ได้ก่อนวันหมดอายุ</p>
         </div>
         <span style={{ padding:"7px 11px", borderRadius:999, color:enabled ? "var(--success-dark)" : "var(--espresso-2)", background:enabled ? "var(--success-light)" : "var(--cream-2)", fontSize:12, fontWeight:800 }}>
           {enabled ? "● เปิดขายอยู่" : "○ ยังไม่เปิดขาย"}
@@ -8505,10 +8593,11 @@ function CoffeePassPanel({ data, orders, updateData, showToast }) {
           <label className="pkg-label">ชื่อแพ็กเกจ</label>
           <TextField className="cfield" style={{ height:44, marginBottom:14 }} value={name} onChange={setName} placeholder="เช่น Weekday Coffee Pass" />
           <div className="pkg-fields">
-            <div><label className="pkg-label">จำนวนวัน</label><input className="cfield" style={{ height:44 }} type="number" min="2" max="30" value={days} onChange={(event) => setDays(event.target.value)} /></div>
-            <div><label className="pkg-label">ส่วนลด (%)</label><input className="cfield" style={{ height:44 }} type="number" min="1" max="50" value={discount} onChange={(event) => setDiscount(event.target.value)} /></div>
+            <div><label className="pkg-label">จำนวนสิทธิ์</label><input className="cfield" style={{ height:44 }} type="number" min="1" max="100" value={uses} onChange={(event) => setUses(event.target.value)} /></div>
+            <div><label className="pkg-label">ราคาแพ็กเกจ (บาท)</label><input className="cfield" style={{ height:44 }} type="number" min="0" step="0.01" value={price} onChange={(event) => setPrice(event.target.value)} /></div>
           </div>
-          {(!valid && dirty) && <div style={{ marginTop:9, color:"var(--danger)", fontSize:11.5 }}>กรอกชื่อ จำนวนวัน 2–30 วัน ส่วนลด 1–50% และเลือกเมนูอย่างน้อย 1 รายการ</div>}
+          <div style={{ marginTop:14 }}><label className="pkg-label">อายุการใช้งานหลังซื้อ (วัน)</label><input className="cfield" style={{ height:44 }} type="number" min="1" max="365" value={validityDays} onChange={(event) => setValidityDays(event.target.value)} /></div>
+          {(!valid && dirty) && <div style={{ marginTop:9, color:"var(--danger)", fontSize:11.5 }}>กรอกจำนวนสิทธิ์ 1–100 ราคา อายุ 1–365 วัน และเลือกเมนูอย่างน้อย 1 รายการ</div>}
 
           <div style={{ marginTop:20, paddingTop:17, borderTop:"1px solid var(--line)" }}>
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10 }}>
@@ -8526,25 +8615,25 @@ function CoffeePassPanel({ data, orders, updateData, showToast }) {
           </div>
 
           <div style={{ marginTop:18, padding:"10px 12px", borderRadius:11, background:"var(--cream-2)", color:"var(--espresso-3)", fontSize:11.5, lineHeight:1.6 }}>
-            ส่วนลดใช้กับราคาเมนูเท่านั้น ส่วนเพิ่มนม/เมล็ดคิดเต็ม · ไม่ซ้อน Hot Deal · รับต่อเนื่องจากวันเริ่มแพ็ก
+            Pass ใช้ได้ครั้งละ 1 เมนูจากรายการที่เลือก · option ที่มีราคาเพิ่มเก็บเงินเพิ่มตามจริง · ระบบตัดสิทธิ์ทันทีและกันการกดซ้ำ
           </div>
           <button type="button" className="cbtn cbtn-accent" disabled={!dirty || !valid} onClick={savePackage} style={{ width:"100%", minHeight:44, marginTop:14, opacity:!dirty || !valid ? .5 : 1 }}>{enabled ? "บันทึกและเปิดขาย" : "บันทึกแบบร่าง (ยังไม่แสดงหน้าลูกค้า)"}</button>
         </div>
 
         <div style={{ display:"flex", flexDirection:"column", gap:18 }}>
           <div className="pkg-stat-grid">
-            {[['ขายทั้งหมด', passOrders.length], ['กำลังใช้งาน', activePasses.length], ['รับแล้ว', collectedCount]].map(([label,value]) => <div className="pkg-stat" key={label}><div style={{ color:"var(--espresso-2)", fontSize:10.5 }}>{label}</div><div style={{ marginTop:3, color:"var(--espresso-5)", fontSize:22, fontWeight:800 }}>{value}</div></div>)}
+            {[['ขายทั้งหมด', passOrders.length], ['เปิดใช้งานแล้ว', activatedPasses.length], ['ใช้สิทธิ์แล้ว', redemptionCount]].map(([label,value]) => <div className="pkg-stat" key={label}><div style={{ color:"var(--espresso-2)", fontSize:10.5 }}>{label}</div><div style={{ marginTop:3, color:"var(--espresso-5)", fontSize:22, fontWeight:800 }}>{value}</div></div>)}
           </div>
           <div className="pkg-preview">
             <div style={{ opacity:.72, fontSize:10.5, fontWeight:800, letterSpacing:".1em" }}>CUSTOMER PREVIEW</div>
             <div style={{ marginTop:15, fontSize:25, fontWeight:800 }}>{name.trim() || "Coffee Pass"}</div>
-            <div style={{ marginTop:5, opacity:.82, fontSize:13 }}>รับวันละ 1 แก้ว · {daysNum || 0} วัน</div>
-            <div style={{ display:"flex", alignItems:"baseline", gap:8, marginTop:20 }}><span style={{ fontSize:34, fontWeight:800 }}>฿{money(sampleTotal)}</span><span style={{ opacity:.75, fontSize:12 }}>ประหยัด {discountNum || 0}%</span></div>
-            <div style={{ marginTop:6, opacity:.72, fontSize:11.5 }}>{sampleMenu ? `${sampleMenu.name} · วันละ ฿${money(sampleUnitPrice)}` : "เพิ่มเมนูเครื่องดื่มก่อนสร้างแพ็กเกจ"}</div>
+            <div style={{ marginTop:5, opacity:.82, fontSize:13 }}>{usesNum || 0} สิทธิ์ · ใช้เมื่อไรก็ได้ภายใน {validityNum || 0} วัน</div>
+            <div style={{ display:"flex", alignItems:"baseline", gap:8, marginTop:20 }}><span style={{ fontSize:34, fontWeight:800 }}>฿{money(priceNum)}</span><span style={{ opacity:.75, fontSize:12 }}>เฉลี่ย ฿{money(usesNum > 0 ? priceNum / usesNum : 0)} / สิทธิ์</span></div>
+            <div style={{ marginTop:6, opacity:.72, fontSize:11.5 }}>{allMenus ? "ใช้ได้กับเครื่องดื่มทุกเมนู" : `ใช้ได้กับ ${menuIds.length} เมนูที่กำหนด`}</div>
           </div>
           <div className="pkg-card">
             <h2>วิธีทำงาน</h2>
-            <ol style={{ margin:"10px 0 0", paddingLeft:20, color:"var(--espresso-3)", fontSize:12, lineHeight:1.9 }}><li>ลูกค้าเลือกแพ็กจากหน้าเมนู</li><li>เลือกสูตรและวันเริ่ม แล้วชำระครั้งเดียว</li><li>บอร์ดออเดอร์แสดงเช็กลิสต์รับรายวัน</li><li>ครบทุกวัน ระบบปิดแพ็กและเพิ่มเมล็ดสะสม</li></ol>
+            <ol style={{ margin:"10px 0 0", paddingLeft:20, color:"var(--espresso-3)", fontSize:12, lineHeight:1.9 }}><li>ลูกค้าซื้อ Pass ตั้ง Passcode และชำระครั้งเดียว</li><li>สิทธิ์เข้าบัญชีตามเบอร์โทรหลังยืนยันเงิน</li><li>ลูกค้าเลือก Pass และเมนูที่ร่วมรายการ</li><li>กรอก Passcode แล้วระบบหักครั้งละ 1 สิทธิ์</li></ol>
           </div>
         </div>
       </div>

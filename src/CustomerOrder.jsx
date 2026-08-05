@@ -35,6 +35,7 @@ const STATUS_TEXT = {
 const PAY_AT_STORE_TEXT = {
   cash: { title: "ชำระเงินสดที่ร้าน", instruction: "กรุณาชำระเงินสดตอนมารับที่ร้าน" },
   thaihelpthai: { title: "ชำระผ่านโครงการไทยช่วยไทยที่ร้าน", instruction: "กรุณาแจ้งพนักงานว่าชำระผ่านโครงการไทยช่วยไทยตอนมารับที่ร้าน" },
+  "coffee-pass": { title: "ใช้สิทธิ์ Coffee Pass แล้ว", instruction: "ไม่ต้องชำระเพิ่ม ระบบหักสิทธิ์นี้เรียบร้อยแล้ว" },
 };
 function isCashLikeMethod(method) {
   return Object.prototype.hasOwnProperty.call(PAY_AT_STORE_TEXT, method);
@@ -217,6 +218,7 @@ const HOT_DEAL_CATEGORY = "HOT DEAL";
 const COFFEE_PASS_CATEGORY = "COFFEE PASS";
 
 function productTypeOf(item) {
+  if (item?.productType === "pass") return "pass";
   if (item?.productType === "food") return "food";
   if (item?.productType === "drink") return "drink";
   return /ขนมปัง|เบเกอรี่|อาหาร|toast|bread|bakery/i.test(item?.category || "") ? "food" : "drink";
@@ -308,17 +310,6 @@ function addDays(days) {
   const d = new Date();
   d.setDate(d.getDate() + days);
   return localDateStr(d);
-}
-
-function buildCoffeePassDates(startDate, days) {
-  if (!startDate) return [];
-  const [year, month, day] = startDate.split("-").map(Number);
-  const start = new Date(year, month - 1, day, 12);
-  return Array.from({ length: Math.max(2, Number(days) || 5) }, (_, index) => {
-    const date = new Date(start);
-    date.setDate(start.getDate() + index);
-    return localDateStr(date);
-  });
 }
 
 function formatPickupDate(dateStr) {
@@ -986,7 +977,7 @@ export default function CustomerOrder({ shopUid }) {
   const [categoryOrder, setCategoryOrder] = useState([]);
   const [loyaltyBeanGoal, setLoyaltyBeanGoal] = useState(10);
   const [seasonalEffect, setSeasonalEffect] = useState("auto");
-  const [coffeePass, setCoffeePass] = useState({ name: "Coffee Pass", enabled: false, days: 5, discountPercent: 10, menuIds: [] });
+  const [coffeePass, setCoffeePass] = useState({ name: "Coffee Pass", enabled: false, uses: 5, price: 250, validityDays: 30, menuIds: [] });
   const [beanRecord, setBeanRecord] = useState(null);
   const [loyaltyStatus, setLoyaltyStatus] = useState("idle"); // idle | loading | loaded | error
   const [loyaltyRetryTick, setLoyaltyRetryTick] = useState(0);
@@ -1012,6 +1003,11 @@ export default function CustomerOrder({ shopUid }) {
   const [pickingMenu, setPickingMenu] = useState(null);
   const [pickingPromo, setPickingPromo] = useState(null);
   const [pickingCoffeePass, setPickingCoffeePass] = useState(false);
+  const [selectedPassId, setSelectedPassId] = useState("");
+  const [passPurchaseCode, setPassPurchaseCode] = useState("");
+  const [passPurchaseCodeConfirm, setPassPurchaseCodeConfirm] = useState("");
+  const [passRedeemCode, setPassRedeemCode] = useState("");
+  const [passRedemptionAttemptId, setPassRedemptionAttemptId] = useState("");
   const [pickingChoicePromo, setPickingChoicePromo] = useState(null);
   const [choiceFlow, setChoiceFlow] = useState(null);
   const [bundleFlow, setBundleFlow] = useState(null);
@@ -1091,9 +1087,10 @@ export default function CustomerOrder({ shopUid }) {
         setCoffeePass({
           name: String(value.name || "Coffee Pass"),
           enabled: value.enabled === true,
-          days: Math.min(30, Math.max(2, Number(value.days) || 5)),
-          discountPercent: Math.min(50, Math.max(1, Number(value.discountPercent) || 10)),
-          menuIds: (value.menuIds || []).filter(Boolean),
+          uses: Math.min(100, Math.max(1, Number(value.uses ?? value.days) || 5)),
+          price: Math.max(0, Number.isFinite(Number(value.price)) ? Number(value.price) : 250),
+          validityDays: Math.min(365, Math.max(1, Number(value.validityDays) || 30)),
+          menuIds: (Array.isArray(value.menuIds) ? value.menuIds : Object.values(value.menuIds || {})).filter(Boolean),
         });
       },
       (err) => console.error("อ่านการตั้งค่า Coffee Pass ไม่ได้ (เช็คว่า deploy database.rules.json ล่าสุดหรือยัง):", err.message)
@@ -1113,12 +1110,12 @@ export default function CustomerOrder({ shopUid }) {
   // เช็คเมล็ดสะสมของเบอร์นี้แบบสด — debounce กันยิง query ทุกครั้งที่พิมพ์ และรอให้เบอร์ครบอย่างน้อย 9 หลักก่อน
   // แยกสถานะ loading/error ออกจากตัวข้อมูล เพื่อให้ UI บอกลูกค้าได้ว่ากำลังโหลดอยู่ หรือโหลดไม่สำเร็จ (ไม่ใช่แค่ "ยังไม่มีข้อมูล")
   useEffect(() => {
-    const digits = phone.replace(/\D/g, "");
-    if (digits.length < 9) { setBeanRecord(null); setLoyaltyStatus("idle"); return; }
+    const phoneKey = normalizeThaiPhone(phone);
+    if (!phoneKey) { setBeanRecord(null); setLoyaltyStatus("idle"); return; }
     setLoyaltyStatus("loading");
     const t = setTimeout(() => {
       const unsub = onValue(
-        ref(db, `customers/${shopUid}/${digits}`),
+        ref(db, `customers/${shopUid}/${phoneKey}`),
         (snap) => {
           setBeanRecord(snap.exists() ? snap.val() : { beans: 0, lifetimeBeans: 0, isNew: true });
           setLoyaltyStatus("loaded");
@@ -1176,6 +1173,11 @@ export default function CustomerOrder({ shopUid }) {
     setRewardOtpOpen(false);
     setRewardOtpStatus("idle");
     setRewardOtpCode("");
+    setSelectedPassId("");
+    setPassPurchaseCode("");
+    setPassPurchaseCodeConfirm("");
+    setPassRedeemCode("");
+    setPassRedemptionAttemptId("");
   }
 
   const menusById = useMemo(() => {
@@ -1228,7 +1230,7 @@ export default function CustomerOrder({ shopUid }) {
     const featured = [];
     if (activePromotions.length > 0) featured.push(HOT_DEAL_CATEGORY);
     const passMenuIds = coffeePass.menuIds || [];
-    const hasCoffeePassMenus = coffeePass.enabled && menus.some((menu) =>
+    const hasCoffeePassMenus = menus.some((menu) =>
       productTypeOf(menu) === "drink" && menu.available !== false && (passMenuIds.length === 0 || passMenuIds.includes(menu.id))
     );
     if (hasCoffeePassMenus) featured.push(COFFEE_PASS_CATEGORY);
@@ -1364,7 +1366,7 @@ export default function CustomerOrder({ shopUid }) {
 
   function openMenu(menu, promo) {
     if (menu.available === false) return;
-    if (cart.some((line) => line.promoKind === "coffee-pass")) {
+    if (cart.some((line) => String(line.promoKind || "").startsWith("coffee-pass"))) {
       setError("Coffee Pass ต้องชำระแยกจากรายการปกติ กรุณาชำระแพ็กนี้ก่อนเลือกเมนูอื่น");
       setShowCart(true);
       return;
@@ -1388,7 +1390,7 @@ export default function CustomerOrder({ shopUid }) {
   }
 
   function addToCart(menu, qty, options, priceOverride, promoId, promoKind) {
-    if (cart.some((line) => line.promoKind === "coffee-pass")) {
+    if (cart.some((line) => String(line.promoKind || "").startsWith("coffee-pass"))) {
       setError("Coffee Pass ต้องชำระแยกจากรายการปกติ กรุณาชำระแพ็กนี้ก่อนเลือกเมนูอื่น");
       setShowCart(true);
       return;
@@ -1403,30 +1405,55 @@ export default function CustomerOrder({ shopUid }) {
   }
 
   function startCoffeePass(menu) {
-    const eligible = coffeePass.menuIds.length === 0 || coffeePass.menuIds.includes(menu.id);
-    if (!coffeePass.enabled || !eligible || menu.available === false || productTypeOf(menu) !== "drink") return;
+    const pass = customerPasses.find((item) => item.id === selectedPassId);
+    const eligible = pass && (pass.menuIds.length === 0 || pass.menuIds.includes(menu.id));
+    if (!pass || !eligible || menu.available === false || productTypeOf(menu) !== "drink") {
+      setError("กรุณาเลือก Pass ที่ยังมีสิทธิ์และใช้กับเมนูนี้ได้ก่อน");
+      return;
+    }
     if (cart.length > 0) {
-      setError("Coffee Pass ต้องชำระแยกจากรายการปกติ กรุณาล้างตะกร้าหรือชำระรายการเดิมก่อน");
+      setError("การใช้ Coffee Pass ต้องทำแยกจากรายการปกติ กรุณาล้างตะกร้าหรือชำระรายการเดิมก่อน");
       setShowCart(true);
       return;
     }
     setError("");
     setPickingMenu(menu);
     setPickingPromo(null);
-    setPickingCoffeePass(true);
+    setPickingCoffeePass("redemption");
   }
 
-  function addCoffeePassToCart(menu, options) {
-    const days = coffeePass.days;
-    const optionDelta = options.reduce((sum, option) => sum + (Number(option.priceDelta) || 0), 0);
-    const discountedMenuPrice = Math.round(menu.priceStore * (1 - coffeePass.discountPercent / 100) * 100) / 100;
+  function addCoffeePassRedemptionToCart(menu, options) {
+    const pass = customerPasses.find((item) => item.id === selectedPassId);
+    if (!pass) return;
+    const optionTotal = Math.max(0, Math.round(options.reduce((sum, option) => sum + (Number(option.priceDelta) || 0), 0) * 100) / 100);
     setCart([{
       lineId: genLineId(), menuId: menu.id, name: menu.name, productType: productTypeOf(menu),
-      unitPrice: discountedMenuPrice + optionDelta,
-      originalUnitPrice: menu.priceStore + optionDelta,
-      qty: days, options, promoId: null, promoGroupId: null, promoKind: "coffee-pass",
-      coffeePass: { name: coffeePass.name, days, discountPercent: coffeePass.discountPercent },
+      unitPrice: optionTotal, originalUnitPrice: menu.priceStore + optionTotal, qty: 1, options,
+      promoId: null, promoGroupId: null, promoKind: "coffee-pass-redemption",
+      passId: pass.id, passName: pass.packageName,
     }]);
+    setPhone(normalizeThaiPhone(phone));
+    setPassRedeemCode("");
+    setPassRedemptionAttemptId(newRedemptionAttemptId());
+  }
+
+  function buyCoffeePass() {
+    if (!coffeePass.enabled) return;
+    if (cart.length > 0) {
+      setError("กรุณาชำระรายการในตะกร้าเดิมก่อนซื้อ Pass");
+      setShowCart(true);
+      return;
+    }
+    setCart([{
+      lineId: genLineId(), menuId: "coffee_pass", name: coffeePass.name || "Coffee Pass", productType: "pass",
+      unitPrice: coffeePass.price, originalUnitPrice: coffeePass.price, qty: 1, options: [],
+      promoId: null, promoGroupId: null, promoKind: "coffee-pass-purchase",
+      coffeePass: { ...coffeePass },
+    }]);
+    setPassPurchaseCode("");
+    setPassPurchaseCodeConfirm("");
+    setError("");
+    setStep("phone");
   }
 
   function bundleQtyInCart(promo) {
@@ -1436,7 +1463,7 @@ export default function CustomerOrder({ shopUid }) {
   }
 
   function setBundleQty(promo, qty, optionsByMenuId) {
-    if (cart.some((line) => line.promoKind === "coffee-pass")) {
+    if (cart.some((line) => String(line.promoKind || "").startsWith("coffee-pass"))) {
       setError("Coffee Pass ต้องชำระแยกจากโปรโมชั่นอื่น");
       setShowCart(true);
       return;
@@ -1509,7 +1536,7 @@ export default function CustomerOrder({ shopUid }) {
   }
 
   function addChoiceSet(promo, chosenMenus, optionsByMenuId) {
-    if (cart.some((line) => line.promoKind === "coffee-pass")) {
+    if (cart.some((line) => String(line.promoKind || "").startsWith("coffee-pass"))) {
       setError("Coffee Pass ต้องชำระแยกจากโปรโมชั่นอื่น");
       setShowCart(true);
       return;
@@ -1620,12 +1647,18 @@ export default function CustomerOrder({ shopUid }) {
   );
   const beanGoalMet = (beanRecord?.beans || 0) >= loyaltyBeanGoal;
   const redeemLine = redeemLineId ? cart.find((l) => l.lineId === redeemLineId && productTypeOf(l) === "drink") : null;
+  const customerPasses = Object.entries(beanRecord?.passes || {}).map(([id, raw]) => ({
+    ...(raw || {}), id: raw?.id || id,
+    menuIds: Array.isArray(raw?.menuIds) ? raw.menuIds : Object.values(raw?.menuIds || {}),
+  })).sort((a, b) => (Number(a.expiresAt) || 0) - (Number(b.expiresAt) || 0));
+  const activeCustomerPasses = customerPasses.filter((pass) => Number(pass.remainingUses) > 0 && Number(pass.expiresAt) >= Date.now() && pass.status !== "cancelled");
+  const selectedCustomerPass = activeCustomerPasses.find((pass) => pass.id === selectedPassId) || null;
   const redeemDiscount = beanGoalMet && redeemLine && rewardVerified ? redeemLine.unitPrice : 0;
   const total = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0) - redeemDiscount;
   const cartCount = cart.reduce((s, l) => s + l.qty, 0);
   const loyaltyCartCount = cart.reduce((sum, line) => sum + (productTypeOf(line) === "drink" ? line.qty : 0), 0);
-  const coffeePassLine = cart.find((line) => line.promoKind === "coffee-pass") || null;
-  const coffeePassDates = coffeePassLine ? buildCoffeePassDates(pickupDate, coffeePassLine.coffeePass?.days || coffeePassLine.qty) : [];
+  const coffeePassPurchaseLine = cart.find((line) => line.promoKind === "coffee-pass-purchase") || null;
+  const coffeePassRedemptionLine = cart.find((line) => line.promoKind === "coffee-pass-redemption") || null;
 
   // ถ้าเมล็ดไม่พอ/ลบรายการที่เลือกแลกออกจากตะกร้าไปแล้ว ต้องเคลียร์การแลกทิ้งกันตัวเลขค้างผิด
   useEffect(() => {
@@ -1758,7 +1791,10 @@ export default function CustomerOrder({ shopUid }) {
     if (!name.trim()) { setError("กรุณาใส่ชื่อ"); return; }
     if (!phone.trim()) { setError("กรุณาใส่เบอร์โทร"); return; }
     if (pickupDate < addDays(1) || pickupDate > addDays(7)) { setError("วันที่รับต้องล่วงหน้าอย่างน้อย 1 วัน และไม่เกิน 7 วัน"); return; }
-    if (paymentMethod === "promptpay" && !promptpayId) { setError("ร้านนี้ยังไม่เปิดรับชำระผ่าน QR (ยังไม่ได้ตั้งค่า PromptPay)"); return; }
+    if ((!coffeePassRedemptionLine || total > 0) && paymentMethod === "promptpay" && !promptpayId) { setError("ร้านนี้ยังไม่เปิดรับชำระผ่าน QR (ยังไม่ได้ตั้งค่า PromptPay)"); return; }
+    if (coffeePassPurchaseLine && !/^\d{6}$/.test(passPurchaseCode)) { setError("กรุณาตั้ง Passcode เป็นตัวเลข 6 หลัก"); return; }
+    if (coffeePassPurchaseLine && passPurchaseCode !== passPurchaseCodeConfirm) { setError("Passcode และรหัสยืนยันไม่ตรงกัน"); return; }
+    if (coffeePassRedemptionLine && !/^\d{6}$/.test(passRedeemCode)) { setError("กรุณากรอก Passcode 6 หลักของ Pass"); return; }
     if (redeemLine && !rewardVerified) {
       startRewardOtp();
       return;
@@ -1778,21 +1814,42 @@ export default function CustomerOrder({ shopUid }) {
         customerName: name.trim(),
         customerPhone: phone.trim(),
         note: note.trim(),
-        paymentMethod,
+        paymentMethod: coffeePassRedemptionLine ? "coffee-pass" : paymentMethod,
         pickupDate,
-        ...(coffeePassLine ? {
-          coffeePass: {
-            name: coffeePassLine.coffeePass?.name || coffeePass.name || "Coffee Pass",
-            days: coffeePassLine.coffeePass?.days || coffeePassLine.qty,
-            discountPercent: coffeePassLine.coffeePass?.discountPercent || 0,
-            deliveryDates: coffeePassDates.map((date) => ({ date, status: "pending" })),
-          },
-        } : {}),
       };
       let orderId;
       let orderData;
 
-      if (redeemLine && rewardVerified) {
+      if (coffeePassRedemptionLine) {
+        const redeemPass = httpsCallable(functions, "redeemCoffeePass");
+        const response = await redeemPass({
+          shopUid,
+          passId: coffeePassRedemptionLine.passId,
+          redemptionAttemptId: passRedemptionAttemptId,
+          customerName: name.trim(),
+          customerPhone: phone.trim(),
+          passcode: passRedeemCode,
+          menuId: coffeePassRedemptionLine.menuId,
+          options: coffeePassRedemptionLine.options,
+          paymentMethod,
+          pickupDate,
+          note: note.trim(),
+        });
+        orderId = response.data.orderId;
+        orderData = response.data.order;
+      } else if (coffeePassPurchaseLine) {
+        const createPassOrder = httpsCallable(functions, "createCoffeePassOrder");
+        const response = await createPassOrder({
+          shopUid,
+          customerName: name.trim(),
+          customerPhone: phone.trim(),
+          paymentMethod,
+          passcode: passPurchaseCode,
+          note: note.trim(),
+        });
+        orderId = response.data.orderId;
+        orderData = response.data.order;
+      } else if (redeemLine && rewardVerified) {
         const createRewardOrder = httpsCallable(functions, "checkoutWithReward");
         const response = await createRewardOrder({
           shopUid,
@@ -1816,7 +1873,7 @@ export default function CustomerOrder({ shopUid }) {
       }
 
       saveMyOrderId(shopUid, orderId);
-      if (paymentMethod === "promptpay") {
+      if (orderData.paymentMethod === "promptpay") {
         const payload = generatePayload(promptpayId, { amount: orderData.total });
         const url = await QRCode.toDataURL(payload, { width: 260, margin: 1 });
         setQrDataUrl(url);
@@ -1832,7 +1889,7 @@ export default function CustomerOrder({ shopUid }) {
         setRewardVerification(null);
         setRedeemLineId(null);
       }
-      setError(isAuthIssue
+      setError(isAuthIssue && !coffeePassRedemptionLine
         ? "การยืนยันเบอร์สำหรับใช้รางวัลหมดอายุ กรุณายืนยัน OTP อีกครั้ง"
         : "สั่งซื้อไม่สำเร็จ: " + e.message);
     } finally {
@@ -2027,15 +2084,20 @@ export default function CustomerOrder({ shopUid }) {
               <p style={{ fontSize: 16, fontWeight: 600, margin: "12px 0 4px" }}>{STATUS_TEXT[order.status] || order.status}</p>
             </div>
           )}
-          {order.pickupDate && (
+          {order.pickupDate && !order.coffeePassPurchase && (
             <p style={{ fontSize: 12.5, color: COLORS.espresso5, fontWeight: 600, margin: "0 0 10px" }}>
               <i className="ti ti-calendar" style={{ fontSize: 13, marginRight: 4 }} aria-hidden="true"></i>
               {order.coffeePass ? `วันเริ่ม ${order.coffeePass.name || "Coffee Pass"}` : "วันที่รับ"}: {formatPickupDate(order.pickupDate)}
             </p>
           )}
+          {order.coffeePassPurchase && (
+            <div style={{ margin:"0 0 12px", padding:"9px 10px", borderRadius:10, background:COLORS.sageLight, color:COLORS.espresso4, fontSize:11.5, fontWeight:700, textAlign:"left" }}>
+              {order.coffeePassPurchase.uses} สิทธิ์ · อายุ {order.coffeePassPurchase.validityDays} วันหลังยืนยันเงิน · ผูกกับเบอร์ {order.customerPhone}
+            </div>
+          )}
           {order.coffeePass?.deliveryDates?.length > 0 && (
             <div style={{ margin: "0 0 12px", padding: "9px 10px", borderRadius: 10, background: COLORS.sageLight, textAlign: "left" }}>
-              <div style={{ color: COLORS.espresso5, fontSize: 11.5, fontWeight: 700 }}>{order.coffeePass.name || "Coffee Pass"} {order.coffeePass.days} วัน · รับวันละ 1 แก้ว</div>
+              <div style={{ color: COLORS.espresso5, fontSize: 11.5, fontWeight: 700 }}>{order.coffeePass.name || "Coffee Pass"} {order.coffeePass.days} วัน · รับวันละ 1 แก้ว{order.coffeePass.skipWeekends ? " · ข้ามเสาร์–อาทิตย์" : ""}</div>
               <div style={{ marginTop: 5, color: COLORS.espresso3, fontSize: 10.5, lineHeight: 1.6 }}>
                 {order.coffeePass.deliveryDates.map((entry) => formatPickupDate(entry.date)).join(" · ")}
               </div>
@@ -2105,7 +2167,7 @@ export default function CustomerOrder({ shopUid }) {
             placeholder="08xxxxxxxx"
           />
 
-          {!coffeePassLine && (
+          {!coffeePassPurchaseLine && !coffeePassRedemptionLine && (
             <>
               <LoyaltyCard
                 phone={phone}
@@ -2139,7 +2201,31 @@ export default function CustomerOrder({ shopUid }) {
             </>
           )}
 
-          <label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>วิธีชำระเงิน</label>
+          {coffeePassRedemptionLine && (
+            <div style={{ marginTop:12, padding:"10px 12px", border:`1px solid ${COLORS.line}`, borderRadius:11, background:COLORS.sageLight }}>
+              <label style={{ display:"block", color:COLORS.espresso4, fontSize:11.5, fontWeight:700 }}>Passcode ของ Pass</label>
+              <input
+                style={{ ...field, marginTop:6, letterSpacing:".28em", textAlign:"center", fontWeight:800 }}
+                type="password" inputMode="numeric" autoComplete="off" maxLength={6}
+                value={passRedeemCode} onChange={(event) => setPassRedeemCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="••••••"
+              />
+              <div style={{ marginTop:5, color:COLORS.espresso2, fontSize:10.5 }}>ใช้รหัส 6 หลักที่ตั้งไว้ตอนซื้อ Pass · ไม่มีค่า OTP</div>
+            </div>
+          )}
+
+          {coffeePassPurchaseLine && (
+            <div style={{ marginTop:12, padding:"10px 12px", border:`1px solid ${COLORS.line}`, borderRadius:11, background:COLORS.sageLight }}>
+              <label style={{ display:"block", color:COLORS.espresso4, fontSize:11.5, fontWeight:700 }}>ตั้ง Passcode 6 หลัก</label>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginTop:6 }}>
+                <input style={{ ...field, letterSpacing:".2em", textAlign:"center", fontWeight:800 }} type="password" inputMode="numeric" autoComplete="new-password" maxLength={6} value={passPurchaseCode} onChange={(event) => setPassPurchaseCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="รหัส 6 หลัก" />
+                <input style={{ ...field, letterSpacing:".2em", textAlign:"center", fontWeight:800 }} type="password" inputMode="numeric" autoComplete="new-password" maxLength={6} value={passPurchaseCodeConfirm} onChange={(event) => setPassPurchaseCodeConfirm(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="ยืนยันรหัส" />
+              </div>
+              <div style={{ marginTop:6, color:COLORS.espresso2, fontSize:10.5 }}>ใช้รหัสนี้ทุกครั้งที่กดใช้ Pass กรุณาจำรหัสไว้และไม่บอกรหัสแก่ผู้อื่น</div>
+            </div>
+          )}
+
+          {(!coffeePassRedemptionLine || total > 0) && <><label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>{coffeePassRedemptionLine ? `ชำระค่าส่วนเพิ่ม ${money(total)} บาท` : "วิธีชำระเงิน"}</label>
           <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
             {[["promptpay", "พร้อมเพย์ (QR)"], ["cash", "เงินสด"], ["thaihelpthai", "ไทยช่วยไทย"]].map(([val, label]) => (
               <button
@@ -2155,21 +2241,11 @@ export default function CustomerOrder({ shopUid }) {
                 {label}
               </button>
             ))}
-          </div>
+          </div></>}
 
-          <label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>{coffeePassLine ? `วันเริ่ม ${coffeePassLine.coffeePass?.name || "Coffee Pass"} (ล่วงหน้า 1-7 วัน)` : "วันที่รับ (ล่วงหน้า 1-7 วัน)"}</label>
-          <input
-            style={field} type="date" value={pickupDate} min={addDays(1)} max={addDays(7)}
-            onChange={(e) => setPickupDate(e.target.value)}
-          />
-          {coffeePassLine && (
-            <div style={{ marginTop: 9, padding: "10px 12px", border: `1px solid ${COLORS.line}`, borderRadius: 11, background: COLORS.sageLight }}>
-              <div style={{ color: COLORS.espresso5, fontSize: 11.5, fontWeight: 700 }}>วันรับทั้งหมด {coffeePassDates.length} วัน</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 7 }}>
-                {coffeePassDates.map((date, index) => <span key={date} style={{ padding: "3px 7px", borderRadius: 999, background: "#fff", color: COLORS.espresso3, fontSize: 10.5 }}>{index + 1}. {formatPickupDate(date)}</span>)}
-              </div>
-            </div>
-          )}
+          {!coffeePassPurchaseLine && <><label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>วันที่รับ (ล่วงหน้า 1-7 วัน)</label>
+          <input style={field} type="date" value={pickupDate} min={addDays(1)} max={addDays(7)} onChange={(e) => setPickupDate(e.target.value)} /></>}
+          {coffeePassPurchaseLine && <div style={{ marginTop:12, padding:"10px 12px", border:`1px solid ${COLORS.line}`, borderRadius:11, background:COLORS.sageLight, color:COLORS.espresso4, fontSize:11.5 }}>Pass จะเริ่มนับอายุและเข้าบัญชีเบอร์นี้หลังร้านยืนยันการชำระเงิน</div>}
 
           <label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>โน้ตถึงร้าน (ถ้ามี)</label>
           <textarea
@@ -2335,36 +2411,56 @@ export default function CustomerOrder({ shopUid }) {
                       <div style={{ position: "relative" }}>
                         <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".12em", opacity: .72 }}>PREPAID COFFEE PACKAGE</div>
                         <h2 style={{ margin: "6px 0 2px", fontFamily: "'Space Grotesk', sans-serif", fontSize: 25, lineHeight: 1.12 }}>{coffeePass.name || "Coffee Pass"}</h2>
-                        <div style={{ fontSize: 12.5, opacity: .82 }}>รับวันละ 1 แก้ว นาน {coffeePass.days} วัน · ลด {coffeePass.discountPercent}%</div>
+                        <div style={{ fontSize: 12.5, opacity: .82 }}>{coffeePass.uses} สิทธิ์ · ใช้เมื่อไรก็ได้ภายใน {coffeePass.validityDays} วัน · option เพิ่มราคาจ่ายเพิ่ม</div>
                         <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 13 }}>
-                          {["ชำระครั้งเดียว", "เลือกวันเริ่มได้", "สูตรเดิมทุกวัน"].map((text) => <span key={text} style={{ padding: "4px 8px", border: "1px solid rgba(255,255,255,.24)", borderRadius: 999, background: "rgba(255,255,255,.1)", fontSize: 9.5, fontWeight: 700 }}>{text}</span>)}
+                          {["ชำระครั้งเดียว", "ใช้ Passcode ไม่เสียค่า OTP", `หมดอายุ ${coffeePass.validityDays} วัน`].map((text) => <span key={text} style={{ padding: "4px 8px", border: "1px solid rgba(255,255,255,.24)", borderRadius: 999, background: "rgba(255,255,255,.1)", fontSize: 9.5, fontWeight: 700 }}>{text}</span>)}
+                        </div>
+                        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, marginTop:18 }}>
+                          <strong style={{ fontSize:25 }}>฿{money(coffeePass.price)}</strong>
+                          {coffeePass.enabled ? <button type="button" onClick={buyCoffeePass} style={{ padding:"9px 16px", border:0, borderRadius:12, background:"#fff", color:COLORS.sageDark, fontWeight:800 }}>ซื้อ Pass</button> : <span style={{ padding:"7px 10px", borderRadius:999, background:"rgba(255,255,255,.15)", fontSize:10.5, fontWeight:700 }}>ปิดขายชั่วคราว</span>}
                         </div>
                       </div>
                     </div>
 
-                    <div style={{ margin: "0 10px 9px", display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 10 }}>
-                      <div><h2 style={{ margin: 0, color: COLORS.espresso5, fontFamily: "'Space Grotesk', sans-serif", fontSize: 18 }}>เลือกเมนูสำหรับแพ็ก</h2><div style={{ marginTop: 2, color: COLORS.espresso2, fontSize: 10.5 }}>ส่วนเพิ่มตัวเลือกคิดราคาเต็ม</div></div>
+                    <div style={{ ...GLASS_PANEL, margin:"0 10px 14px", padding:14, borderRadius:16 }}>
+                      <div style={{ color:COLORS.espresso5, fontSize:14, fontWeight:800 }}>Pass ของฉัน</div>
+                      <div style={{ marginTop:3, color:COLORS.espresso2, fontSize:10.5 }}>กรอกเบอร์ที่ใช้ซื้อ ระบบจะแสดงยอดสิทธิ์คงเหลือ</div>
+                      <input
+                        type="tel" value={phone} placeholder="08xxxxxxxx"
+                        onChange={(event) => { setPhone(event.target.value); setSelectedPassId(""); setPassRedeemCode(""); }}
+                        style={{ ...field, marginTop:9 }}
+                      />
+                      {loyaltyStatus === "loading" && <div style={{ marginTop:8, color:COLORS.espresso2, fontSize:11 }}>กำลังค้นหา Pass...</div>}
+                      {loyaltyStatus === "loaded" && customerPasses.length === 0 && <div style={{ marginTop:8, color:COLORS.espresso2, fontSize:11 }}>ยังไม่พบ Pass ของเบอร์นี้</div>}
+                      {customerPasses.map((pass) => {
+                        const active = activeCustomerPasses.some((item) => item.id === pass.id);
+                        const selected = selectedPassId === pass.id;
+                        return <button type="button" key={pass.id} disabled={!active} onClick={() => setSelectedPassId(pass.id)} style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, marginTop:8, padding:"10px 11px", border:selected ? `2px solid ${COLORS.sage}` : `1px solid ${COLORS.line}`, borderRadius:12, background:selected ? COLORS.sageLight : "#fff", opacity:active ? 1 : .48, textAlign:"left" }}>
+                          <span><strong style={{ display:"block", color:COLORS.espresso5, fontSize:12.5 }}>{pass.packageName || "Coffee Pass"}</strong><small style={{ color:COLORS.espresso2 }}>หมดอายุ {new Date(Number(pass.expiresAt)).toLocaleDateString("th-TH")}</small></span>
+                          <span style={{ color:selected ? COLORS.sageDark : COLORS.espresso4, fontWeight:800, fontSize:13 }}>{Number(pass.remainingUses) || 0}/{Number(pass.totalUses) || 0} สิทธิ์{selected ? " ✓" : ""}</span>
+                        </button>;
+                      })}
                     </div>
-                    {(menus || []).filter((menu) => productTypeOf(menu) === "drink" && menu.available !== false && (coffeePass.menuIds.length === 0 || coffeePass.menuIds.includes(menu.id))).map((menu) => {
-                      const passUnit = Math.round(menu.priceStore * (1 - coffeePass.discountPercent / 100) * 100) / 100;
-                      const passTotal = Math.round(passUnit * coffeePass.days * 100) / 100;
+
+                    <div style={{ margin: "0 10px 9px", display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 10 }}>
+                      <div><h2 style={{ margin: 0, color: COLORS.espresso5, fontFamily: "'Space Grotesk', sans-serif", fontSize: 18 }}>เมนูที่ใช้ Pass ได้</h2><div style={{ marginTop: 2, color: COLORS.espresso2, fontSize: 10.5 }}>{selectedPassId ? "เลือกเมนูเพื่อใช้ 1 สิทธิ์" : "เลือก Pass ด้านบนก่อนกดใช้สิทธิ์"}</div></div>
+                    </div>
+                    {(menus || []).filter((menu) => productTypeOf(menu) === "drink" && menu.available !== false && ((selectedCustomerPass?.menuIds || coffeePass.menuIds).length === 0 || (selectedCustomerPass?.menuIds || coffeePass.menuIds).includes(menu.id))).map((menu) => {
+                      const usable = selectedCustomerPass && (selectedCustomerPass.menuIds.length === 0 || selectedCustomerPass.menuIds.includes(menu.id));
                       return (
                         <button
                           type="button"
                           key={menu.id}
+                          disabled={!usable}
                           onClick={() => startCoffeePass(menu)}
-                          style={{ ...GLASS_PANEL, width: "calc(100% - 20px)", margin: "0 10px 9px", padding: "11px 12px", borderRadius: 15, display: "flex", alignItems: "center", gap: 12, border: "1px solid rgba(0,163,224,.18)", textAlign: "left", color: COLORS.espresso4 }}
+                          style={{ ...GLASS_PANEL, width: "calc(100% - 20px)", margin: "0 10px 9px", padding: "11px 12px", borderRadius: 15, display: "flex", alignItems: "center", gap: 12, border: "1px solid rgba(0,163,224,.18)", textAlign: "left", color: COLORS.espresso4, opacity:selectedPassId && !usable ? .45 : 1 }}
                         >
                           <MenuThumb imageUrl={menu.imageUrl} productType="drink" size={64} />
                           <span style={{ flex: 1, minWidth: 0 }}>
                             <span style={{ display: "block", color: COLORS.espresso5, fontSize: 14, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{menu.name}</span>
-                            <span style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
-                              <span style={{ color: COLORS.espresso2, fontSize: 10.5, textDecoration: "line-through" }}>{money(menu.priceStore * coffeePass.days)}</span>
-                              <span style={{ color: COLORS.sageDark, fontSize: 15, fontWeight: 800 }}>{money(passTotal)}</span>
-                            </span>
-                            <span style={{ display: "block", marginTop: 2, color: COLORS.espresso2, fontSize: 9.5 }}>วันละ {money(passUnit)} · {coffeePass.days} วัน</span>
+                            <span style={{ display: "block", marginTop: 4, color: usable ? COLORS.sageDark : COLORS.espresso2, fontSize: 11, fontWeight:700 }}>{usable ? "ใช้ 1 สิทธิ์ · option เพิ่มราคาคิดตามจริง" : `ราคาปกติ ${money(menu.priceStore)}`}</span>
                           </span>
-                          <span style={{ width: 34, height: 34, borderRadius: 11, display: "grid", placeItems: "center", flexShrink: 0, background: COLORS.sage, color: "#fff" }}><i className="ti ti-arrow-right" aria-hidden="true" /></span>
+                          <span style={{ width: 34, height: 34, borderRadius: 11, display: "grid", placeItems: "center", flexShrink: 0, background: usable ? COLORS.sage : COLORS.line, color: "#fff" }}><i className="ti ti-arrow-right" aria-hidden="true" /></span>
                         </button>
                       );
                     })}
@@ -2518,14 +2614,14 @@ export default function CustomerOrder({ shopUid }) {
                                 ซื้อครบ {directPromo.minQty || 2} {productUnitLabel(m)} ราคา {money(qtyPromoTotal(directPromo, m, directPromo.minQty || 2))}
                               </div>
                             )}
-                            {!soldOut && coffeePass.enabled && productTypeOf(m) === "drink" && (coffeePass.menuIds.length === 0 || coffeePass.menuIds.includes(m.id)) && (
+                            {!soldOut && selectedCustomerPass && productTypeOf(m) === "drink" && (selectedCustomerPass.menuIds.length === 0 || selectedCustomerPass.menuIds.includes(m.id)) && (
                               <button
                                 type="button"
                                 onClick={(event) => { event.stopPropagation(); startCoffeePass(m); }}
                                 style={{ marginTop: 6, padding: "4px 8px", border: `1px solid ${COLORS.sage}`, borderRadius: 999, background: COLORS.sageLight, color: COLORS.sageDark, fontSize: 10.5, fontWeight: 700 }}
                               >
-                                <i className="ti ti-calendar-repeat" style={{ marginRight: 4 }} aria-hidden="true" />
-                                {coffeePass.name} {coffeePass.days} วัน ลด {coffeePass.discountPercent}% · {money(Math.round(m.priceStore * (1 - coffeePass.discountPercent / 100) * coffeePass.days * 100) / 100)}
+                                <i className="ti ti-ticket" style={{ marginRight: 4 }} aria-hidden="true" />
+                                ใช้ {selectedCustomerPass.packageName || "Coffee Pass"} 1 สิทธิ์
                               </button>
                             )}
                           </div>
@@ -2635,7 +2731,7 @@ export default function CustomerOrder({ shopUid }) {
           }
           if (pickingCoffeePass) {
             spawnFly(pickingMenu.id, pickingMenu.imageUrl);
-            addCoffeePassToCart(pickingMenu, options);
+            addCoffeePassRedemptionToCart(pickingMenu, options);
             setPickingMenu(null);
             setPickingCoffeePass(false);
             return;
@@ -2761,18 +2857,19 @@ function CartDrawer({ visible, cart, total, onClose, onSetQty, onRemove, onCheck
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 500, fontSize: 14, color: COLORS.espresso5, display: "flex", alignItems: "center", gap: 6 }}>
                   {l.name}
-                  {l.promoKind === "coffee-pass" ? (
+                  {String(l.promoKind || "").startsWith("coffee-pass") ? (
                     <span style={{ fontSize: 9.5, fontWeight: 700, color: "#fff", background: COLORS.sageDark, borderRadius: 999, padding: "1px 6px" }}>COFFEE PASS</span>
                   ) : l.promoId ? (
                     <span style={{ fontSize: 9.5, fontWeight: 700, color: "#fff", background: COLORS.danger, borderRadius: 999, padding: "1px 6px" }}>โปร</span>
                   ) : null}
                 </div>
                 {l.options.length > 0 && <div style={{ fontSize: 11.5, color: COLORS.espresso2, marginTop: 2 }}>{l.options.map((o) => o.label).join(", ")}</div>}
-                {l.promoKind === "coffee-pass" && <div style={{ fontSize: 10.5, color: COLORS.espresso2, marginTop: 3 }}>{l.coffeePass?.name || "Coffee Pass"} · รับวันละ 1 แก้ว · {l.qty} วัน · ลด {l.coffeePass?.discountPercent || 0}%</div>}
+                {l.promoKind === "coffee-pass-purchase" && <div style={{ fontSize: 10.5, color: COLORS.espresso2, marginTop: 3 }}>{l.coffeePass?.uses || 0} สิทธิ์ · อายุ {l.coffeePass?.validityDays || 0} วัน</div>}
+                {l.promoKind === "coffee-pass-redemption" && <div style={{ fontSize: 10.5, color: COLORS.espresso2, marginTop: 3 }}>ใช้ {l.passName || "Coffee Pass"} 1 สิทธิ์{l.unitPrice > 0 ? ` · ค่าส่วนเพิ่ม ${money(l.unitPrice)}` : ""}</div>}
                 <div style={{ fontSize: 12.5, color: l.promoId ? COLORS.danger : COLORS.sage, fontWeight: 600, marginTop: 4 }}><AnimatedMoney value={l.unitPrice * l.qty} /></div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                {["bundle", "choice", "coffee-pass"].includes(l.promoKind) ? (
+                {["bundle", "choice", "coffee-pass-purchase", "coffee-pass-redemption"].includes(l.promoKind) ? (
                   <span style={{ fontSize: 12, color: COLORS.espresso2, marginRight: 2 }}>x{l.qty}</span>
                 ) : (
                   <>
