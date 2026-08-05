@@ -380,6 +380,10 @@ const GLOBAL_CSS = `
   .banner-carousel:focus-visible { outline: 3px solid rgba(0,163,224,.42); outline-offset: 2px; }
   @keyframes offerRipple { 0% { transform: scale(0); opacity: .5; } 100% { transform: scale(2.4); opacity: 0; } }
   .offer-ripple { position: absolute; inset: 0; border-radius: inherit; background: rgba(0,163,224,0.22); animation: offerRipple .5s ease-out; pointer-events: none; }
+  .coffee-pass-buy-border { position: relative; isolation: isolate; overflow: hidden; padding: 2px; border-radius: 14px; background: #FFFFFF; box-shadow: 0 7px 20px rgba(0,59,92,.22); }
+  .coffee-pass-buy-border::before { content: ""; position: absolute; z-index: 0; inset: -180%; background: conic-gradient(from 0deg, #FFFFFF 0deg, #74D1EE 58deg, #00A3E0 112deg, #FFFFFF 168deg, #0077A8 230deg, #74D1EE 300deg, #FFFFFF 360deg); animation: coffeePassBorderSpin 2.4s linear infinite; }
+  .coffee-pass-buy-border > button { position: relative; z-index: 1; }
+  @keyframes coffeePassBorderSpin { to { transform: rotate(360deg); } }
   .zone-header { transition: box-shadow .25s ease; }
   .zone-icon-btn { transition: transform .25s ease, box-shadow .25s ease; }
   .zone-icon-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,0.14); }
@@ -580,6 +584,7 @@ const GLOBAL_CSS = `
   }
   @media (prefers-reduced-motion: reduce) {
     .banner-slide { transition-duration: 0ms; }
+    .coffee-pass-buy-border::before { animation: none; }
     .seasonal-effects { display: none; }
     .closed-order-page *, .closed-order-page *::before, .closed-order-page *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
   }
@@ -2569,7 +2574,7 @@ export default function CustomerOrder({ shopUid }) {
                     >
                       <div aria-hidden="true" style={{ position: "absolute", width: 150, height: 150, borderRadius: "50%", right: -55, top: -70, border: "22px solid rgba(255,255,255,.09)" }} />
                       <div style={{ position: "relative" }}>
-                        <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:10 }}>
+                        <div style={{ display:"flex", flexWrap:"wrap", alignItems:"flex-start", justifyContent:"space-between", gap:8 }}>
                           <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".12em", opacity: .72 }}>PREPAID COFFEE PACKAGE</div>
                           {coffeePassBenefit.savingsMax > 0 && (
                             <span style={{ padding:"5px 9px", borderRadius:999, background:"#fff", color:COLORS.sageDark, boxShadow:"0 4px 12px rgba(0,59,92,.18)", fontSize:10.5, fontWeight:900, whiteSpace:"nowrap" }}>
@@ -2580,28 +2585,26 @@ export default function CustomerOrder({ shopUid }) {
                         <h2 style={{ margin: "5px 0 2px", fontFamily: "'Space Grotesk', sans-serif", fontSize: 25, lineHeight: 1.12 }}>{coffeePass.name || "Coffee Pass"}</h2>
                         <div style={{ fontSize: 14, fontWeight:800, opacity: .95 }}>รับเครื่องดื่ม {coffeePassBenefit.uses} แก้ว ในราคาเดียว</div>
 
-                        <div style={{ display:"grid", gridTemplateColumns:"1fr auto", alignItems:"end", gap:12, marginTop:14, padding:"12px 13px", border:"1px solid rgba(255,255,255,.2)", borderRadius:14, background:"rgba(255,255,255,.1)" }}>
-                          <div>
+                        <div style={{ display:"flex", flexWrap:"wrap", alignItems:"flex-end", justifyContent:"space-between", gap:"10px 12px", marginTop:14, padding:"12px 13px", border:"1px solid rgba(255,255,255,.2)", borderRadius:14, background:"rgba(255,255,255,.1)" }}>
+                          <div style={{ flex:"1 1 125px", minWidth:0 }}>
                             {coffeePassBenefit.hasPriceComparison && (
-                              <div style={{ fontSize:10.5, opacity:.76 }}>
+                              <div style={{ fontSize:10, opacity:.76 }}>
                                 ซื้อแยกปกติ{coffeePassBenefit.regularMin !== coffeePassBenefit.regularMax ? "สูงสุด" : ""}
-                                <span style={{ marginLeft:5, fontSize:13, fontWeight:700, textDecoration:"line-through" }}>฿{money(coffeePassBenefit.regularMax)}</span>
+                                <span style={{ marginLeft:4, fontSize:12, fontWeight:700, textDecoration:"line-through" }}>฿{money(coffeePassBenefit.regularMax)}</span>
                               </div>
                             )}
-                            <div style={{ display:"flex", alignItems:"baseline", gap:6, marginTop:2 }}>
-                              <strong style={{ fontSize:29, lineHeight:1 }}>฿{money(coffeePassBenefit.passPrice)}</strong>
-                              <span style={{ fontSize:10.5, opacity:.8 }}>ทั้งแพ็ก</span>
-                            </div>
+                            <div style={{ marginTop:3, fontSize:9.5, opacity:.76 }}>ราคา Pass ทั้งแพ็ก</div>
+                            <strong style={{ display:"block", marginTop:1, fontSize:27, lineHeight:1, whiteSpace:"nowrap" }}>฿{money(coffeePassBenefit.passPrice)}</strong>
                           </div>
                           {coffeePassBenefit.savingsMax > 0 && (
-                            <div style={{ textAlign:"right" }}>
+                            <div style={{ flex:"0 0 auto", marginLeft:"auto", paddingLeft:10, borderLeft:"1px solid rgba(255,255,255,.2)", textAlign:"right" }}>
                               <div style={{ fontSize:9.5, opacity:.75 }}>ประหยัดสูงสุด</div>
-                              <strong style={{ display:"block", marginTop:1, color:"#fff", fontSize:18 }}>฿{money(coffeePassBenefit.savingsMax)}</strong>
+                              <strong style={{ display:"block", marginTop:1, color:"#fff", fontSize:17, whiteSpace:"nowrap" }}>฿{money(coffeePassBenefit.savingsMax)}</strong>
                             </div>
                           )}
                         </div>
 
-                        <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:6, marginTop:9 }}>
+                        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(68px, 1fr))", gap:6, marginTop:9 }}>
                           {[
                             [money(coffeePassBenefit.perCup), "บาท / แก้ว"],
                             [coffeePassBenefit.uses, "สิทธิ์ทั้งหมด"],
@@ -2617,9 +2620,11 @@ export default function CustomerOrder({ shopUid }) {
                         <div style={{ marginTop:12, fontSize:10.5, opacity:.78 }}>เลือกเมนูที่ร่วมรายการได้ตามใจ · จ่ายเพิ่มเฉพาะ option ที่มีราคาเพิ่ม</div>
                         <div style={{ marginTop:14 }}>
                           {coffeePass.enabled ? (
-                            <button type="button" onClick={(event) => { event.stopPropagation(); buyCoffeePass(); }} style={{ width:"100%", padding:"11px 16px", border:0, borderRadius:12, background:"#fff", color:COLORS.sageDark, boxShadow:"0 7px 18px rgba(0,59,92,.18)", fontSize:13.5, fontWeight:900 }}>
-                              ซื้อ {coffeePass.name || "Coffee Pass"}{coffeePassBenefit.savingsMax > 0 ? ` · ประหยัดสูงสุด ฿${money(coffeePassBenefit.savingsMax)}` : ""}
-                            </button>
+                            <div className="coffee-pass-buy-border">
+                              <button type="button" onClick={(event) => { event.stopPropagation(); buyCoffeePass(); }} style={{ width:"100%", padding:"10px 12px", border:0, borderRadius:12, background:"#fff", color:COLORS.sageDark, fontSize:13, fontWeight:900, whiteSpace:"nowrap" }}>
+                                ซื้อเลย · ฿{money(coffeePassBenefit.passPrice)}
+                              </button>
+                            </div>
                           ) : <div style={{ padding:"9px 10px", borderRadius:12, background:"rgba(255,255,255,.15)", textAlign:"center", fontSize:10.5, fontWeight:700 }}>ปิดขายชั่วคราว</div>}
                         </div>
                         <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:5, marginTop:13, paddingTop:10, borderTop:"1px solid rgba(255,255,255,.18)", fontSize:10.5, fontWeight:700, opacity:.9 }}>
