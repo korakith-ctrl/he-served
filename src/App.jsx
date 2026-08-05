@@ -299,7 +299,7 @@ function defaultState() {
     menus,
     sales: [],
     purchases: [],
-    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true, slipTestMode: false, bannerImageUrl: "", bannerImageUrls: [], categoryOrder: [], defaultPackagingLines: [], loyaltyBeanGoal: 10, seasonalEffect: "auto", coffeePass: { enabled: false, days: 5, discountPercent: 10 } },
+    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true, slipTestMode: false, bannerImageUrl: "", bannerImageUrls: [], categoryOrder: [], defaultPackagingLines: [], loyaltyBeanGoal: 10, seasonalEffect: "auto", coffeePass: { name: "Coffee Pass", enabled: false, days: 5, discountPercent: 10, menuIds: [] } },
     optionGroups,
     promotions: [],
   };
@@ -368,9 +368,11 @@ function normalizeData(raw) {
       loyaltyBeanGoal: raw.settings?.loyaltyBeanGoal || 10,
       seasonalEffect: ["off", "auto", "christmas", "songkran"].includes(raw.settings?.seasonalEffect) ? raw.settings.seasonalEffect : "auto",
       coffeePass: {
+        name: String(raw.settings?.coffeePass?.name || "Coffee Pass"),
         enabled: raw.settings?.coffeePass?.enabled === true,
         days: Math.min(30, Math.max(2, Number(raw.settings?.coffeePass?.days) || 5)),
         discountPercent: Math.min(50, Math.max(1, Number(raw.settings?.coffeePass?.discountPercent) || 10)),
+        menuIds: (raw.settings?.coffeePass?.menuIds || []).filter(Boolean),
       },
     },
     optionGroups: (raw.optionGroups || []).filter(Boolean).map((g) => ({
@@ -674,6 +676,7 @@ const TABS = [
   { id: "orders", label: "Orders", icon: "receipt" },
   { id: "menus", label: "Menu & Recipes", icon: "cup" },
   { id: "promotions", label: "Promotions", icon: "discount" },
+  { id: "packages", label: "Packages", icon: "calendar-repeat" },
   { id: "loyalty", label: "Loyalty Beans", icon: "coffee" },
   { id: "options", label: "Add-on Options", icon: "list-details" },
   { id: "ingredients", label: "Inventory & Stock", icon: "box-multiple" },
@@ -1683,6 +1686,7 @@ function ShopApp({ uid, user, theme, onToggleTheme }) {
           {tab === "orders" && <OrdersPanel uid={uid} orders={orders} recordSale={recordSale} cancelOrder={cancelOrder} awardLoyaltyBeans={awardLoyaltyBeans} revokeLoyaltyBeans={revokeLoyaltyBeans} showToast={showToast} data={data} ingredientsById={ingredientsById} />}
           {tab === "menus" && <MenusPanel data={dataForDisplay} ingredientsById={ingredientsById} updateData={updateData} showToast={showToast} />}
           {tab === "promotions" && <PromotionsPanel data={data} orders={orders} updateData={updateData} showToast={showToast} />}
+          {tab === "packages" && <CoffeePassPanel data={data} orders={orders} updateData={updateData} showToast={showToast} />}
           {tab === "ingredients" && <IngredientsPanel uid={uid} data={data} updateData={updateData} showToast={showToast} onSaveAccounting={saveAccountingTransaction} isAccountingPeriodClosed={isAccountingPeriodClosed} />}
           {tab === "reports" && <ReportsPanel data={dataForDisplay} orders={orders} shopName={data.settings.shopName} showToast={showToast} />}
           {tab === "accounting" && <AccountingPanel transactions={accountingTransactions} assets={accountingAssets} recurringExpenses={recurringExpenses} accounts={accountingAccounts} reconciliations={accountReconciliations} ownerReimbursements={ownerReimbursements} ownerCapitalMovements={ownerCapitalMovements} accountingSettings={accountingSettings} periodClosings={accountingPeriodClosings} sales={dataForDisplay.sales} overheadPerCup={data.settings.overheadPerCup} onSave={saveAccountingTransaction} onDelete={deleteAccountingTransaction} onSaveAsset={saveAccountingAsset} onDeleteAsset={deleteAccountingAsset} onSaveRecurring={saveRecurringExpense} onDeleteRecurring={deleteRecurringExpense} onUpdateOccurrence={updateRecurringOccurrence} onUpdateAccount={updateAccountingAccount} onSaveReconciliation={saveAccountReconciliation} onSaveOwnerReimbursement={saveOwnerReimbursement} onDeleteOwnerReimbursement={deleteOwnerReimbursement} onSaveOwnerCapitalMovement={saveOwnerCapitalMovement} onDeleteOwnerCapitalMovement={deleteOwnerCapitalMovement} onSaveSettings={saveAccountingSettings} onSetPeriodClosed={setAccountingPeriodClosed} showToast={showToast} />}
@@ -3742,7 +3746,7 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, 
                     {o.coffeePass?.deliveryDates && (
                       <div style={{ margin: compact ? "5px 0" : "8px 0", padding: compact ? 6 : 9, borderRadius: 9, background: "var(--sage-light)", border: "1px solid var(--sage)" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 5, color: "var(--espresso-4)", fontSize: compact ? 9.5 : 11, fontWeight: 700 }}>
-                          <span>Coffee Pass {o.coffeePass.days} วัน</span>
+                          <span>{o.coffeePass.name || "Coffee Pass"} {o.coffeePass.days} วัน</span>
                           <span>ลด {o.coffeePass.discountPercent}%</span>
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>
@@ -8421,6 +8425,133 @@ function SettingsField({ label, error, suffix, children }) {
   );
 }
 
+function CoffeePassPanel({ data, orders, updateData, showToast }) {
+  const saved = data.settings.coffeePass || { name: "Coffee Pass", enabled: false, days: 5, discountPercent: 10, menuIds: [] };
+  const drinkMenus = useMemo(() => data.menus.filter((menu) => productTypeOf(menu) === "drink"), [data.menus]);
+  const [name, setName] = useState(saved.name || "Coffee Pass");
+  const [enabled, setEnabled] = useState(saved.enabled === true);
+  const [days, setDays] = useState(String(saved.days || 5));
+  const [discount, setDiscount] = useState(String(saved.discountPercent || 10));
+  const [allMenus, setAllMenus] = useState((saved.menuIds || []).length === 0);
+  const [menuIds, setMenuIds] = useState(saved.menuIds || []);
+
+  const daysNum = Number(days);
+  const discountNum = Number(discount);
+  const valid = name.trim() && Number.isInteger(daysNum) && daysNum >= 2 && daysNum <= 30 && Number.isFinite(discountNum) && discountNum >= 1 && discountNum <= 50 && (allMenus || menuIds.length > 0);
+  const normalizedMenuIds = allMenus ? [] : menuIds;
+  const dirty = name.trim() !== (saved.name || "Coffee Pass") || enabled !== (saved.enabled === true) || days !== String(saved.days || 5) || discount !== String(saved.discountPercent || 10) || JSON.stringify(normalizedMenuIds) !== JSON.stringify(saved.menuIds || []);
+
+  const passOrders = (orders || []).filter((order) => order.coffeePass);
+  const activePasses = passOrders.filter((order) => !["done", "cancelled"].includes(order.status));
+  const collectedCount = passOrders.reduce((sum, order) => {
+    const entries = Array.isArray(order.coffeePass?.deliveryDates) ? order.coffeePass.deliveryDates : Object.values(order.coffeePass?.deliveryDates || {});
+    return sum + entries.filter((entry) => entry.status === "collected").length;
+  }, 0);
+  const sampleMenu = drinkMenus.find((menu) => allMenus || menuIds.includes(menu.id)) || drinkMenus[0];
+  const sampleUnitPrice = sampleMenu ? Math.round(sampleMenu.priceStore * (1 - (discountNum || 0) / 100) * 100) / 100 : 0;
+  const sampleTotal = Math.round(sampleUnitPrice * (daysNum || 0) * 100) / 100;
+
+  function toggleMenu(menuId) {
+    setMenuIds((ids) => ids.includes(menuId) ? ids.filter((id) => id !== menuId) : [...ids, menuId]);
+  }
+
+  function savePackage() {
+    if (!valid) return;
+    updateData((next) => {
+      next.settings.coffeePass = {
+        name: name.trim(), enabled, days: daysNum, discountPercent: discountNum, menuIds: normalizedMenuIds,
+      };
+    });
+    showToast(enabled ? "บันทึกและเปิดขายแพ็กเกจแล้ว" : "บันทึกแพ็กเกจแล้ว");
+  }
+
+  return (
+    <div className="pkg-wrap">
+      <style>{`
+        .pkg-wrap { max-width: 1120px; }
+        .pkg-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; }
+        .pkg-grid { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(300px,.85fr); gap:18px; align-items:start; }
+        .pkg-card { background:var(--surface); border:1px solid var(--line); border-radius:18px; padding:20px; box-shadow:0 4px 18px rgba(0,0,0,.035); }
+        .pkg-card h2 { margin:0; color:var(--espresso-5); font-size:17px; }
+        .pkg-label { display:block; margin-bottom:6px; color:var(--espresso-4); font-size:12.5px; font-weight:700; }
+        .pkg-fields { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+        .pkg-menu-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; max-height:330px; overflow:auto; margin-top:10px; }
+        .pkg-menu { display:flex; align-items:center; gap:9px; min-width:0; padding:9px 10px; border:1px solid var(--line); border-radius:11px; background:var(--surface); color:var(--espresso-4); text-align:left; }
+        .pkg-menu.active { border-color:var(--sage); background:var(--sage-light); color:var(--sage-dark); }
+        .pkg-stat-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:18px; }
+        .pkg-stat { padding:12px; border:1px solid var(--line); border-radius:12px; background:var(--cream-2); }
+        .pkg-preview { padding:20px; border-radius:20px; color:#fff; background:linear-gradient(145deg,#003B5C,#0077A8 62%,#00A3E0); box-shadow:0 16px 35px rgba(0,91,133,.22); }
+        @media(max-width:850px){ .pkg-grid{grid-template-columns:1fr}.pkg-menu-grid{grid-template-columns:1fr}.pkg-fields{grid-template-columns:1fr}.pkg-head{flex-direction:column}.pkg-stat-grid{grid-template-columns:1fr 1fr 1fr} }
+      `}</style>
+
+      <div className="pkg-head">
+        <div>
+          <p style={{ margin:0, color:"var(--sage-dark)", fontSize:11.5, fontWeight:800, letterSpacing:".08em", textTransform:"uppercase" }}>Subscriptions</p>
+          <h1 style={{ margin:"3px 0 4px", color:"var(--espresso-5)", fontFamily:"var(--f-display)", fontSize:26 }}>สร้างแพ็กเกจ Coffee Pass</h1>
+          <p style={{ margin:0, color:"var(--espresso-2)", fontSize:13 }}>ลูกค้าชำระล่วงหน้าครั้งเดียว รับเมนูและตัวเลือกเดิมวันละ 1 แก้ว</p>
+        </div>
+        <span style={{ padding:"7px 11px", borderRadius:999, color:enabled ? "var(--success-dark)" : "var(--espresso-2)", background:enabled ? "var(--success-light)" : "var(--cream-2)", fontSize:12, fontWeight:800 }}>
+          {enabled ? "● เปิดขายอยู่" : "○ ยังไม่เปิดขาย"}
+        </span>
+      </div>
+
+      <div className="pkg-grid">
+        <div className="pkg-card">
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, paddingBottom:16, marginBottom:16, borderBottom:"1px solid var(--line)" }}>
+            <div><h2>รายละเอียดแพ็กเกจ</h2><div style={{ marginTop:3, color:"var(--espresso-2)", fontSize:11.5 }}>ตั้งค่าแล้วกดบันทึกด้านล่าง</div></div>
+            <OptgToggle checked={enabled} onChange={setEnabled} color="var(--sage)" />
+          </div>
+
+          <label className="pkg-label">ชื่อแพ็กเกจ</label>
+          <TextField className="cfield" style={{ height:44, marginBottom:14 }} value={name} onChange={setName} placeholder="เช่น Weekday Coffee Pass" />
+          <div className="pkg-fields">
+            <div><label className="pkg-label">จำนวนวัน</label><input className="cfield" style={{ height:44 }} type="number" min="2" max="30" value={days} onChange={(event) => setDays(event.target.value)} /></div>
+            <div><label className="pkg-label">ส่วนลด (%)</label><input className="cfield" style={{ height:44 }} type="number" min="1" max="50" value={discount} onChange={(event) => setDiscount(event.target.value)} /></div>
+          </div>
+          {(!valid && dirty) && <div style={{ marginTop:9, color:"var(--danger)", fontSize:11.5 }}>กรอกชื่อ จำนวนวัน 2–30 วัน ส่วนลด 1–50% และเลือกเมนูอย่างน้อย 1 รายการ</div>}
+
+          <div style={{ marginTop:20, paddingTop:17, borderTop:"1px solid var(--line)" }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10 }}>
+              <div><h2>เมนูที่ร่วมแพ็กเกจ</h2><div style={{ marginTop:3, color:"var(--espresso-2)", fontSize:11.5 }}>{allMenus ? `เครื่องดื่มทั้งหมด ${drinkMenus.length} เมนู` : `เลือกแล้ว ${menuIds.length} เมนู`}</div></div>
+              <button type="button" className={allMenus ? "cbtn cbtn-accent" : "cbtn"} onClick={() => setAllMenus((value) => !value)}>{allMenus ? "✓ ทุกเมนู" : "เลือกทุกเมนู"}</button>
+            </div>
+            {!allMenus && (
+              <div className="pkg-menu-grid">
+                {drinkMenus.map((menu) => {
+                  const selected = menuIds.includes(menu.id);
+                  return <button type="button" key={menu.id} className={`pkg-menu${selected ? " active" : ""}`} onClick={() => toggleMenu(menu.id)}><Icon name={selected ? "square-check" : "square"} size={15} /><span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>{menu.name}</span><small>฿{money(menu.priceStore)}</small></button>;
+                })}
+              </div>
+            )}
+          </div>
+
+          <div style={{ marginTop:18, padding:"10px 12px", borderRadius:11, background:"var(--cream-2)", color:"var(--espresso-3)", fontSize:11.5, lineHeight:1.6 }}>
+            ส่วนลดใช้กับราคาเมนูเท่านั้น ส่วนเพิ่มนม/เมล็ดคิดเต็ม · ไม่ซ้อน Hot Deal · รับต่อเนื่องจากวันเริ่มแพ็ก
+          </div>
+          <button type="button" className="cbtn cbtn-accent" disabled={!dirty || !valid} onClick={savePackage} style={{ width:"100%", minHeight:44, marginTop:14, opacity:!dirty || !valid ? .5 : 1 }}>บันทึกแพ็กเกจ</button>
+        </div>
+
+        <div style={{ display:"flex", flexDirection:"column", gap:18 }}>
+          <div className="pkg-stat-grid">
+            {[['ขายทั้งหมด', passOrders.length], ['กำลังใช้งาน', activePasses.length], ['รับแล้ว', collectedCount]].map(([label,value]) => <div className="pkg-stat" key={label}><div style={{ color:"var(--espresso-2)", fontSize:10.5 }}>{label}</div><div style={{ marginTop:3, color:"var(--espresso-5)", fontSize:22, fontWeight:800 }}>{value}</div></div>)}
+          </div>
+          <div className="pkg-preview">
+            <div style={{ opacity:.72, fontSize:10.5, fontWeight:800, letterSpacing:".1em" }}>CUSTOMER PREVIEW</div>
+            <div style={{ marginTop:15, fontSize:25, fontWeight:800 }}>{name.trim() || "Coffee Pass"}</div>
+            <div style={{ marginTop:5, opacity:.82, fontSize:13 }}>รับวันละ 1 แก้ว · {daysNum || 0} วัน</div>
+            <div style={{ display:"flex", alignItems:"baseline", gap:8, marginTop:20 }}><span style={{ fontSize:34, fontWeight:800 }}>฿{money(sampleTotal)}</span><span style={{ opacity:.75, fontSize:12 }}>ประหยัด {discountNum || 0}%</span></div>
+            <div style={{ marginTop:6, opacity:.72, fontSize:11.5 }}>{sampleMenu ? `${sampleMenu.name} · วันละ ฿${money(sampleUnitPrice)}` : "เพิ่มเมนูเครื่องดื่มก่อนสร้างแพ็กเกจ"}</div>
+          </div>
+          <div className="pkg-card">
+            <h2>วิธีทำงาน</h2>
+            <ol style={{ margin:"10px 0 0", paddingLeft:20, color:"var(--espresso-3)", fontSize:12, lineHeight:1.9 }}><li>ลูกค้าเลือกแพ็กจากหน้าเมนู</li><li>เลือกสูตรและวันเริ่ม แล้วชำระครั้งเดียว</li><li>บอร์ดออเดอร์แสดงเช็กลิสต์รับรายวัน</li><li>ครบทุกวัน ระบบปิดแพ็กและเพิ่มเมล็ดสะสม</li></ol>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ไม่มี Accordion สำเร็จรูปในระบบมาก่อน สร้างใหม่แบบง่ายที่สุด — ปิดเป็นค่าเริ่มต้นเสมอตามสเปก
 function SettingsAccordion({ title, children }) {
   const [open, setOpen] = useState(false);
@@ -8566,9 +8697,6 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
   const [platforms, setPlatforms] = useState(s.platforms);
   const [promptpayId, setPromptpayId] = useState(s.promptpayId || "");
   const [seasonalEffect, setSeasonalEffect] = useState(s.seasonalEffect || "auto");
-  const [coffeePassEnabled, setCoffeePassEnabled] = useState(s.coffeePass?.enabled === true);
-  const [coffeePassDays, setCoffeePassDays] = useState(String(s.coffeePass?.days || 5));
-  const [coffeePassDiscount, setCoffeePassDiscount] = useState(String(s.coffeePass?.discountPercent || 10));
   const originalBannerUrls = s.bannerImageUrls && s.bannerImageUrls.length ? s.bannerImageUrls : (s.bannerImageUrl ? [s.bannerImageUrl] : []);
   const [bannerImageUrls, setBannerImageUrls] = useState(originalBannerUrls);
   const [editingBannerIdx, setEditingBannerIdx] = useState(null);
@@ -8646,9 +8774,6 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
   const shopNameError = shopName.trim() ? "" : "กรุณาใส่ชื่อร้าน";
   const overheadNum = Number(overhead);
   const overheadError = overhead.trim() === "" || Number.isNaN(overheadNum) || overheadNum < 0 ? "กรอกตัวเลขที่มากกว่าหรือเท่ากับ 0" : "";
-  const coffeePassDaysNum = Number(coffeePassDays);
-  const coffeePassDiscountNum = Number(coffeePassDiscount);
-  const coffeePassError = coffeePassEnabled && (!Number.isInteger(coffeePassDaysNum) || coffeePassDaysNum < 2 || coffeePassDaysNum > 30 || !Number.isFinite(coffeePassDiscountNum) || coffeePassDiscountNum < 1 || coffeePassDiscountNum > 50);
   const platformNameCounts = useMemo(() => {
     const counts = {};
     for (const p of platforms) {
@@ -8665,7 +8790,7 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
     if (p.gpPercent === "" || Number.isNaN(gp) || gp < 0 || gp > 100) return "GP ต้องอยู่ระหว่าง 0-100";
     return "";
   }
-  const hasErrors = !!shopNameError || !!overheadError || coffeePassError || platforms.some((p) => !!platformErrorFor(p));
+  const hasErrors = !!shopNameError || !!overheadError || platforms.some((p) => !!platformErrorFor(p));
 
   const dirty =
     shopName !== s.shopName ||
@@ -8673,9 +8798,6 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
     JSON.stringify(platforms) !== JSON.stringify(s.platforms) ||
     promptpayId !== (s.promptpayId || "") ||
     seasonalEffect !== (s.seasonalEffect || "auto") ||
-    coffeePassEnabled !== (s.coffeePass?.enabled === true) ||
-    coffeePassDays !== String(s.coffeePass?.days || 5) ||
-    coffeePassDiscount !== String(s.coffeePass?.discountPercent || 10) ||
     JSON.stringify(bannerImageUrls) !== JSON.stringify(originalBannerUrls);
 
   useEffect(() => {
@@ -8694,9 +8816,6 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
     setPlatforms(s.platforms);
     setPromptpayId(s.promptpayId || "");
     setSeasonalEffect(s.seasonalEffect || "auto");
-    setCoffeePassEnabled(s.coffeePass?.enabled === true);
-    setCoffeePassDays(String(s.coffeePass?.days || 5));
-    setCoffeePassDiscount(String(s.coffeePass?.discountPercent || 10));
     setBannerImageUrls(originalBannerUrls);
     setEditingBannerIdx(null);
   }
@@ -8713,11 +8832,6 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
       next.settings.platforms = platforms;
       next.settings.promptpayId = promptpayId.trim();
       next.settings.seasonalEffect = seasonalEffect;
-      next.settings.coffeePass = {
-        enabled: coffeePassEnabled,
-        days: Number.isInteger(coffeePassDaysNum) && coffeePassDaysNum >= 2 && coffeePassDaysNum <= 30 ? coffeePassDaysNum : 5,
-        discountPercent: Number.isFinite(coffeePassDiscountNum) && coffeePassDiscountNum >= 1 && coffeePassDiscountNum <= 50 ? coffeePassDiscountNum : 10,
-      };
       next.settings.bannerImageUrls = bannerImageUrls.map((u) => u.trim()).filter(Boolean);
     });
     setTimeout(() => {
@@ -8882,32 +8996,6 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
 
         <div className="set-col">
           <OrderLinkCard uid={uid} />
-
-          <SettingsCard icon="calendar-repeat" title="Coffee Pass" subtitle="ขายแพ็กเครื่องดื่มเมนูเดิมและตัวเลือกเดิม รับวันละ 1 แก้ว ชำระล่วงหน้าครั้งเดียว">
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: coffeePassEnabled ? 16 : 0 }}>
-              <div>
-                <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--espresso-4)" }}>เปิดขาย Coffee Pass</div>
-                <div style={{ marginTop: 2, fontSize: 11.5, color: "var(--espresso-2)" }}>แสดงตัวเลือกแพ็กในเมนูเครื่องดื่มหน้าลูกค้า</div>
-              </div>
-              <OptgToggle checked={coffeePassEnabled} onChange={setCoffeePassEnabled} color="var(--sage)" />
-            </div>
-            {coffeePassEnabled && (
-              <>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                  <SettingsField label="จำนวนวัน" suffix="วัน">
-                    <input className="cfield" style={{ height: 42, paddingRight: 38 }} type="number" min="2" max="30" step="1" value={coffeePassDays} onChange={(e) => setCoffeePassDays(e.target.value)} />
-                  </SettingsField>
-                  <SettingsField label="ส่วนลด" suffix="%">
-                    <input className="cfield" style={{ height: 42, paddingRight: 30 }} type="number" min="1" max="50" step="1" value={coffeePassDiscount} onChange={(e) => setCoffeePassDiscount(e.target.value)} />
-                  </SettingsField>
-                </div>
-                {coffeePassError && <div style={{ marginTop: -6, color: "var(--danger)", fontSize: 11.5 }}>จำนวนวันต้องเป็น 2–30 วัน และส่วนลดต้องอยู่ระหว่าง 1–50%</div>}
-                <div style={{ marginTop: 5, padding: "10px 12px", borderRadius: 10, background: "var(--cream-2)", color: "var(--espresso-3)", fontSize: 11.5, lineHeight: 1.55 }}>
-                  ลดเฉพาะราคาเมนู ส่วนเพิ่มตัวเลือกคิดราคาเต็ม · ไม่ซ้อนกับ Hot Deal · วันรับจะเรียงต่อเนื่องจากวันเริ่มแพ็ก
-                </div>
-              </>
-            )}
-          </SettingsCard>
 
           <SettingsCard icon="sparkles" title="เอฟเฟกต์เทศกาลหน้าลูกค้า" subtitle="ตกแต่งทุกขั้นตอนของหน้าสั่งซื้อโดยไม่บังปุ่มหรือรบกวนการใช้งาน">
             <div className="set-season-grid" role="radiogroup" aria-label="เลือกเอฟเฟกต์เทศกาล">
