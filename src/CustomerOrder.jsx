@@ -68,6 +68,8 @@ function rewardOtpErrorMessage(error) {
 }
 
 const PANTONE_299C = "#00A3E0";
+// เปลี่ยนเป็น "legacy" เพื่อกลับไปใช้ Splash เดิมได้ทันที
+const CUSTOMER_SPLASH_VARIANT = "zone2-dark";
 const COLORS = {
   cream: "#F7FCFE", cream2: "#E8F7FC", surface: "#FFFFFF",
   espresso5: "#003B5C", espresso4: "#005B85", espresso3: "#35657D", espresso2: "#718A99",
@@ -375,6 +377,42 @@ const GLOBAL_CSS = `
   .offer-arrow-btn { transition: transform .2s ease, background .2s ease; }
   .offer-arrow-btn:hover { transform: scale(1.08); background: #C5EDFA; }
   .offer-arrow-btn:active { transform: scale(0.94); }
+  .zone2-splash {
+    position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; overflow: hidden;
+    color: #F7FBFF; background: radial-gradient(circle at 50% 42%, rgba(17,148,207,.12), transparent 30%), linear-gradient(145deg, #05070A 0%, #0A1017 55%, #05070A 100%);
+    transition: opacity .55s ease, visibility .55s ease;
+  }
+  .zone2-splash.is-leaving { opacity: 0; visibility: hidden; }
+  .zone2-splash-ambient { position: absolute; width: 34rem; aspect-ratio: 1; border-radius: 50%; filter: blur(90px); opacity: .12; background: #18A4DC; animation: zone2AmbientFloat 6s ease-in-out infinite alternate; }
+  .zone2-splash-ambient.one { top: -18rem; left: -12rem; }
+  .zone2-splash-ambient.two { right: -16rem; bottom: -20rem; animation-delay: -3s; }
+  .zone2-splash-stage { position: relative; width: min(78vw, 340px); display: flex; flex-direction: column; align-items: center; transform: translateY(-1vh); }
+  .zone2-splash-logo-wrap { position: relative; width: 100%; aspect-ratio: 1; display: grid; place-items: center; opacity: 0; transform: translateY(38px) scale(.74) rotate(-3deg); animation: zone2LogoEnter .9s cubic-bezier(.2,.9,.22,1.22) .12s forwards; }
+  .zone2-splash-logo { position: relative; z-index: 2; width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 18px 24px rgba(0,0,0,.4)); animation: zone2LogoBreathe 2.8s ease-in-out 1.15s infinite; }
+  .zone2-splash-logo-glow { position: absolute; inset: 26%; border-radius: 50%; background: #18A4DC; filter: blur(44px); opacity: 0; animation: zone2GlowPop 1.15s ease .35s forwards, zone2GlowPulse 2.8s ease-in-out 1.4s infinite; }
+  .zone2-splash-shine { position: absolute; z-index: 3; top: 22%; left: 25%; width: 15%; height: 55%; transform: translateX(-230%) skewX(-18deg); background: linear-gradient(90deg, transparent, rgba(255,255,255,.55), transparent); filter: blur(2px); mix-blend-mode: screen; opacity: 0; animation: zone2ShineSweep 1.15s ease 1.15s forwards; pointer-events: none; }
+  .zone2-splash-steam { position: absolute; z-index: 4; top: 4%; left: 50%; width: 52%; height: 26%; transform: translateX(-50%); pointer-events: none; }
+  .zone2-splash-steam-line { position: absolute; bottom: 0; width: 15px; height: 74px; border: 4px solid transparent; border-left-color: rgba(255,255,255,.7); border-radius: 50%; opacity: 0; filter: blur(.2px); animation: zone2SteamRise 2.15s ease-in-out infinite; }
+  .zone2-splash-steam-line.one { left: 22%; animation-delay: 1.05s; }
+  .zone2-splash-steam-line.two { left: 47%; height: 88px; animation-delay: 1.38s; }
+  .zone2-splash-steam-line.three { right: 18%; height: 66px; animation-delay: 1.7s; }
+  .zone2-splash-brand-copy { margin-top: -13%; text-align: center; opacity: 0; transform: translateY(14px); animation: zone2CopyEnter .55s ease .92s forwards; }
+  .zone2-splash-brand { font-size: clamp(1.35rem, 5vw, 1.8rem); font-weight: 850; letter-spacing: .28em; padding-left: .28em; }
+  .zone2-splash-tagline { margin-top: .42rem; color: rgba(247,251,255,.58); font-size: .78rem; letter-spacing: .14em; }
+  .zone2-splash-loader { display: flex; gap: 7px; margin-top: 1.45rem; opacity: 0; animation: zone2LoaderIn .35s ease 1.25s forwards; }
+  .zone2-splash-loader span { width: 7px; height: 7px; border-radius: 50%; background: #18A4DC; box-shadow: 0 0 13px rgba(24,164,220,.36); animation: zone2BeanBounce 1s ease-in-out infinite; }
+  .zone2-splash-loader span:nth-child(2) { animation-delay: .14s; }
+  .zone2-splash-loader span:nth-child(3) { animation-delay: .28s; }
+  @keyframes zone2LogoEnter { 0% { opacity: 0; transform: translateY(38px) scale(.74) rotate(-3deg); } 68% { opacity: 1; transform: translateY(-7px) scale(1.035) rotate(.8deg); } 100% { opacity: 1; transform: translateY(0) scale(1) rotate(0); } }
+  @keyframes zone2LogoBreathe { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-4px) scale(1.012); } }
+  @keyframes zone2GlowPop { to { opacity: .32; transform: scale(1.28); } }
+  @keyframes zone2GlowPulse { 0%,100% { opacity: .25; } 50% { opacity: .42; } }
+  @keyframes zone2ShineSweep { 0% { opacity: 0; transform: translateX(-230%) skewX(-18deg); } 25% { opacity: .8; } 100% { opacity: 0; transform: translateX(450%) skewX(-18deg); } }
+  @keyframes zone2SteamRise { 0% { opacity: 0; transform: translateY(12px) translateX(0) scale(.75) rotate(7deg); } 25% { opacity: .58; } 72% { opacity: .22; } 100% { opacity: 0; transform: translateY(-55px) translateX(13px) scale(1.15) rotate(-9deg); } }
+  @keyframes zone2CopyEnter { to { opacity: 1; transform: translateY(0); } }
+  @keyframes zone2LoaderIn { to { opacity: 1; } }
+  @keyframes zone2BeanBounce { 0%,60%,100% { transform: translateY(0) scale(1); opacity: .35; } 30% { transform: translateY(-7px) scale(1.1); opacity: 1; } }
+  @keyframes zone2AmbientFloat { to { transform: translate3d(28px,18px,0) scale(1.08); } }
   .banner-carousel { touch-action: pan-y; }
   .banner-slide { transition: opacity .45s ease; }
   .banner-carousel:focus-visible { outline: 3px solid rgba(0,163,224,.42); outline-offset: 2px; }
@@ -584,6 +622,7 @@ const GLOBAL_CSS = `
   }
   @media (prefers-reduced-motion: reduce) {
     .banner-slide { transition-duration: 0ms; }
+    .zone2-splash *, .zone2-splash *::before, .zone2-splash *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
     .coffee-pass-buy-border::before { animation: none; }
     .seasonal-effects { display: none; }
     .closed-order-page *, .closed-order-page *::before, .closed-order-page *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
@@ -890,7 +929,8 @@ function BrandLogo({ height = 64 }) {
   );
 }
 
-function LandingScreen({ seasonalEffect }) {
+// เก็บ Splash เดิมไว้เพื่อสลับกลับได้ทันทีหากต้องการ
+function LegacyLandingScreen({ seasonalEffect }) {
   const ringBase = {
     position: "absolute", inset: 0, borderRadius: "50%",
     animation: "ringRipple 2.6s cubic-bezier(0.2, 0.6, 0.35, 1) infinite",
@@ -917,6 +957,39 @@ function LandingScreen({ seasonalEffect }) {
           animation: "logoReveal 1.4s cubic-bezier(0.22, 1, 0.36, 1) both, logoBreathe 3.2s ease-in-out 1.4s infinite",
         }}>
           <BrandLogo height={250} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LandingScreen({ leaving = false }) {
+  return (
+    <div className="corder">
+      <style>{GLOBAL_CSS}</style>
+      <div className={`zone2-splash${leaving ? " is-leaving" : ""}`} role="status" aria-label="กำลังเปิดร้าน ZONE 2">
+        <div className="zone2-splash-ambient one" aria-hidden="true" />
+        <div className="zone2-splash-ambient two" aria-hidden="true" />
+
+        <div className="zone2-splash-stage">
+          <div className="zone2-splash-steam" aria-hidden="true">
+            <span className="zone2-splash-steam-line one" />
+            <span className="zone2-splash-steam-line two" />
+            <span className="zone2-splash-steam-line three" />
+          </div>
+
+          <div className="zone2-splash-logo-wrap">
+            <div className="zone2-splash-logo-glow" />
+            <img className="zone2-splash-logo" src="/logo-zone2.png" alt="ZONE 2 Coffee" />
+            <div className="zone2-splash-shine" aria-hidden="true" />
+          </div>
+
+          <div className="zone2-splash-brand-copy">
+            <div className="zone2-splash-brand">ZONE 2</div>
+            <div className="zone2-splash-tagline">Coffee in your zone.</div>
+          </div>
+
+          <div className="zone2-splash-loader" aria-hidden="true"><span /><span /><span /></div>
         </div>
       </div>
     </div>
@@ -1035,6 +1108,8 @@ export default function CustomerOrder({ shopUid }) {
   const [activeCategory, setActiveCategory] = useState(null);
   const [showCart, setShowCart] = useState(false);
   const [splashDone, setSplashDone] = useState(false);
+  const [splashMinimumElapsed, setSplashMinimumElapsed] = useState(false);
+  const [splashLeaving, setSplashLeaving] = useState(false);
   const [takeoverPromo, setTakeoverPromo] = useState(null);
   const [hasActiveOrder, setHasActiveOrder] = useState(false);
   const [headerRipple, setHeaderRipple] = useState(false);
@@ -1046,9 +1121,16 @@ export default function CustomerOrder({ shopUid }) {
   const [offerRippleId, setOfferRippleId] = useState(null);
 
   useEffect(() => {
-    const t = setTimeout(() => setSplashDone(true), 2000);
+    const t = setTimeout(() => setSplashMinimumElapsed(true), 2250);
     return () => clearTimeout(t);
   }, []);
+
+  useEffect(() => {
+    if (!splashMinimumElapsed || !authUid || menus === null) return undefined;
+    setSplashLeaving(true);
+    const t = setTimeout(() => setSplashDone(true), 560);
+    return () => clearTimeout(t);
+  }, [splashMinimumElapsed, authUid, menus]);
 
   // ฟัง auth state ตลอด ไม่ใช่ sign-in ครั้งเดียวตอนเปิดหน้า — เบราว์เซอร์บางตัว (เช่น in-app browser ของ LINE,
   // Safari private mode) ล้าง session ที่ persist ไว้กลางคันได้ ถ้า authUid ค้างค่าเก่าไว้ใน state เฉยๆ
@@ -2028,7 +2110,9 @@ export default function CustomerOrder({ shopUid }) {
   }
 
   if (!authUid || menus === null || !splashDone) {
-    return <LandingScreen seasonalEffect={activeSeasonalEffect} />;
+    return CUSTOMER_SPLASH_VARIANT === "legacy"
+      ? <LegacyLandingScreen seasonalEffect={activeSeasonalEffect} />
+      : <LandingScreen leaving={splashLeaving} />;
   }
 
   if (step === "myorders") {
