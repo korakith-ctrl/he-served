@@ -222,35 +222,27 @@ exports.resetCoffeePassPasscode = onCall({ region: REGION }, async (request) => 
   return { reset: true };
 });
 
-// Redeem exactly one use. The attempt ID makes retries idempotent, while the
-// transaction prevents two devices from spending the final use together.
-exports.redeemCoffeePass = onCall({ region: REGION }, async (request) => {
-  if (!request.auth) throw new HttpsError("unauthenticated", "กรุณาเข้าสู่ระบบก่อนใช้ Pass");
-  const { shopUid, passId, redemptionAttemptId, customerName, customerPhone, passcode, menuId, options, paymentMethod, pickupDate, note } = request.data || {};
-  if (!validShopUid(shopUid) || !passId || !/^[A-Za-z0-9_-]{16,100}$/.test(redemptionAttemptId || "")) {
-    throw new HttpsError("invalid-argument", "ข้อมูลการใช้ Pass ไม่ถูกต้อง");
-  }
-  const phone = normalizeThaiPhone(customerPhone);
-  if (!phone) throw new HttpsError("invalid-argument", "เบอร์เจ้าของ Pass ไม่ถูกต้อง");
-  if (!/^\d{6}$/.test(String(passcode || ""))) throw new HttpsError("invalid-argument", "Passcode ต้องเป็นตัวเลข 6 หลัก");
-  if (!String(customerName || "").trim() || !menuId || typeof pickupDate !== "string") throw new HttpsError("invalid-argument", "ข้อมูลออเดอร์ไม่ครบ");
-  if (!["promptpay", "cash", "thaihelpthai"].includes(paymentMethod)) throw new HttpsError("invalid-argument", "วิธีชำระค่าส่วนเพิ่มไม่ถูกต้อง");
-
+async function verifyCoffeePasscodeAttempt(shopUid, passId, redemptionAttemptId, passcode) {
   const secretRef = db.ref(`coffeePassSecrets/${shopUid}/${passId}`);
-  const passcodeAttempt = hashPasscode(passcode, (await secretRef.child("salt").once("value")).val() || "missing");
+  const salt = (await secretRef.child("salt").once("value")).val() || "missing";
+  const passcodeAttempt = hashPasscode(passcode, salt);
   const verification = await secretRef.transaction((current) => {
     if (!current) return undefined;
     const currentTime = Date.now();
     const verifiedAttempts = current.verifiedAttempts || {};
+    const failedAttemptIds = current.failedAttemptIds || {};
     if (verifiedAttempts[redemptionAttemptId]) return current;
+    if (failedAttemptIds[redemptionAttemptId]) return current;
     if ((Number(current.lockedUntil) || 0) > currentTime) return current;
     if (current.passcodeHash !== passcodeAttempt) {
       const failedAttempts = (Number(current.failedAttempts) || 0) + 1;
+      const recentFailed = Object.fromEntries(Object.entries(failedAttemptIds).slice(-19));
       return {
         ...current,
         failedAttempts: failedAttempts >= 5 ? 0 : failedAttempts,
         lockedUntil: failedAttempts >= 5 ? currentTime + 15 * 60 * 1000 : 0,
         lastFailedAt: currentTime,
+        failedAttemptIds: { ...recentFailed, [redemptionAttemptId]: currentTime },
       };
     }
     const recentVerified = Object.fromEntries(Object.entries(verifiedAttempts).slice(-19));
@@ -266,6 +258,42 @@ exports.redeemCoffeePass = onCall({ region: REGION }, async (request) => {
   const verifiedSecret = verification.snapshot.val();
   if ((Number(verifiedSecret.lockedUntil) || 0) > Date.now()) throw new HttpsError("resource-exhausted", "กรอก Passcode ผิดครบ 5 ครั้ง กรุณารอ 15 นาทีแล้วลองใหม่");
   if (!verifiedSecret.verifiedAttempts?.[redemptionAttemptId]) throw new HttpsError("permission-denied", "Passcode ไม่ถูกต้อง");
+}
+
+// Verify as soon as the customer finishes entering six digits. The same attempt
+// ID is then reused by redeemCoffeePass so checkout remains idempotent.
+exports.verifyCoffeePassPasscode = onCall({ region: REGION }, async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "กรุณาเข้าสู่ระบบก่อนใช้ Pass");
+  const { shopUid, customerPhone, passId, redemptionAttemptId, passcode } = request.data || {};
+  if (!validShopUid(shopUid) || !passId || !/^[A-Za-z0-9_-]{16,100}$/.test(redemptionAttemptId || "")) {
+    throw new HttpsError("invalid-argument", "ข้อมูลการตรวจสอบ Pass ไม่ถูกต้อง");
+  }
+  const phone = normalizeThaiPhone(customerPhone);
+  if (!phone || !/^\d{6}$/.test(String(passcode || ""))) throw new HttpsError("invalid-argument", "Passcode ต้องเป็นตัวเลข 6 หลัก");
+  const passSnap = await db.ref(`customers/${shopUid}/${phone}/passes/${passId}`).once("value");
+  const pass = passSnap.val();
+  if (!pass || Number(pass.remainingUses) <= 0 || Number(pass.expiresAt) < Date.now() || pass.status === "cancelled") {
+    throw new HttpsError("failed-precondition", "Pass นี้หมดอายุหรือไม่มีสิทธิ์คงเหลือแล้ว");
+  }
+  await verifyCoffeePasscodeAttempt(shopUid, passId, redemptionAttemptId, String(passcode));
+  return { valid: true };
+});
+
+// Redeem exactly one use. The attempt ID makes retries idempotent, while the
+// transaction prevents two devices from spending the final use together.
+exports.redeemCoffeePass = onCall({ region: REGION }, async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "กรุณาเข้าสู่ระบบก่อนใช้ Pass");
+  const { shopUid, passId, redemptionAttemptId, customerName, customerPhone, passcode, menuId, options, paymentMethod, pickupDate, note } = request.data || {};
+  if (!validShopUid(shopUid) || !passId || !/^[A-Za-z0-9_-]{16,100}$/.test(redemptionAttemptId || "")) {
+    throw new HttpsError("invalid-argument", "ข้อมูลการใช้ Pass ไม่ถูกต้อง");
+  }
+  const phone = normalizeThaiPhone(customerPhone);
+  if (!phone) throw new HttpsError("invalid-argument", "เบอร์เจ้าของ Pass ไม่ถูกต้อง");
+  if (!/^\d{6}$/.test(String(passcode || ""))) throw new HttpsError("invalid-argument", "Passcode ต้องเป็นตัวเลข 6 หลัก");
+  if (!String(customerName || "").trim() || !menuId || typeof pickupDate !== "string") throw new HttpsError("invalid-argument", "ข้อมูลออเดอร์ไม่ครบ");
+  if (!["promptpay", "cash", "thaihelpthai"].includes(paymentMethod)) throw new HttpsError("invalid-argument", "วิธีชำระค่าส่วนเพิ่มไม่ถูกต้อง");
+
+  await verifyCoffeePasscodeAttempt(shopUid, passId, redemptionAttemptId, String(passcode));
 
   const [settingsSnap, menusSnap, optionGroupsSnap] = await Promise.all([
     db.ref(`shops/${shopUid}/settings`).once("value"),
