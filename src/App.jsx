@@ -8499,7 +8499,7 @@ function CoffeePassPanel({ data, orders, updateData, showToast }) {
         <div className="pkg-card">
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, paddingBottom:16, marginBottom:16, borderBottom:"1px solid var(--line)" }}>
             <div><h2>รายละเอียดแพ็กเกจ</h2><div style={{ marginTop:3, color:"var(--espresso-2)", fontSize:11.5 }}>ตั้งค่าแล้วกดบันทึกด้านล่าง</div></div>
-            <OptgToggle checked={enabled} onChange={setEnabled} color="var(--sage)" />
+            <div style={{ display:"flex", alignItems:"center", gap:8 }}><span style={{ color:enabled ? "var(--success-dark)" : "var(--espresso-2)", fontSize:11.5, fontWeight:700 }}>{enabled ? "เปิดขาย" : "แบบร่าง"}</span><OptgToggle checked={enabled} onChange={setEnabled} color="var(--sage)" /></div>
           </div>
 
           <label className="pkg-label">ชื่อแพ็กเกจ</label>
@@ -8528,7 +8528,7 @@ function CoffeePassPanel({ data, orders, updateData, showToast }) {
           <div style={{ marginTop:18, padding:"10px 12px", borderRadius:11, background:"var(--cream-2)", color:"var(--espresso-3)", fontSize:11.5, lineHeight:1.6 }}>
             ส่วนลดใช้กับราคาเมนูเท่านั้น ส่วนเพิ่มนม/เมล็ดคิดเต็ม · ไม่ซ้อน Hot Deal · รับต่อเนื่องจากวันเริ่มแพ็ก
           </div>
-          <button type="button" className="cbtn cbtn-accent" disabled={!dirty || !valid} onClick={savePackage} style={{ width:"100%", minHeight:44, marginTop:14, opacity:!dirty || !valid ? .5 : 1 }}>บันทึกแพ็กเกจ</button>
+          <button type="button" className="cbtn cbtn-accent" disabled={!dirty || !valid} onClick={savePackage} style={{ width:"100%", minHeight:44, marginTop:14, opacity:!dirty || !valid ? .5 : 1 }}>{enabled ? "บันทึกและเปิดขาย" : "บันทึกแบบร่าง (ยังไม่แสดงหน้าลูกค้า)"}</button>
         </div>
 
         <div style={{ display:"flex", flexDirection:"column", gap:18 }}>

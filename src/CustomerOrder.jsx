@@ -214,6 +214,7 @@ function genLineId() {
 }
 
 const HOT_DEAL_CATEGORY = "HOT DEAL";
+const COFFEE_PASS_CATEGORY = "COFFEE PASS";
 
 function productTypeOf(item) {
   if (item?.productType === "food") return "food";
@@ -1224,8 +1225,15 @@ export default function CustomerOrder({ shopUid }) {
     const ordered = categoryOrder && categoryOrder.length
       ? [...categoryOrder.filter((c) => seen.includes(c)), ...seen.filter((c) => !categoryOrder.includes(c))]
       : seen;
-    return activePromotions.length > 0 ? [HOT_DEAL_CATEGORY, ...ordered] : ordered;
-  }, [menus, activePromotions, categoryOrder]);
+    const featured = [];
+    if (activePromotions.length > 0) featured.push(HOT_DEAL_CATEGORY);
+    const passMenuIds = coffeePass.menuIds || [];
+    const hasCoffeePassMenus = coffeePass.enabled && menus.some((menu) =>
+      productTypeOf(menu) === "drink" && menu.available !== false && (passMenuIds.length === 0 || passMenuIds.includes(menu.id))
+    );
+    if (hasCoffeePassMenus) featured.push(COFFEE_PASS_CATEGORY);
+    return [...featured, ...ordered];
+  }, [menus, activePromotions, categoryOrder, coffeePass]);
 
   useEffect(() => {
     if (categories.length > 0 && !activeCategory) setActiveCategory(categories[0]);
@@ -2320,7 +2328,48 @@ export default function CustomerOrder({ shopUid }) {
             )}
             {categories.map((cat) => (
               <section key={cat} data-category={cat} ref={(el) => { sectionRefs.current[cat] = el; }} style={{ padding: "16px 6px 0" }}>
-                {cat === HOT_DEAL_CATEGORY ? (
+                {cat === COFFEE_PASS_CATEGORY ? (
+                  <>
+                    <div style={{ margin: "0 10px 15px", padding: "18px", borderRadius: 20, color: "#fff", background: "linear-gradient(145deg, #003B5C, #0077A8 62%, #00A3E0)", boxShadow: "0 16px 34px rgba(0,91,133,.2)", position: "relative", overflow: "hidden" }}>
+                      <div aria-hidden="true" style={{ position: "absolute", width: 150, height: 150, borderRadius: "50%", right: -55, top: -70, border: "22px solid rgba(255,255,255,.09)" }} />
+                      <div style={{ position: "relative" }}>
+                        <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".12em", opacity: .72 }}>PREPAID COFFEE PACKAGE</div>
+                        <h2 style={{ margin: "6px 0 2px", fontFamily: "'Space Grotesk', sans-serif", fontSize: 25, lineHeight: 1.12 }}>{coffeePass.name || "Coffee Pass"}</h2>
+                        <div style={{ fontSize: 12.5, opacity: .82 }}>รับวันละ 1 แก้ว นาน {coffeePass.days} วัน · ลด {coffeePass.discountPercent}%</div>
+                        <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 13 }}>
+                          {["ชำระครั้งเดียว", "เลือกวันเริ่มได้", "สูตรเดิมทุกวัน"].map((text) => <span key={text} style={{ padding: "4px 8px", border: "1px solid rgba(255,255,255,.24)", borderRadius: 999, background: "rgba(255,255,255,.1)", fontSize: 9.5, fontWeight: 700 }}>{text}</span>)}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ margin: "0 10px 9px", display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 10 }}>
+                      <div><h2 style={{ margin: 0, color: COLORS.espresso5, fontFamily: "'Space Grotesk', sans-serif", fontSize: 18 }}>เลือกเมนูสำหรับแพ็ก</h2><div style={{ marginTop: 2, color: COLORS.espresso2, fontSize: 10.5 }}>ส่วนเพิ่มตัวเลือกคิดราคาเต็ม</div></div>
+                    </div>
+                    {(menus || []).filter((menu) => productTypeOf(menu) === "drink" && menu.available !== false && (coffeePass.menuIds.length === 0 || coffeePass.menuIds.includes(menu.id))).map((menu) => {
+                      const passUnit = Math.round(menu.priceStore * (1 - coffeePass.discountPercent / 100) * 100) / 100;
+                      const passTotal = Math.round(passUnit * coffeePass.days * 100) / 100;
+                      return (
+                        <button
+                          type="button"
+                          key={menu.id}
+                          onClick={() => startCoffeePass(menu)}
+                          style={{ ...GLASS_PANEL, width: "calc(100% - 20px)", margin: "0 10px 9px", padding: "11px 12px", borderRadius: 15, display: "flex", alignItems: "center", gap: 12, border: "1px solid rgba(0,163,224,.18)", textAlign: "left", color: COLORS.espresso4 }}
+                        >
+                          <MenuThumb imageUrl={menu.imageUrl} productType="drink" size={64} />
+                          <span style={{ flex: 1, minWidth: 0 }}>
+                            <span style={{ display: "block", color: COLORS.espresso5, fontSize: 14, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{menu.name}</span>
+                            <span style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+                              <span style={{ color: COLORS.espresso2, fontSize: 10.5, textDecoration: "line-through" }}>{money(menu.priceStore * coffeePass.days)}</span>
+                              <span style={{ color: COLORS.sageDark, fontSize: 15, fontWeight: 800 }}>{money(passTotal)}</span>
+                            </span>
+                            <span style={{ display: "block", marginTop: 2, color: COLORS.espresso2, fontSize: 9.5 }}>วันละ {money(passUnit)} · {coffeePass.days} วัน</span>
+                          </span>
+                          <span style={{ width: 34, height: 34, borderRadius: 11, display: "grid", placeItems: "center", flexShrink: 0, background: COLORS.sage, color: "#fff" }}><i className="ti ti-arrow-right" aria-hidden="true" /></span>
+                        </button>
+                      );
+                    })}
+                  </>
+                ) : cat === HOT_DEAL_CATEGORY ? (
                   <>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "0 16px 14px" }}>
                       <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 22, color: COLORS.espresso5, margin: 0 }}>Today's Offer</h2>
