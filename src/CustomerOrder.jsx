@@ -68,8 +68,8 @@ function rewardOtpErrorMessage(error) {
 }
 
 const PANTONE_299C = "#00A3E0";
-// เปลี่ยนเป็น "legacy" เพื่อกลับไปใช้ Splash เดิมได้ทันที
-const CUSTOMER_SPLASH_VARIANT = "zone2-dark";
+// ตัวเลือก: "minimal-white" (ปัจจุบัน), "zone2-dark" หรือ "legacy"
+const CUSTOMER_SPLASH_VARIANT = "minimal-white";
 const COLORS = {
   cream: "#F7FCFE", cream2: "#E8F7FC", surface: "#FFFFFF",
   espresso5: "#003B5C", espresso4: "#005B85", espresso3: "#35657D", espresso2: "#718A99",
@@ -377,6 +377,15 @@ const GLOBAL_CSS = `
   .offer-arrow-btn { transition: transform .2s ease, background .2s ease; }
   .offer-arrow-btn:hover { transform: scale(1.08); background: #C5EDFA; }
   .offer-arrow-btn:active { transform: scale(0.94); }
+  .zone2-minimal-splash { position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; overflow: hidden; background: #FFFFFF; transition: opacity .5s ease, visibility .5s ease; }
+  .zone2-minimal-splash.is-leaving { opacity: 0; visibility: hidden; }
+  .zone2-minimal-mark { position: relative; width: clamp(104px, 30vw, 132px); aspect-ratio: 1058 / 1352; opacity: 0; transform: translateY(24px) scale(.68); animation: zone2MinimalEnter 1s cubic-bezier(.2,.88,.22,1.22) .12s forwards; }
+  .zone2-minimal-mark::before { content: ""; position: absolute; z-index: -1; inset: 18% 5%; border-radius: 50%; background: rgba(0,163,224,.13); filter: blur(30px); opacity: 0; animation: zone2MinimalGlow 1.1s ease .25s forwards; }
+  .zone2-minimal-logo-crop { position: absolute; inset: 0; overflow: hidden; }
+  .zone2-minimal-logo-crop img { position: absolute; width: 193.57%; height: auto; max-width: none; left: -46.79%; top: -25.74%; display: block; animation: zone2MinimalBreathe 2.8s ease-in-out 1.2s infinite; }
+  @keyframes zone2MinimalEnter { 0% { opacity: 0; transform: translateY(24px) scale(.68); } 66% { opacity: 1; transform: translateY(-5px) scale(1.055); } 84% { transform: translateY(2px) scale(.985); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
+  @keyframes zone2MinimalGlow { 0% { opacity: 0; transform: scale(.72); } 55% { opacity: .75; } 100% { opacity: .35; transform: scale(1.12); } }
+  @keyframes zone2MinimalBreathe { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-3px) scale(1.012); } }
   .zone2-splash {
     position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; overflow: hidden;
     color: #F7FBFF; background: radial-gradient(circle at 50% 42%, rgba(17,148,207,.12), transparent 30%), linear-gradient(145deg, #05070A 0%, #0A1017 55%, #05070A 100%);
@@ -622,6 +631,7 @@ const GLOBAL_CSS = `
   }
   @media (prefers-reduced-motion: reduce) {
     .banner-slide { transition-duration: 0ms; }
+    .zone2-minimal-splash *, .zone2-minimal-splash *::before, .zone2-minimal-splash *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
     .zone2-splash *, .zone2-splash *::before, .zone2-splash *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
     .coffee-pass-buy-border::before { animation: none; }
     .seasonal-effects { display: none; }
@@ -963,7 +973,7 @@ function LegacyLandingScreen({ seasonalEffect }) {
   );
 }
 
-function LandingScreen({ leaving = false }) {
+function DarkLandingScreen({ leaving = false }) {
   return (
     <div className="corder">
       <style>{GLOBAL_CSS}</style>
@@ -990,6 +1000,21 @@ function LandingScreen({ leaving = false }) {
           </div>
 
           <div className="zone2-splash-loader" aria-hidden="true"><span /><span /><span /></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LandingScreen({ leaving = false }) {
+  return (
+    <div className="corder">
+      <style>{GLOBAL_CSS}</style>
+      <div className={`zone2-minimal-splash${leaving ? " is-leaving" : ""}`} role="status" aria-label="กำลังเปิดร้าน ZONE 2">
+        <div className="zone2-minimal-mark" aria-hidden="true">
+          <span className="zone2-minimal-logo-crop">
+            <img src="/logo-zone2.png" alt="" />
+          </span>
         </div>
       </div>
     </div>
@@ -2110,9 +2135,9 @@ export default function CustomerOrder({ shopUid }) {
   }
 
   if (!authUid || menus === null || !splashDone) {
-    return CUSTOMER_SPLASH_VARIANT === "legacy"
-      ? <LegacyLandingScreen seasonalEffect={activeSeasonalEffect} />
-      : <LandingScreen leaving={splashLeaving} />;
+    if (CUSTOMER_SPLASH_VARIANT === "legacy") return <LegacyLandingScreen seasonalEffect={activeSeasonalEffect} />;
+    if (CUSTOMER_SPLASH_VARIANT === "zone2-dark") return <DarkLandingScreen leaving={splashLeaving} />;
+    return <LandingScreen leaving={splashLeaving} />;
   }
 
   if (step === "myorders") {
