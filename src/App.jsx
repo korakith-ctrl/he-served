@@ -299,7 +299,7 @@ function defaultState() {
     menus,
     sales: [],
     purchases: [],
-    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true, slipTestMode: false, bannerImageUrl: "", bannerImageUrls: [], categoryOrder: [], defaultPackagingLines: [], loyaltyBeanGoal: 10 },
+    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true, slipTestMode: false, bannerImageUrl: "", bannerImageUrls: [], categoryOrder: [], defaultPackagingLines: [], loyaltyBeanGoal: 10, seasonalEffect: "auto" },
     optionGroups,
     promotions: [],
   };
@@ -366,6 +366,7 @@ function normalizeData(raw) {
       categoryOrder: raw.settings?.categoryOrder || [],
       defaultPackagingLines: raw.settings?.defaultPackagingLines || [],
       loyaltyBeanGoal: raw.settings?.loyaltyBeanGoal || 10,
+      seasonalEffect: ["off", "auto", "christmas", "songkran"].includes(raw.settings?.seasonalEffect) ? raw.settings.seasonalEffect : "auto",
     },
     optionGroups: (raw.optionGroups || []).filter(Boolean).map((g) => ({
       ...g,
@@ -8509,6 +8510,7 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
   const [overhead, setOverhead] = useState(String(s.overheadPerCup));
   const [platforms, setPlatforms] = useState(s.platforms);
   const [promptpayId, setPromptpayId] = useState(s.promptpayId || "");
+  const [seasonalEffect, setSeasonalEffect] = useState(s.seasonalEffect || "auto");
   const originalBannerUrls = s.bannerImageUrls && s.bannerImageUrls.length ? s.bannerImageUrls : (s.bannerImageUrl ? [s.bannerImageUrl] : []);
   const [bannerImageUrls, setBannerImageUrls] = useState(originalBannerUrls);
   const [editingBannerIdx, setEditingBannerIdx] = useState(null);
@@ -8609,6 +8611,7 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
     overhead !== String(s.overheadPerCup) ||
     JSON.stringify(platforms) !== JSON.stringify(s.platforms) ||
     promptpayId !== (s.promptpayId || "") ||
+    seasonalEffect !== (s.seasonalEffect || "auto") ||
     JSON.stringify(bannerImageUrls) !== JSON.stringify(originalBannerUrls);
 
   useEffect(() => {
@@ -8626,6 +8629,7 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
     setOverhead(String(s.overheadPerCup));
     setPlatforms(s.platforms);
     setPromptpayId(s.promptpayId || "");
+    setSeasonalEffect(s.seasonalEffect || "auto");
     setBannerImageUrls(originalBannerUrls);
     setEditingBannerIdx(null);
   }
@@ -8641,6 +8645,7 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
       next.settings.overheadPerCup = Number(overhead);
       next.settings.platforms = platforms;
       next.settings.promptpayId = promptpayId.trim();
+      next.settings.seasonalEffect = seasonalEffect;
       next.settings.bannerImageUrls = bannerImageUrls.map((u) => u.trim()).filter(Boolean);
     });
     setTimeout(() => {
@@ -8679,6 +8684,14 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
         .set-banner-thumb { width: 76px; height: 40px; border-radius: 8px; overflow: hidden; flex-shrink: 0; background: var(--cream-2); }
         .set-banner-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
         .set-banner-thumb-empty { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--espresso-2); }
+        .set-season-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+        .set-season-option { min-height: 76px; padding: 11px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--espresso-4); text-align: left; cursor: pointer; transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease; }
+        .set-season-option:hover { border-color: var(--sage); background: var(--cream-2); }
+        .set-season-option.active { border-color: var(--sage); background: var(--sage-light); box-shadow: inset 0 0 0 1px var(--sage); }
+        .set-season-option:focus-visible { outline: 2px solid var(--sage); outline-offset: 2px; }
+        .set-season-icon { display: block; font-size: 21px; line-height: 1; margin-bottom: 7px; }
+        .set-season-name { display: block; font-size: 12.5px; font-weight: 700; }
+        .set-season-note { display: block; margin-top: 2px; font-size: 10.5px; line-height: 1.35; color: var(--espresso-2); }
         .set-alert { display: flex; gap: 8px; align-items: flex-start; background: var(--gold-light); border: 1px solid var(--gold); color: var(--gold-dark); border-radius: 10px; padding: 10px 12px; font-size: 12px; line-height: 1.5; margin-top: 10px; }
         .set-savebar { position: sticky; bottom: 0; margin-top: 24px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 18px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; box-shadow: 0 -4px 20px rgba(0,0,0,.06); z-index: 10; }
         .set-empty { text-align: center; padding: 24px 10px; color: var(--espresso-2); font-size: 12.5px; }
@@ -8797,6 +8810,33 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
 
         <div className="set-col">
           <OrderLinkCard uid={uid} />
+
+          <SettingsCard icon="sparkles" title="เอฟเฟกต์เทศกาลหน้าลูกค้า" subtitle="ตกแต่งทุกขั้นตอนของหน้าสั่งซื้อโดยไม่บังปุ่มหรือรบกวนการใช้งาน">
+            <div className="set-season-grid" role="radiogroup" aria-label="เลือกเอฟเฟกต์เทศกาล">
+              {[
+                { value: "off", icon: "○", name: "ปิด", note: "ไม่แสดงเอฟเฟกต์" },
+                { value: "auto", icon: "✦", name: "อัตโนมัติ", note: "เปิดตามช่วงเทศกาล" },
+                { value: "christmas", icon: "❄", name: "Christmas", note: "หิมะตกบนหน้าจอ" },
+                { value: "songkran", icon: "💧", name: "สงกรานต์", note: "หยดน้ำและสายน้ำ" },
+              ].map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={seasonalEffect === option.value}
+                  className={`set-season-option${seasonalEffect === option.value ? " active" : ""}`}
+                  onClick={() => setSeasonalEffect(option.value)}
+                >
+                  <span className="set-season-icon" aria-hidden="true">{option.icon}</span>
+                  <span className="set-season-name">{option.name}</span>
+                  <span className="set-season-note">{option.note}</span>
+                </button>
+              ))}
+            </div>
+            <p style={{ margin: "11px 0 0", fontSize: 11.5, lineHeight: 1.55, color: "var(--espresso-2)" }}>
+              โหมดอัตโนมัติ: สงกรานต์ 12–16 เม.ย. และ Christmas 20 ธ.ค.–5 ม.ค. เลือกชื่อเทศกาลเพื่อเปิดหรือทดสอบได้ตลอดปี
+            </p>
+          </SettingsCard>
 
           <SettingsCard icon="photo" title="แบนเนอร์หน้าลูกค้า" subtitle="ใส่ได้หลายรูป ระบบจะเลื่อนสไลด์วนอัตโนมัติที่หน้าลูกค้า ไม่ใส่รูปเลยถ้าไม่ต้องการแสดงแบนเนอร์">
             {bannerImageUrls.length === 0 ? (

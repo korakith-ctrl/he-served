@@ -77,6 +77,31 @@ const COLORS = {
   pending: "#B8860B", pendingLight: "#FCEFD1",
 };
 
+const SEASONAL_EFFECTS = new Set(["off", "auto", "christmas", "songkran"]);
+
+function bangkokMonthDay(date = new Date()) {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Bangkok", month: "numeric", day: "numeric",
+    }).formatToParts(date);
+    return {
+      month: Number(parts.find((part) => part.type === "month")?.value),
+      day: Number(parts.find((part) => part.type === "day")?.value),
+    };
+  } catch {
+    return { month: date.getMonth() + 1, day: date.getDate() };
+  }
+}
+
+function resolveSeasonalEffect(setting, date = new Date()) {
+  const selected = SEASONAL_EFFECTS.has(setting) ? setting : "auto";
+  if (selected !== "auto") return selected;
+  const { month, day } = bangkokMonthDay(date);
+  if (month === 4 && day >= 12 && day <= 16) return "songkran";
+  if ((month === 12 && day >= 20) || (month === 1 && day <= 5)) return "christmas";
+  return "off";
+}
+
 function RewardTermsSheet({ goal, onClose }) {
   const { mounted, shown } = useSheetTransition(true);
   if (!mounted) return null;
@@ -130,13 +155,53 @@ const GLASS_PANEL = {
   boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9), 0 8px 24px rgba(0,91,133,0.10)",
 };
 
-function GlassBackdrop() {
+function SeasonalEffects({ effect }) {
+  if (effect === "off") return null;
+  const particles = Array.from({ length: effect === "christmas" ? 26 : 18 }, (_, index) => ({
+    left: `${(index * 37 + 7) % 100}%`,
+    delay: `${-((index * 1.37) % 12).toFixed(2)}s`,
+    duration: `${(effect === "christmas" ? 8 : 5) + (index % 7) * 0.7}s`,
+    drift: `${((index % 5) - 2) * 24}px`,
+    size: `${effect === "christmas" ? 11 + (index % 5) * 3 : 9 + (index % 4) * 5}px`,
+  }));
+
   return (
-    <div className="customer-backdrop" style={{ position: "fixed", inset: 0, zIndex: -1, overflow: "hidden", background: "linear-gradient(160deg, #FFFFFF, #EDF9FD)" }}>
-      <div style={{ position: "absolute", top: "-10%", left: "-10%", width: "55%", height: "45%", borderRadius: "50%", background: PANTONE_299C, opacity: 0.2, filter: "blur(70px)", animation: "blobFloat1 16s ease-in-out infinite" }} />
-      <div style={{ position: "absolute", top: "-5%", right: "-12%", width: "45%", height: "40%", borderRadius: "50%", background: "#74D1EE", opacity: 0.22, filter: "blur(70px)", animation: "blobFloat2 18s ease-in-out infinite" }} />
-      <div style={{ position: "absolute", bottom: "-15%", left: "20%", width: "60%", height: "50%", borderRadius: "50%", background: "#BFEAF8", opacity: 0.38, filter: "blur(80px)", animation: "blobFloat3 20s ease-in-out infinite" }} />
+    <div className={`seasonal-effects seasonal-effects--${effect}`} aria-hidden="true">
+      {particles.map((particle, index) => (
+        <span
+          key={index}
+          className={effect === "christmas" ? "seasonal-snowflake" : "seasonal-water-drop"}
+          style={{
+            "--season-left": particle.left,
+            "--season-delay": particle.delay,
+            "--season-duration": particle.duration,
+            "--season-drift": particle.drift,
+            "--season-size": particle.size,
+          }}
+        >
+          {effect === "christmas" ? (index % 3 === 0 ? "❄" : index % 3 === 1 ? "✦" : "•") : ""}
+        </span>
+      ))}
+      {effect === "songkran" && (
+        <>
+          <span className="seasonal-water-arc seasonal-water-arc--left" />
+          <span className="seasonal-water-arc seasonal-water-arc--right" />
+        </>
+      )}
     </div>
+  );
+}
+
+function GlassBackdrop({ seasonalEffect = "off" }) {
+  return (
+    <>
+      <div className="customer-backdrop" style={{ position: "fixed", inset: 0, zIndex: -1, overflow: "hidden", background: "linear-gradient(160deg, #FFFFFF, #EDF9FD)" }}>
+        <div style={{ position: "absolute", top: "-10%", left: "-10%", width: "55%", height: "45%", borderRadius: "50%", background: PANTONE_299C, opacity: 0.2, filter: "blur(70px)", animation: "blobFloat1 16s ease-in-out infinite" }} />
+        <div style={{ position: "absolute", top: "-5%", right: "-12%", width: "45%", height: "40%", borderRadius: "50%", background: "#74D1EE", opacity: 0.22, filter: "blur(70px)", animation: "blobFloat2 18s ease-in-out infinite" }} />
+        <div style={{ position: "absolute", bottom: "-15%", left: "20%", width: "60%", height: "50%", borderRadius: "50%", background: "#BFEAF8", opacity: 0.38, filter: "blur(80px)", animation: "blobFloat3 20s ease-in-out infinite" }} />
+      </div>
+      <SeasonalEffects effect={seasonalEffect} />
+    </>
   );
 }
 
@@ -349,6 +414,34 @@ const GLOBAL_CSS = `
   @keyframes blobFloat1 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(6%,-8%) scale(1.1); } }
   @keyframes blobFloat2 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-8%,6%) scale(1.06); } }
   @keyframes blobFloat3 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(5%,5%) scale(1.12); } }
+  .seasonal-effects { position: fixed; inset: 0; z-index: 12; overflow: hidden; pointer-events: none; contain: strict; }
+  .seasonal-snowflake {
+    position: absolute; top: -12vh; left: var(--season-left); color: rgba(255,255,255,.96);
+    font-size: var(--season-size); line-height: 1; text-shadow: 0 0 5px rgba(0,91,133,.62), 0 1px 1px rgba(0,59,92,.32);
+    opacity: .82; will-change: transform; animation: seasonalSnowFall var(--season-duration) var(--season-delay) linear infinite;
+  }
+  .seasonal-water-drop {
+    position: absolute; top: -12vh; left: var(--season-left); width: var(--season-size); height: calc(var(--season-size) * 1.28);
+    border: 1px solid rgba(255,255,255,.8); border-radius: 68% 32% 63% 37% / 67% 38% 62% 33%;
+    background: linear-gradient(145deg, rgba(255,255,255,.76), rgba(0,163,224,.48) 48%, rgba(0,91,133,.32));
+    box-shadow: inset 2px 2px 3px rgba(255,255,255,.5), 0 2px 7px rgba(0,91,133,.2);
+    opacity: .68; will-change: transform; animation: seasonalWaterFall var(--season-duration) var(--season-delay) cubic-bezier(.38,.05,.75,.65) infinite;
+  }
+  .seasonal-water-arc { position: fixed; bottom: -115px; width: 210px; height: 210px; border: 4px solid rgba(0,163,224,.2); border-radius: 50%; box-shadow: 0 0 0 18px rgba(116,209,238,.08), 0 0 0 38px rgba(0,163,224,.045); animation: seasonalWaterPulse 2.8s ease-in-out infinite; }
+  .seasonal-water-arc--left { left: -110px; }
+  .seasonal-water-arc--right { right: -110px; animation-delay: -1.4s; }
+  @keyframes seasonalSnowFall {
+    0% { transform: translate3d(0,-8vh,0) rotate(0deg); opacity: 0; }
+    12% { opacity: .82; }
+    88% { opacity: .82; }
+    100% { transform: translate3d(var(--season-drift),120vh,0) rotate(380deg); opacity: 0; }
+  }
+  @keyframes seasonalWaterFall {
+    0% { transform: translate3d(0,-8vh,0) rotate(38deg) scale(.7); opacity: 0; }
+    14% { opacity: .68; }
+    100% { transform: translate3d(var(--season-drift),122vh,0) rotate(118deg) scale(1); opacity: 0; }
+  }
+  @keyframes seasonalWaterPulse { 0%,100% { transform: scale(.92); opacity: .52; } 50% { transform: scale(1.1); opacity: .9; } }
   @keyframes flyToCart {
     0% { transform: translate(0,0) scale(1); opacity: 1; }
     50% { transform: translate(calc(var(--dx) * 0.6), calc(var(--dy) * 0.5 - 50px)) scale(0.7); opacity: 1; }
@@ -484,6 +577,7 @@ const GLOBAL_CSS = `
   }
   @media (prefers-reduced-motion: reduce) {
     .banner-slide { transition-duration: 0ms; }
+    .seasonal-effects { display: none; }
     .closed-order-page *, .closed-order-page *::before, .closed-order-page *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
   }
 `;
@@ -788,7 +882,7 @@ function BrandLogo({ height = 64 }) {
   );
 }
 
-function LandingScreen() {
+function LandingScreen({ seasonalEffect }) {
   const ringBase = {
     position: "absolute", inset: 0, borderRadius: "50%",
     animation: "ringRipple 2.6s cubic-bezier(0.2, 0.6, 0.35, 1) infinite",
@@ -800,6 +894,7 @@ function LandingScreen() {
       fontFamily: "'Inter', sans-serif",
     }}>
       <style>{GLOBAL_CSS}</style>
+      <SeasonalEffects effect={seasonalEffect} />
       <div style={{ position: "relative", width: 340, height: 340, display: "flex", alignItems: "center", justifyContent: "center" }}>
         <div style={{
           position: "absolute", inset: -60, borderRadius: "50%",
@@ -820,10 +915,11 @@ function LandingScreen() {
   );
 }
 
-function ClosedOrderScreen({ shopName, hasOrders, onOpenOrders }) {
+function ClosedOrderScreen({ shopName, hasOrders, onOpenOrders, seasonalEffect }) {
   return (
     <main className="corder closed-order-page">
       <style>{GLOBAL_CSS}</style>
+      <SeasonalEffects effect={seasonalEffect} />
       <div className="closed-order-glow" aria-hidden="true" style={{ width: 240, height: 240, top: "-90px", right: "-90px", background: "rgba(255,255,255,.16)" }} />
       <div className="closed-order-glow" aria-hidden="true" style={{ width: 310, height: 310, bottom: "-150px", left: "-130px", background: "rgba(0,163,224,.2)", animationDelay: "-4s" }} />
 
@@ -877,6 +973,7 @@ export default function CustomerOrder({ shopUid }) {
   const [bannerImageUrls, setBannerImageUrls] = useState([]);
   const [categoryOrder, setCategoryOrder] = useState([]);
   const [loyaltyBeanGoal, setLoyaltyBeanGoal] = useState(10);
+  const [seasonalEffect, setSeasonalEffect] = useState("auto");
   const [beanRecord, setBeanRecord] = useState(null);
   const [loyaltyStatus, setLoyaltyStatus] = useState("idle"); // idle | loading | loaded | error
   const [loyaltyRetryTick, setLoyaltyRetryTick] = useState(0);
@@ -965,6 +1062,10 @@ export default function CustomerOrder({ shopUid }) {
     const unsub7b = onValue(ref(db, `shops/${shopUid}/settings/bannerImageUrls`), (snap) => setBannerImageUrls(snap.val() || []));
     const unsub9 = onValue(ref(db, `shops/${shopUid}/settings/categoryOrder`), (snap) => setCategoryOrder(snap.val() || []));
     const unsub10 = onValue(ref(db, `shops/${shopUid}/settings/loyaltyBeanGoal`), (snap) => setLoyaltyBeanGoal(snap.val() || 10));
+    const unsub11 = onValue(ref(db, `shops/${shopUid}/settings/seasonalEffect`), (snap) => {
+      const value = snap.val();
+      setSeasonalEffect(SEASONAL_EFFECTS.has(value) ? value : "auto");
+    });
     const unsub8 = onValue(ref(db, `shops/${shopUid}/promotions`), (snap) => {
       const list = snap.val() || [];
       setPromotions(list.map((p) => ({
@@ -974,7 +1075,7 @@ export default function CustomerOrder({ shopUid }) {
         chooseCount: p.chooseCount || 2,
       })));
     });
-    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); unsub7(); unsub7b(); unsub8(); unsub9(); unsub10(); };
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); unsub7(); unsub7b(); unsub8(); unsub9(); unsub10(); unsub11(); };
   }, [authUid, shopUid]);
 
   // เช็คเมล็ดสะสมของเบอร์นี้แบบสด — debounce กันยิง query ทุกครั้งที่พิมพ์ และรอให้เบอร์ครบอย่างน้อย 9 หลักก่อน
@@ -1651,19 +1752,21 @@ export default function CustomerOrder({ shopUid }) {
     setStep("pay");
   }
 
+  const activeSeasonalEffect = resolveSeasonalEffect(seasonalEffect);
+
   if (!authUid && error) {
     return <div style={centerWrap}><div style={centerCard}>{error}</div></div>;
   }
 
   if (!authUid || menus === null || !splashDone) {
-    return <LandingScreen />;
+    return <LandingScreen seasonalEffect={activeSeasonalEffect} />;
   }
 
   if (step === "myorders") {
     return (
       <div className="corder" style={centerWrap}>
         <style>{GLOBAL_CSS}</style>
-        <GlassBackdrop />
+        <GlassBackdrop seasonalEffect={activeSeasonalEffect} />
         <div style={centerCard}>
           <p style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: COLORS.sageDark, fontWeight: 500, margin: 0 }}>{shopName}</p>
           <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, margin: "4px 0 14px" }}>ออเดอร์ของฉัน</h1>
@@ -1697,7 +1800,7 @@ export default function CustomerOrder({ shopUid }) {
     return (
       <div className="corder" style={centerWrap}>
         <style>{GLOBAL_CSS}</style>
-        <GlassBackdrop />
+        <GlassBackdrop seasonalEffect={activeSeasonalEffect} />
         <div style={{ ...centerCard, textAlign: "center" }}>
           <div style={{ animation: "successPop .5s cubic-bezier(.34,1.56,.64,1)", margin: "10px auto 4px", width: 84, height: 84 }}>
             <svg viewBox="0 0 52 52" width={84} height={84}>
@@ -1737,7 +1840,7 @@ export default function CustomerOrder({ shopUid }) {
     return (
       <div className="corder" style={centerWrap}>
         <style>{GLOBAL_CSS}</style>
-        <GlassBackdrop />
+        <GlassBackdrop seasonalEffect={activeSeasonalEffect} />
         <div style={{ ...centerCard, textAlign: "center" }}>
           <p style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: COLORS.sageDark, fontWeight: 500, margin: 0 }}>{shopName}</p>
           <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, margin: "4px 0 14px" }}>
@@ -1821,7 +1924,7 @@ export default function CustomerOrder({ shopUid }) {
     return (
       <div className="corder" style={centerWrap}>
         <style>{GLOBAL_CSS}</style>
-        <GlassBackdrop />
+        <GlassBackdrop seasonalEffect={activeSeasonalEffect} />
         <div style={centerCard}>
           <p style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: COLORS.sageDark, fontWeight: 500, margin: 0 }}>{shopName}</p>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "4px 0 14px" }}>
@@ -1960,13 +2063,13 @@ export default function CustomerOrder({ shopUid }) {
   }
 
   if (!acceptingOrders) {
-    return <ClosedOrderScreen shopName={shopName} hasOrders={loadMyOrderIds(shopUid).length > 0} onOpenOrders={openMyOrders} />;
+    return <ClosedOrderScreen shopName={shopName} hasOrders={loadMyOrderIds(shopUid).length > 0} onOpenOrders={openMyOrders} seasonalEffect={activeSeasonalEffect} />;
   }
 
   return (
     <div className="corder" style={{ height: "100vh", display: "flex", flexDirection: "column", fontFamily: "'Inter', sans-serif", color: COLORS.espresso4, animation: "pageIn .32s cubic-bezier(.22,1,.36,1) both" }}>
       <style>{GLOBAL_CSS}</style>
-      <GlassBackdrop />
+      <GlassBackdrop seasonalEffect={activeSeasonalEffect} />
 
       {takeoverPromo && (
         <PromotionTakeover
