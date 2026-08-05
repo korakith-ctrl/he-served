@@ -299,7 +299,7 @@ function defaultState() {
     menus,
     sales: [],
     purchases: [],
-    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true, slipTestMode: false, bannerImageUrl: "", bannerImageUrls: [], categoryOrder: [], defaultPackagingLines: [], loyaltyBeanGoal: 10, seasonalEffect: "auto" },
+    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true, slipTestMode: false, bannerImageUrl: "", bannerImageUrls: [], categoryOrder: [], defaultPackagingLines: [], loyaltyBeanGoal: 10, seasonalEffect: "auto", coffeePass: { enabled: false, days: 5, discountPercent: 10 } },
     optionGroups,
     promotions: [],
   };
@@ -367,6 +367,11 @@ function normalizeData(raw) {
       defaultPackagingLines: raw.settings?.defaultPackagingLines || [],
       loyaltyBeanGoal: raw.settings?.loyaltyBeanGoal || 10,
       seasonalEffect: ["off", "auto", "christmas", "songkran"].includes(raw.settings?.seasonalEffect) ? raw.settings.seasonalEffect : "auto",
+      coffeePass: {
+        enabled: raw.settings?.coffeePass?.enabled === true,
+        days: Math.min(30, Math.max(2, Number(raw.settings?.coffeePass?.days) || 5)),
+        discountPercent: Math.min(50, Math.max(1, Number(raw.settings?.coffeePass?.discountPercent) || 10)),
+      },
     },
     optionGroups: (raw.optionGroups || []).filter(Boolean).map((g) => ({
       ...g,
@@ -867,7 +872,7 @@ function ShopApp({ uid, user, theme, onToggleTheme }) {
           const itemMenu = data.menus.find((m) => m.id === item.menuId);
           const substitutions = itemMenu ? resolveIngredientAdjustmentsFromOptions(itemMenu, item.options, ingredientsById) : {};
           const promoDiscount = item.freeUnit && itemMenu ? itemMenu.priceStore + upcharge : 0;
-          recordSale(item.menuId, item.qty, "online", { upcharge, substitutions, promoDiscount, milkLabel: (item.options || []).map((x) => x.label).join(", ") || null, orderId: o.id, paymentMethod: o.paymentMethod });
+          recordSale(item.menuId, item.qty, "online", { upcharge, unitPriceOverride: Number(item.unitPrice), substitutions, promoDiscount, milkLabel: (item.options || []).map((x) => x.label).join(", ") || null, orderId: o.id, paymentMethod: o.paymentMethod });
         }
         // สลิปยืนยันอัตโนมัติทำให้ order ค้างที่ status "paid" ซึ่งไม่ใช่หนึ่งใน 4 คอลัมน์ Kanban แล้ว
         // ต้องเลื่อนเข้า "preparing" ทันที เหมือนตอนบาริสต้ากดยืนยันรับเงินสดเอง ไม่งั้นการ์ดจะหายไปจากบอร์ด
@@ -3417,6 +3422,31 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, 
     setEditingPickupDate(null);
   }
 
+  async function markCoffeePassDelivery(order, deliveryIndex) {
+    if (!order.saleRecorded) {
+      showToast("กรุณายืนยันการชำระเงินก่อนบันทึกรับ Coffee Pass");
+      return;
+    }
+    const deliveries = Array.isArray(order.coffeePass?.deliveryDates) ? order.coffeePass.deliveryDates : Object.values(order.coffeePass?.deliveryDates || {});
+    if (!deliveries[deliveryIndex] || deliveries[deliveryIndex].status === "collected") return;
+    const nextDeliveries = deliveries.map((entry, index) => index === deliveryIndex ? {
+      ...entry, status: "collected", collectedAt: new Date().toISOString(), collectedBy: uid,
+    } : entry);
+    const nextCoffeePass = { ...order.coffeePass, deliveryDates: nextDeliveries };
+    try {
+      await update(ref(db, `orders/${uid}/${order.id}`), { coffeePass: nextCoffeePass });
+      const completed = nextDeliveries.every((entry) => entry.status === "collected");
+      if (completed) {
+        await setStatus({ ...order, coffeePass: nextCoffeePass }, "done");
+        showToast("Coffee Pass ครบทุกวันแล้ว · ปิดแพ็กและเพิ่มเมล็ดสะสมเรียบร้อย");
+      } else {
+        showToast(`บันทึกรับ Coffee Pass วันที่ ${deliveryIndex + 1} แล้ว`);
+      }
+    } catch (error) {
+      showToast("บันทึก Coffee Pass ไม่สำเร็จ: " + error.message);
+    }
+  }
+
   function confirmPaid(order) {
     // ถ้าเคยบันทึกยอดขายไปแล้ว (ลากการ์ดออกจาก "รอยืนยัน" แล้วลากกลับมาใหม่โดยไม่ได้กดยกเลิก) แค่เปลี่ยนสถานะเฉยๆ
     // ห้ามบันทึกยอดขาย/ตัดสต็อกซ้ำอีกรอบ ไม่งั้นยอดขายจะเพี้ยนสูงเกินจริง
@@ -3432,7 +3462,7 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, 
       const substitutions = itemMenu ? resolveIngredientAdjustmentsFromOptions(itemMenu, item.options, ingredientsById) : {};
       // แลกเมล็ดฟรี 1 แก้ว — หักรายได้ที่บันทึกออกเท่าราคาแก้วนั้น (1 หน่วย) ไม่งั้นยอดขาย/กำไรจะเพี้ยนสูงเกินจริงทั้งที่ลูกค้าไม่ได้จ่าย
       const promoDiscount = item.freeUnit && itemMenu ? itemMenu.priceStore + upcharge : 0;
-      recordSale(item.menuId, item.qty, "online", { upcharge, substitutions, promoDiscount, milkLabel: (item.options || []).map((o) => o.label).join(", ") || null, orderId: order.id, paymentMethod: order.paymentMethod });
+      recordSale(item.menuId, item.qty, "online", { upcharge, unitPriceOverride: Number(item.unitPrice), substitutions, promoDiscount, milkLabel: (item.options || []).map((o) => o.label).join(", ") || null, orderId: order.id, paymentMethod: order.paymentMethod });
     }
     showToast(`ยืนยันออเดอร์ ${order.customerName || order.customerPhone} แล้ว บันทึกยอดขายให้อัตโนมัติ`);
   }
@@ -3704,11 +3734,36 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, 
                         {new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}
                       </div>
                     )}
-                    <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} paymentVerified={o.paymentVerified} paymentVerifiedBy={o.paymentVerifiedBy} compact={compact} onEditPickupDate={() => setEditingPickupDate(o)} />
+                    <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.pickupDate} paymentVerified={o.paymentVerified} paymentVerifiedBy={o.paymentVerifiedBy} compact={compact} onEditPickupDate={o.coffeePass ? undefined : () => setEditingPickupDate(o)} />
                     <OrderItemLines
                       items={o.items} note={o.note} compact={compact}
                       onEditItem={col.id === "pending" ? (idx) => setEditingItem({ order: o, itemIdx: idx }) : undefined}
                     />
+                    {o.coffeePass?.deliveryDates && (
+                      <div style={{ margin: compact ? "5px 0" : "8px 0", padding: compact ? 6 : 9, borderRadius: 9, background: "var(--sage-light)", border: "1px solid var(--sage)" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 5, color: "var(--espresso-4)", fontSize: compact ? 9.5 : 11, fontWeight: 700 }}>
+                          <span>Coffee Pass {o.coffeePass.days} วัน</span>
+                          <span>ลด {o.coffeePass.discountPercent}%</span>
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>
+                          {(Array.isArray(o.coffeePass.deliveryDates) ? o.coffeePass.deliveryDates : Object.values(o.coffeePass.deliveryDates)).map((entry, index) => {
+                            const collected = entry.status === "collected";
+                            return (
+                              <button
+                                key={`${entry.date}-${index}`}
+                                type="button"
+                                disabled={collected || col.id === "pending" || col.id === "done"}
+                                onClick={() => markCoffeePassDelivery(o, index)}
+                                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 5, padding: compact ? "4px 5px" : "5px 7px", border: `1px solid ${collected ? "var(--success)" : "var(--line)"}`, borderRadius: 7, background: collected ? "var(--success-light)" : "var(--surface)", color: collected ? "var(--success-dark)" : "var(--espresso-3)", fontSize: compact ? 8.5 : 10.5, textAlign: "left", opacity: col.id === "pending" ? .65 : 1 }}
+                              >
+                                <span>{index + 1}. {formatPickupDateTH(entry.date)}</span>
+                                <span style={{ fontWeight: 700 }}>{collected ? "✓ รับแล้ว" : "กดเมื่อรับ"}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontWeight: 700, fontSize: compact ? 13 : 16, fontFamily: "var(--f-body)", borderTop: "1px dashed var(--line)", paddingTop: compact ? 4 : 7, marginBottom: compact ? 6 : 9 }}>
                       <span style={{ fontSize: compact ? 10.5 : 12, fontWeight: 600, color: "var(--espresso-3)" }}>รวม</span><span>฿{money(o.total)}</span>
                     </div>
@@ -3725,7 +3780,7 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, 
                       </button>
                       {col.id !== "done" && (
                         <>
-                        <button className="cbtn cbtn-accent" style={{ flex: 1, fontSize: compact ? 10.5 : 12.5, padding: compact ? "6px 4px" : "8px 10px" }} onClick={() => advance(o)}>{compact ? "→ ถัดไป" : KANBAN_NEXT_LABEL[col.id]}</button>
+                        {(!o.coffeePass || col.id === "pending") && <button className="cbtn cbtn-accent" style={{ flex: 1, fontSize: compact ? 10.5 : 12.5, padding: compact ? "6px 4px" : "8px 10px" }} onClick={() => advance(o)}>{compact ? "→ ถัดไป" : KANBAN_NEXT_LABEL[col.id]}</button>}
                         <button
                           className="cbtn cbtn-danger" style={{ padding: compact ? "6px 6px" : "8px 9px" }}
                           onClick={() => cancelOrder(o)}
@@ -8511,6 +8566,9 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
   const [platforms, setPlatforms] = useState(s.platforms);
   const [promptpayId, setPromptpayId] = useState(s.promptpayId || "");
   const [seasonalEffect, setSeasonalEffect] = useState(s.seasonalEffect || "auto");
+  const [coffeePassEnabled, setCoffeePassEnabled] = useState(s.coffeePass?.enabled === true);
+  const [coffeePassDays, setCoffeePassDays] = useState(String(s.coffeePass?.days || 5));
+  const [coffeePassDiscount, setCoffeePassDiscount] = useState(String(s.coffeePass?.discountPercent || 10));
   const originalBannerUrls = s.bannerImageUrls && s.bannerImageUrls.length ? s.bannerImageUrls : (s.bannerImageUrl ? [s.bannerImageUrl] : []);
   const [bannerImageUrls, setBannerImageUrls] = useState(originalBannerUrls);
   const [editingBannerIdx, setEditingBannerIdx] = useState(null);
@@ -8588,6 +8646,9 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
   const shopNameError = shopName.trim() ? "" : "กรุณาใส่ชื่อร้าน";
   const overheadNum = Number(overhead);
   const overheadError = overhead.trim() === "" || Number.isNaN(overheadNum) || overheadNum < 0 ? "กรอกตัวเลขที่มากกว่าหรือเท่ากับ 0" : "";
+  const coffeePassDaysNum = Number(coffeePassDays);
+  const coffeePassDiscountNum = Number(coffeePassDiscount);
+  const coffeePassError = coffeePassEnabled && (!Number.isInteger(coffeePassDaysNum) || coffeePassDaysNum < 2 || coffeePassDaysNum > 30 || !Number.isFinite(coffeePassDiscountNum) || coffeePassDiscountNum < 1 || coffeePassDiscountNum > 50);
   const platformNameCounts = useMemo(() => {
     const counts = {};
     for (const p of platforms) {
@@ -8604,7 +8665,7 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
     if (p.gpPercent === "" || Number.isNaN(gp) || gp < 0 || gp > 100) return "GP ต้องอยู่ระหว่าง 0-100";
     return "";
   }
-  const hasErrors = !!shopNameError || !!overheadError || platforms.some((p) => !!platformErrorFor(p));
+  const hasErrors = !!shopNameError || !!overheadError || coffeePassError || platforms.some((p) => !!platformErrorFor(p));
 
   const dirty =
     shopName !== s.shopName ||
@@ -8612,6 +8673,9 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
     JSON.stringify(platforms) !== JSON.stringify(s.platforms) ||
     promptpayId !== (s.promptpayId || "") ||
     seasonalEffect !== (s.seasonalEffect || "auto") ||
+    coffeePassEnabled !== (s.coffeePass?.enabled === true) ||
+    coffeePassDays !== String(s.coffeePass?.days || 5) ||
+    coffeePassDiscount !== String(s.coffeePass?.discountPercent || 10) ||
     JSON.stringify(bannerImageUrls) !== JSON.stringify(originalBannerUrls);
 
   useEffect(() => {
@@ -8630,6 +8694,9 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
     setPlatforms(s.platforms);
     setPromptpayId(s.promptpayId || "");
     setSeasonalEffect(s.seasonalEffect || "auto");
+    setCoffeePassEnabled(s.coffeePass?.enabled === true);
+    setCoffeePassDays(String(s.coffeePass?.days || 5));
+    setCoffeePassDiscount(String(s.coffeePass?.discountPercent || 10));
     setBannerImageUrls(originalBannerUrls);
     setEditingBannerIdx(null);
   }
@@ -8646,6 +8713,11 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
       next.settings.platforms = platforms;
       next.settings.promptpayId = promptpayId.trim();
       next.settings.seasonalEffect = seasonalEffect;
+      next.settings.coffeePass = {
+        enabled: coffeePassEnabled,
+        days: Number.isInteger(coffeePassDaysNum) && coffeePassDaysNum >= 2 && coffeePassDaysNum <= 30 ? coffeePassDaysNum : 5,
+        discountPercent: Number.isFinite(coffeePassDiscountNum) && coffeePassDiscountNum >= 1 && coffeePassDiscountNum <= 50 ? coffeePassDiscountNum : 10,
+      };
       next.settings.bannerImageUrls = bannerImageUrls.map((u) => u.trim()).filter(Boolean);
     });
     setTimeout(() => {
@@ -8810,6 +8882,32 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
 
         <div className="set-col">
           <OrderLinkCard uid={uid} />
+
+          <SettingsCard icon="calendar-repeat" title="Coffee Pass" subtitle="ขายแพ็กเครื่องดื่มเมนูเดิมและตัวเลือกเดิม รับวันละ 1 แก้ว ชำระล่วงหน้าครั้งเดียว">
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: coffeePassEnabled ? 16 : 0 }}>
+              <div>
+                <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--espresso-4)" }}>เปิดขาย Coffee Pass</div>
+                <div style={{ marginTop: 2, fontSize: 11.5, color: "var(--espresso-2)" }}>แสดงตัวเลือกแพ็กในเมนูเครื่องดื่มหน้าลูกค้า</div>
+              </div>
+              <OptgToggle checked={coffeePassEnabled} onChange={setCoffeePassEnabled} color="var(--sage)" />
+            </div>
+            {coffeePassEnabled && (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <SettingsField label="จำนวนวัน" suffix="วัน">
+                    <input className="cfield" style={{ height: 42, paddingRight: 38 }} type="number" min="2" max="30" step="1" value={coffeePassDays} onChange={(e) => setCoffeePassDays(e.target.value)} />
+                  </SettingsField>
+                  <SettingsField label="ส่วนลด" suffix="%">
+                    <input className="cfield" style={{ height: 42, paddingRight: 30 }} type="number" min="1" max="50" step="1" value={coffeePassDiscount} onChange={(e) => setCoffeePassDiscount(e.target.value)} />
+                  </SettingsField>
+                </div>
+                {coffeePassError && <div style={{ marginTop: -6, color: "var(--danger)", fontSize: 11.5 }}>จำนวนวันต้องเป็น 2–30 วัน และส่วนลดต้องอยู่ระหว่าง 1–50%</div>}
+                <div style={{ marginTop: 5, padding: "10px 12px", borderRadius: 10, background: "var(--cream-2)", color: "var(--espresso-3)", fontSize: 11.5, lineHeight: 1.55 }}>
+                  ลดเฉพาะราคาเมนู ส่วนเพิ่มตัวเลือกคิดราคาเต็ม · ไม่ซ้อนกับ Hot Deal · วันรับจะเรียงต่อเนื่องจากวันเริ่มแพ็ก
+                </div>
+              </>
+            )}
+          </SettingsCard>
 
           <SettingsCard icon="sparkles" title="เอฟเฟกต์เทศกาลหน้าลูกค้า" subtitle="ตกแต่งทุกขั้นตอนของหน้าสั่งซื้อโดยไม่บังปุ่มหรือรบกวนการใช้งาน">
             <div className="set-season-grid" role="radiogroup" aria-label="เลือกเอฟเฟกต์เทศกาล">

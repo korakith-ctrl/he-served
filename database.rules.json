@@ -22,7 +22,8 @@
           "bannerImageUrls": { ".read": "auth != null" },
           "categoryOrder": { ".read": "auth != null" },
           "loyaltyBeanGoal": { ".read": "auth != null" },
-          "seasonalEffect": { ".read": "auth != null" }
+          "seasonalEffect": { ".read": "auth != null" },
+          "coffeePass": { ".read": "auth != null" }
         }
       }
     },
