@@ -1377,19 +1377,21 @@ export default function CustomerOrder({ shopUid }) {
   const categories = useMemo(() => {
     if (!menus) return [];
     const seen = [];
-    for (const m of menus) if (!seen.includes(m.category)) seen.push(m.category);
+    for (const m of menus) {
+      if (![HOT_DEAL_CATEGORY, COFFEE_PASS_CATEGORY].includes(m.category) && !seen.includes(m.category)) seen.push(m.category);
+    }
     const ordered = categoryOrder && categoryOrder.length
       ? [...categoryOrder.filter((c) => seen.includes(c)), ...seen.filter((c) => !categoryOrder.includes(c))]
       : seen;
     const featured = [];
     if (activePromotions.length > 0) featured.push(HOT_DEAL_CATEGORY);
-    const hasCoffeePassMenus = coffeePassEligibleMenus.length > 0;
+    const hasCoffeePassMenus = coffeePass.enabled === true && coffeePassEligibleMenus.length > 0;
     if (hasCoffeePassMenus) featured.push(COFFEE_PASS_CATEGORY);
     return [...featured, ...ordered];
-  }, [menus, activePromotions, categoryOrder, coffeePassEligibleMenus]);
+  }, [menus, activePromotions, categoryOrder, coffeePass.enabled, coffeePassEligibleMenus]);
 
   useEffect(() => {
-    if (categories.length > 0 && !activeCategory) setActiveCategory(categories[0]);
+    if (categories.length > 0 && (!activeCategory || !categories.includes(activeCategory))) setActiveCategory(categories[0]);
   }, [categories, activeCategory]);
 
   // เลื่อนการ์ดโปรโมชันให้ลูกค้าเห็นว่ามีรายการถัดไป โดยเว้นช่วงหลังลูกค้าแตะ/ลากเอง
