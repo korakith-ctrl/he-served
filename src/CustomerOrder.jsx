@@ -1272,6 +1272,29 @@ export default function CustomerOrder({ shopUid }) {
     return cart.filter((l) => l.menuId === menuId && (l.promoId || null) === promoId);
   }
 
+  // โปรที่ซื้อได้จากเมนูเดียว (single/qty) ต้องใช้ราคาเดียวกันไม่ว่าลูกค้าจะกดจาก Hot Deal
+  // หรือจากหมวดเมนูปกติ ส่วน bundle/choice ยังต้องเข้าผ่านการ์ดโปรเพราะมีขั้นตอนเลือกหลายรายการ
+  function bestDirectPromoForMenu(menu, qty = 1) {
+    if (!menu) return null;
+    const safeQty = Math.max(1, Number(qty) || 1);
+    const candidates = activePromotions.filter((promo) =>
+      (promo.type === "single" || promo.type === "qty") && promo.menuIds?.[0] === menu.id
+    );
+    return candidates.reduce((best, promo) => {
+      const total = promo.type === "qty"
+        ? qtyPromoTotal(promo, menu, safeQty)
+        : singlePromoPrice(promo, menu) * safeQty;
+      if (!best || total < best.total) return { promo, total };
+      // ถ้าราคารวมเท่ากัน ให้โปร single มาก่อนเพื่อให้ราคาโปรเห็นผลตั้งแต่ชิ้นแรก
+      if (total === best.total && promo.type === "single" && best.promo.type !== "single") return { promo, total };
+      return best;
+    }, null)?.promo || null;
+  }
+
+  function directLinesForMenu(menuId) {
+    return cart.filter((line) => line.menuId === menuId && line.promoKind !== "bundle" && line.promoKind !== "choice");
+  }
+
   function qtyForMenu(menuId, promoId = null) {
     return linesForMenu(menuId, promoId).reduce((s, l) => s + l.qty, 0);
   }
@@ -1307,10 +1330,11 @@ export default function CustomerOrder({ shopUid }) {
   function openMenu(menu, promo) {
     if (menu.available === false) return;
     const groups = groupsForMenu(menu);
-    const isQty = promo && promo.type === "qty";
-    const priceOverride = promo ? (isQty ? qtyPromoUnitPrice(promo, menu, 1) : singlePromoPrice(promo, menu)) : undefined;
-    const promoId = promo ? promo.id : null;
-    const promoKind = promo ? (isQty ? "qty" : "single") : null;
+    const effectivePromo = promo || bestDirectPromoForMenu(menu, 1);
+    const isQty = effectivePromo && effectivePromo.type === "qty";
+    const priceOverride = effectivePromo ? (isQty ? qtyPromoUnitPrice(effectivePromo, menu, 1) : singlePromoPrice(effectivePromo, menu)) : undefined;
+    const promoId = effectivePromo ? effectivePromo.id : null;
+    const promoKind = effectivePromo ? (isQty ? "qty" : "single") : null;
     const refKey = promo ? "promo_" + menu.id : menu.id;
     if (groups.length === 0) {
       spawnFly(refKey, menu.imageUrl);
@@ -1477,12 +1501,23 @@ export default function CustomerOrder({ shopUid }) {
     if (qty <= 0) { removeLine(lineId); return; }
     setCart((c) => c.map((l) => {
       if (l.lineId !== lineId) return l;
-      if (l.promoKind === "qty") {
+      if (l.promoKind !== "bundle" && l.promoKind !== "choice") {
         const menu = menusById[l.menuId];
-        const promo = (promotions || []).find((p) => p.id === l.promoId);
-        if (menu && promo) {
+        const promo = bestDirectPromoForMenu(menu, qty);
+        if (menu) {
           const optionDelta = (l.options || []).reduce((s, o) => s + (o.priceDelta || 0), 0);
-          return { ...l, qty, unitPrice: qtyPromoUnitPrice(promo, menu, qty) + optionDelta };
+          const promoBase = promo
+            ? (promo.type === "qty" ? qtyPromoUnitPrice(promo, menu, qty) : singlePromoPrice(promo, menu))
+            : menu.priceStore;
+          return {
+            ...l,
+            qty,
+            unitPrice: promoBase + optionDelta,
+            originalUnitPrice: menu.priceStore + optionDelta,
+            promoId: promo?.id || null,
+            promoGroupId: promo?.id || null,
+            promoKind: promo ? (promo.type === "qty" ? "qty" : "single") : null,
+          };
         }
       }
       return { ...l, qty };
@@ -2294,10 +2329,12 @@ export default function CustomerOrder({ shopUid }) {
                     <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 600, color: COLORS.espresso5, margin: "0 0 10px" }}>{cat}</h2>
                     {menus.filter((m) => m.category === cat).map((m) => {
                       const soldOut = m.available === false;
-                      const lines = linesForMenu(m.id);
+                      const lines = directLinesForMenu(m.id);
                       const qty = lines.reduce((s, l) => s + l.qty, 0);
                       const singleLine = lines.length === 1 ? lines[0] : null;
                       const canAddDirectly = groupsForMenu(m).length === 0;
+                      const directPromo = bestDirectPromoForMenu(m, Math.max(1, qty));
+                      const directPromoPrice = directPromo?.type === "single" ? singlePromoPrice(directPromo, m) : null;
                       return (
                         <div key={m.id} onClick={() => !soldOut && !singleLine && openMenu(m)} style={{
                           ...GLASS_PANEL, display: "flex", gap: 12, alignItems: "center", padding: "10px 12px", borderRadius: 14, marginBottom: 8,
@@ -2309,8 +2346,19 @@ export default function CustomerOrder({ shopUid }) {
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontWeight: 500, fontSize: 14, color: COLORS.espresso5 }}>{m.name}</div>
                             <div style={{ fontSize: 13, color: soldOut ? COLORS.danger : COLORS.gold, fontWeight: 600, marginTop: 3 }}>
-                              {soldOut ? "หมดวันนี้" : `${money(m.priceStore)} / ${productUnitLabel(m)}`}
+                              {soldOut ? "หมดวันนี้" : directPromoPrice !== null ? (
+                                <span style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
+                                  <span style={{ color: COLORS.espresso2, fontSize: 11.5, textDecoration: "line-through" }}>{money(m.priceStore)}</span>
+                                  <span style={{ color: COLORS.danger }}>{money(directPromoPrice)} / {productUnitLabel(m)}</span>
+                                  <span style={{ color: "#fff", background: COLORS.danger, borderRadius: 999, padding: "1px 6px", fontSize: 9.5 }}>ราคาโปร</span>
+                                </span>
+                              ) : `${money(m.priceStore)} / ${productUnitLabel(m)}`}
                             </div>
+                            {!soldOut && directPromo?.type === "qty" && (
+                              <div style={{ marginTop: 3, color: COLORS.danger, fontSize: 10.5, fontWeight: 600 }}>
+                                ซื้อครบ {directPromo.minQty || 2} {productUnitLabel(m)} ราคา {money(qtyPromoTotal(directPromo, m, directPromo.minQty || 2))}
+                              </div>
+                            )}
                           </div>
                           {singleLine ? (
                             <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
@@ -2418,9 +2466,10 @@ export default function CustomerOrder({ shopUid }) {
           }
           const refKey = pickingPromo ? "promo_" + pickingMenu.id : pickingMenu.id;
           spawnFly(refKey, pickingMenu.imageUrl);
-          const isQty = pickingPromo && pickingPromo.type === "qty";
-          const priceOverride = pickingPromo ? (isQty ? qtyPromoUnitPrice(pickingPromo, pickingMenu, qty) : singlePromoPrice(pickingPromo, pickingMenu)) : undefined;
-          addToCart(pickingMenu, qty, options, priceOverride, pickingPromo ? pickingPromo.id : null, pickingPromo ? (isQty ? "qty" : "single") : null);
+          const effectivePromo = pickingPromo || bestDirectPromoForMenu(pickingMenu, qty);
+          const isQty = effectivePromo && effectivePromo.type === "qty";
+          const priceOverride = effectivePromo ? (isQty ? qtyPromoUnitPrice(effectivePromo, pickingMenu, qty) : singlePromoPrice(effectivePromo, pickingMenu)) : undefined;
+          addToCart(pickingMenu, qty, options, priceOverride, effectivePromo ? effectivePromo.id : null, effectivePromo ? (isQty ? "qty" : "single") : null);
           setPickingMenu(null);
           setPickingPromo(null);
         }}
