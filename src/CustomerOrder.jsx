@@ -1192,6 +1192,36 @@ export default function CustomerOrder({ shopUid }) {
     return m;
   }, [menus]);
 
+  const coffeePassEligibleMenus = useMemo(() => (menus || []).filter((menu) =>
+    productTypeOf(menu) === "drink" &&
+    menu.available !== false &&
+    ((coffeePass.menuIds || []).length === 0 || coffeePass.menuIds.includes(menu.id))
+  ), [menus, coffeePass.menuIds]);
+
+  const coffeePassBenefit = useMemo(() => {
+    const uses = Math.max(1, Number(coffeePass.uses) || 1);
+    const passPrice = Math.max(0, Number(coffeePass.price) || 0);
+    const eligiblePrices = coffeePassEligibleMenus.map((menu) => Number(menu.priceStore)).filter((price) => price > 0);
+    const minMenuPrice = eligiblePrices.length ? Math.min(...eligiblePrices) : 0;
+    const maxMenuPrice = eligiblePrices.length ? Math.max(...eligiblePrices) : 0;
+    const regularMin = minMenuPrice * uses;
+    const regularMax = maxMenuPrice * uses;
+    const savingsMin = Math.max(0, regularMin - passPrice);
+    const savingsMax = Math.max(0, regularMax - passPrice);
+    const savingsPercentMax = regularMax > 0 ? Math.round((savingsMax / regularMax) * 100) : 0;
+    return {
+      uses,
+      passPrice,
+      perCup: passPrice / uses,
+      regularMin,
+      regularMax,
+      savingsMin,
+      savingsMax,
+      savingsPercentMax,
+      hasPriceComparison: regularMax > passPrice,
+    };
+  }, [coffeePass.uses, coffeePass.price, coffeePassEligibleMenus]);
+
   const shopNameParts = useMemo(() => {
     const [first, ...rest] = (shopName || "").split(" - ");
     return [first, rest.join(" - ").trim()];
@@ -1235,13 +1265,10 @@ export default function CustomerOrder({ shopUid }) {
       : seen;
     const featured = [];
     if (activePromotions.length > 0) featured.push(HOT_DEAL_CATEGORY);
-    const passMenuIds = coffeePass.menuIds || [];
-    const hasCoffeePassMenus = menus.some((menu) =>
-      productTypeOf(menu) === "drink" && menu.available !== false && (passMenuIds.length === 0 || passMenuIds.includes(menu.id))
-    );
+    const hasCoffeePassMenus = coffeePassEligibleMenus.length > 0;
     if (hasCoffeePassMenus) featured.push(COFFEE_PASS_CATEGORY);
     return [...featured, ...ordered];
-  }, [menus, activePromotions, categoryOrder, coffeePass]);
+  }, [menus, activePromotions, categoryOrder, coffeePassEligibleMenus]);
 
   useEffect(() => {
     if (categories.length > 0 && !activeCategory) setActiveCategory(categories[0]);
@@ -2542,15 +2569,58 @@ export default function CustomerOrder({ shopUid }) {
                     >
                       <div aria-hidden="true" style={{ position: "absolute", width: 150, height: 150, borderRadius: "50%", right: -55, top: -70, border: "22px solid rgba(255,255,255,.09)" }} />
                       <div style={{ position: "relative" }}>
-                        <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".12em", opacity: .72 }}>PREPAID COFFEE PACKAGE</div>
-                        <h2 style={{ margin: "6px 0 2px", fontFamily: "'Space Grotesk', sans-serif", fontSize: 25, lineHeight: 1.12 }}>{coffeePass.name || "Coffee Pass"}</h2>
-                        <div style={{ fontSize: 12.5, opacity: .82 }}>{coffeePass.uses} สิทธิ์ · ใช้เมื่อไรก็ได้ภายใน {coffeePass.validityDays} วัน · option เพิ่มราคาจ่ายเพิ่ม</div>
-                        <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 13 }}>
-                          {["ชำระครั้งเดียว", "ใช้ได้ตามเมนูที่กำหนด", `อายุ ${coffeePass.validityDays} วัน`].map((text) => <span key={text} style={{ padding: "4px 8px", border: "1px solid rgba(255,255,255,.24)", borderRadius: 999, background: "rgba(255,255,255,.1)", fontSize: 9.5, fontWeight: 700 }}>{text}</span>)}
+                        <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:10 }}>
+                          <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".12em", opacity: .72 }}>PREPAID COFFEE PACKAGE</div>
+                          {coffeePassBenefit.savingsMax > 0 && (
+                            <span style={{ padding:"5px 9px", borderRadius:999, background:"#fff", color:COLORS.sageDark, boxShadow:"0 4px 12px rgba(0,59,92,.18)", fontSize:10.5, fontWeight:900, whiteSpace:"nowrap" }}>
+                              SAVE UP TO {coffeePassBenefit.savingsPercentMax}%
+                            </span>
+                          )}
                         </div>
-                        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, marginTop:18 }}>
-                          <strong style={{ fontSize:25 }}>฿{money(coffeePass.price)}</strong>
-                          {coffeePass.enabled ? <button type="button" onClick={(event) => { event.stopPropagation(); buyCoffeePass(); }} style={{ padding:"9px 16px", border:0, borderRadius:12, background:"#fff", color:COLORS.sageDark, fontWeight:800 }}>ซื้อ Pass</button> : <span style={{ padding:"7px 10px", borderRadius:999, background:"rgba(255,255,255,.15)", fontSize:10.5, fontWeight:700 }}>ปิดขายชั่วคราว</span>}
+                        <h2 style={{ margin: "5px 0 2px", fontFamily: "'Space Grotesk', sans-serif", fontSize: 25, lineHeight: 1.12 }}>{coffeePass.name || "Coffee Pass"}</h2>
+                        <div style={{ fontSize: 14, fontWeight:800, opacity: .95 }}>รับเครื่องดื่ม {coffeePassBenefit.uses} แก้ว ในราคาเดียว</div>
+
+                        <div style={{ display:"grid", gridTemplateColumns:"1fr auto", alignItems:"end", gap:12, marginTop:14, padding:"12px 13px", border:"1px solid rgba(255,255,255,.2)", borderRadius:14, background:"rgba(255,255,255,.1)" }}>
+                          <div>
+                            {coffeePassBenefit.hasPriceComparison && (
+                              <div style={{ fontSize:10.5, opacity:.76 }}>
+                                ซื้อแยกปกติ{coffeePassBenefit.regularMin !== coffeePassBenefit.regularMax ? "สูงสุด" : ""}
+                                <span style={{ marginLeft:5, fontSize:13, fontWeight:700, textDecoration:"line-through" }}>฿{money(coffeePassBenefit.regularMax)}</span>
+                              </div>
+                            )}
+                            <div style={{ display:"flex", alignItems:"baseline", gap:6, marginTop:2 }}>
+                              <strong style={{ fontSize:29, lineHeight:1 }}>฿{money(coffeePassBenefit.passPrice)}</strong>
+                              <span style={{ fontSize:10.5, opacity:.8 }}>ทั้งแพ็ก</span>
+                            </div>
+                          </div>
+                          {coffeePassBenefit.savingsMax > 0 && (
+                            <div style={{ textAlign:"right" }}>
+                              <div style={{ fontSize:9.5, opacity:.75 }}>ประหยัดสูงสุด</div>
+                              <strong style={{ display:"block", marginTop:1, color:"#fff", fontSize:18 }}>฿{money(coffeePassBenefit.savingsMax)}</strong>
+                            </div>
+                          )}
+                        </div>
+
+                        <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:6, marginTop:9 }}>
+                          {[
+                            [money(coffeePassBenefit.perCup), "บาท / แก้ว"],
+                            [coffeePassBenefit.uses, "สิทธิ์ทั้งหมด"],
+                            [coffeePass.validityDays, "วันใช้งาน"],
+                          ].map(([value, label]) => (
+                            <div key={label} style={{ padding:"7px 5px", borderRadius:10, background:"rgba(255,255,255,.1)", textAlign:"center" }}>
+                              <strong style={{ display:"block", fontSize:13 }}>{value}</strong>
+                              <span style={{ display:"block", marginTop:1, fontSize:8.5, opacity:.72 }}>{label}</span>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div style={{ marginTop:12, fontSize:10.5, opacity:.78 }}>เลือกเมนูที่ร่วมรายการได้ตามใจ · จ่ายเพิ่มเฉพาะ option ที่มีราคาเพิ่ม</div>
+                        <div style={{ marginTop:14 }}>
+                          {coffeePass.enabled ? (
+                            <button type="button" onClick={(event) => { event.stopPropagation(); buyCoffeePass(); }} style={{ width:"100%", padding:"11px 16px", border:0, borderRadius:12, background:"#fff", color:COLORS.sageDark, boxShadow:"0 7px 18px rgba(0,59,92,.18)", fontSize:13.5, fontWeight:900 }}>
+                              ซื้อ {coffeePass.name || "Coffee Pass"}{coffeePassBenefit.savingsMax > 0 ? ` · ประหยัดสูงสุด ฿${money(coffeePassBenefit.savingsMax)}` : ""}
+                            </button>
+                          ) : <div style={{ padding:"9px 10px", borderRadius:12, background:"rgba(255,255,255,.15)", textAlign:"center", fontSize:10.5, fontWeight:700 }}>ปิดขายชั่วคราว</div>}
                         </div>
                         <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:5, marginTop:13, paddingTop:10, borderTop:"1px solid rgba(255,255,255,.18)", fontSize:10.5, fontWeight:700, opacity:.9 }}>
                           ดูสิทธิประโยชน์และวิธีใช้ <i className={`ti ti-chevron-${showCoffeePassDetails ? "up" : "down"}`} aria-hidden="true" />
@@ -2562,14 +2632,19 @@ export default function CustomerOrder({ shopUid }) {
                       <div style={{ ...GLASS_PANEL, margin:"0 10px 14px", padding:14, borderRadius:16 }}>
                         <div style={{ color:COLORS.espresso5, fontSize:14, fontWeight:800 }}>สิทธิประโยชน์</div>
                         <ul style={{ margin:"8px 0 0", paddingLeft:20, color:COLORS.espresso4, fontSize:11.5, lineHeight:1.65 }}>
+                          {coffeePassBenefit.savingsMax > 0 && (
+                            <li><strong>ประหยัดสูงสุด {money(coffeePassBenefit.savingsMax)} บาท</strong> เทียบกับซื้อเมนูที่ร่วมรายการครบ {coffeePassBenefit.uses} แก้วในราคาปกติ</li>
+                          )}
+                          <li>เฉลี่ยเพียง <strong>{money(coffeePassBenefit.perCup)} บาทต่อแก้ว</strong></li>
                           <li>รับเครื่องดื่ม {coffeePass.uses} แก้ว ภายใน {coffeePass.validityDays} วันหลังร้านเปิดใช้งาน</li>
                           <li>ใช้ได้ครั้งละ 1 แก้วกับเมนูที่ร่วมรายการ</li>
                           <li>ตัวเลือกที่มีราคาเพิ่ม ชำระเฉพาะส่วนเพิ่มตามจริง</li>
                         </ul>
                         <div style={{ marginTop:12, color:COLORS.espresso5, fontSize:14, fontWeight:800 }}>เมนูที่ร่วมรายการ</div>
                         <div style={{ marginTop:6, color:COLORS.espresso3, fontSize:11.5, lineHeight:1.55 }}>
-                          {(menus || []).filter((menu) => productTypeOf(menu) === "drink" && ((coffeePass.menuIds || []).length === 0 || coffeePass.menuIds.includes(menu.id))).map((menu) => menu.name).join(" · ") || "ยังไม่มีเมนูที่ร่วมรายการ"}
+                          {coffeePassEligibleMenus.map((menu) => menu.name).join(" · ") || "ยังไม่มีเมนูที่ร่วมรายการ"}
                         </div>
+                        {coffeePassBenefit.regularMin !== coffeePassBenefit.regularMax && coffeePassBenefit.savingsMax > 0 && <div style={{ marginTop:5, color:COLORS.espresso2, fontSize:9.5 }}>ยอดประหยัดจริงขึ้นอยู่กับเมนูที่เลือก โดยคำนวณจากราคาปกติปัจจุบัน</div>}
                         <div style={{ marginTop:12, color:COLORS.espresso5, fontSize:14, fontWeight:800 }}>วิธีใช้</div>
                         <ol style={{ margin:"8px 0 0", paddingLeft:20, color:COLORS.espresso4, fontSize:11.5, lineHeight:1.65 }}>
                           <li>เลือกเครื่องดื่มจากเมนูตามปกติ แล้วไปหน้าชำระเงิน</li>
