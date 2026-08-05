@@ -1062,10 +1062,14 @@ export default function CustomerOrder({ shopUid }) {
     const unsub7b = onValue(ref(db, `shops/${shopUid}/settings/bannerImageUrls`), (snap) => setBannerImageUrls(snap.val() || []));
     const unsub9 = onValue(ref(db, `shops/${shopUid}/settings/categoryOrder`), (snap) => setCategoryOrder(snap.val() || []));
     const unsub10 = onValue(ref(db, `shops/${shopUid}/settings/loyaltyBeanGoal`), (snap) => setLoyaltyBeanGoal(snap.val() || 10));
-    const unsub11 = onValue(ref(db, `shops/${shopUid}/settings/seasonalEffect`), (snap) => {
-      const value = snap.val();
-      setSeasonalEffect(SEASONAL_EFFECTS.has(value) ? value : "auto");
-    });
+    const unsub11 = onValue(
+      ref(db, `shops/${shopUid}/settings/seasonalEffect`),
+      (snap) => {
+        const value = snap.val();
+        setSeasonalEffect(SEASONAL_EFFECTS.has(value) ? value : "auto");
+      },
+      (err) => console.error("อ่านเอฟเฟกต์เทศกาลไม่ได้ (เช็คว่า deploy database.rules.json ล่าสุดหรือยัง):", err.message)
+    );
     const unsub8 = onValue(ref(db, `shops/${shopUid}/promotions`), (snap) => {
       const list = snap.val() || [];
       setPromotions(list.map((p) => ({
