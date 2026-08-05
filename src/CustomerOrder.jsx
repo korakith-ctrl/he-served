@@ -380,15 +380,13 @@ const GLOBAL_CSS = `
   .zone2-minimal-splash { position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; overflow: hidden; background: #FFFFFF; transition: opacity .5s ease, visibility .5s ease; }
   .zone2-minimal-splash.is-leaving { opacity: 0; visibility: hidden; }
   .zone2-minimal-stage { position: relative; width: clamp(104px, 30vw, 132px); aspect-ratio: 1058 / 1352; }
-  .zone2-minimal-mark { position: relative; width: 100%; height: 100%; opacity: 0; transform: translateY(24px) scale(.68); animation: zone2MinimalEnter 1s cubic-bezier(.2,.88,.22,1.22) .12s forwards; }
-  .zone2-minimal-mark::before { content: ""; position: absolute; z-index: -1; inset: 18% 5%; border-radius: 50%; background: rgba(0,163,224,.13); filter: blur(30px); opacity: 0; animation: zone2MinimalGlow 1.1s ease .25s forwards; }
+  .zone2-minimal-mark { position: relative; width: 100%; height: 100%; transform: translateY(0); animation: zone2MinimalLift .62s cubic-bezier(.22,.8,.25,1) .58s forwards; }
+  .zone2-minimal-mark::before { content: ""; position: absolute; z-index: -1; inset: 18% 5%; border-radius: 50%; background: rgba(0,163,224,.1); filter: blur(30px); opacity: .22; }
   .zone2-minimal-logo-crop { position: absolute; inset: 0; overflow: hidden; }
-  .zone2-minimal-logo-crop img { position: absolute; width: 193.57%; height: auto; max-width: none; left: -46.79%; top: -25.74%; display: block; animation: zone2MinimalFloat 1.15s cubic-bezier(.42,0,.24,1) 1.1s 1 both; }
-  .zone2-minimal-tagline { position: absolute; top: calc(100% + 24px); left: 50%; color: #718A99; font-family: 'Space Grotesk', sans-serif; font-size: clamp(8px, 2.3vw, 10px); font-weight: 600; letter-spacing: .24em; line-height: 1; white-space: nowrap; opacity: 0; clip-path: inset(0 50% 0 50%); -webkit-clip-path: inset(0 50% 0 50%); transform: translateX(-50%); animation: zone2MinimalTagReveal .95s steps(10,end) .95s forwards; }
-  @keyframes zone2MinimalEnter { 0% { opacity: 0; transform: translateY(24px) scale(.68); } 66% { opacity: 1; transform: translateY(-5px) scale(1.055); } 84% { transform: translateY(2px) scale(.985); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
-  @keyframes zone2MinimalGlow { 0% { opacity: 0; transform: scale(.72); } 55% { opacity: .75; } 100% { opacity: .35; transform: scale(1.12); } }
-  @keyframes zone2MinimalFloat { 0% { transform: translateY(0) scale(1); } 38% { transform: translateY(-4px) scale(1.01); } 68% { transform: translateY(1.5px) scale(.997); } 84% { transform: translateY(-1px) scale(1.003); } 100% { transform: translateY(0) scale(1); } }
-  @keyframes zone2MinimalTagReveal { 0% { opacity: 0; clip-path: inset(0 50% 0 50%); -webkit-clip-path: inset(0 50% 0 50%); letter-spacing: .42em; } 18% { opacity: .38; } 100% { opacity: 1; clip-path: inset(0 0 0 0); -webkit-clip-path: inset(0 0 0 0); letter-spacing: .24em; } }
+  .zone2-minimal-logo-crop img { position: absolute; width: 193.57%; height: auto; max-width: none; left: -46.79%; top: -25.74%; display: block; }
+  .zone2-minimal-tagline { position: absolute; top: calc(100% + 14px); left: 50%; color: #718A99; font-family: 'Space Grotesk', sans-serif; font-size: clamp(8px, 2.3vw, 10px); font-weight: 600; letter-spacing: .24em; line-height: 1; white-space: nowrap; opacity: 0; transform: translate(-50%, 8px); animation: zone2MinimalTextFade .65s ease 1.08s forwards; }
+  @keyframes zone2MinimalLift { from { transform: translateY(0); } to { transform: translateY(-10px); } }
+  @keyframes zone2MinimalTextFade { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
   .zone2-splash {
     position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; overflow: hidden;
     color: #F7FBFF; background: radial-gradient(circle at 50% 42%, rgba(17,148,207,.12), transparent 30%), linear-gradient(145deg, #05070A 0%, #0A1017 55%, #05070A 100%);
@@ -1153,7 +1151,7 @@ export default function CustomerOrder({ shopUid }) {
 
   useEffect(() => {
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const minimumDuration = reducedMotion ? 350 : (CUSTOMER_SPLASH_VARIANT === "minimal-white" ? 2850 : 2250);
+    const minimumDuration = reducedMotion ? 350 : (CUSTOMER_SPLASH_VARIANT === "minimal-white" ? 2500 : 2250);
     const t = setTimeout(() => setSplashMinimumElapsed(true), minimumDuration);
     return () => clearTimeout(t);
   }, []);
