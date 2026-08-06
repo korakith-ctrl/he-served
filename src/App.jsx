@@ -6,6 +6,7 @@ import { httpsCallable } from "firebase/functions";
 import QRCode from "qrcode";
 import Login from "./Login.jsx";
 import CustomerOrder from "./CustomerOrder.jsx";
+import LandingScreen, { LANDING_SCREEN_EXIT_MS, LANDING_SCREEN_MINIMUM_MS } from "./LandingScreen.jsx";
 
 const UNITS = { g: "กรัม", ml: "มล.", piece: "ชิ้น" };
 const CATEGORIES = [
@@ -687,7 +688,7 @@ const TABS = [
   { id: "settings", label: "Settings", icon: "settings" },
 ];
 
-function ShopApp({ uid, user, theme, onToggleTheme }) {
+function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
   const [data, setData] = useState(null);
   const [tab, setTab] = useState("dashboard");
   const [toast, setToast] = useState(null);
@@ -896,6 +897,10 @@ function ShopApp({ uid, user, theme, onToggleTheme }) {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
+
+  useEffect(() => {
+    if (data) onReady?.(true);
+  }, [data, onReady]);
 
   function showToast(msg) {
     setToast(msg);
@@ -1201,11 +1206,7 @@ function ShopApp({ uid, user, theme, onToggleTheme }) {
   }, [orders, customers, uid]);
 
   if (!data) {
-    return (
-      <div style={{ padding: "3rem", textAlign: "center", color: "#0B4A7A", fontFamily: "sans-serif" }}>
-        กำลังโหลดข้อมูลร้าน...
-      </div>
-    );
+    return null;
   }
 
   function updateData(fn) {
@@ -9250,6 +9251,36 @@ function AddPlatformModal({ existingNames, onAdd, onClose }) {
   );
 }
 
+function AdminDashboard({ user, theme, onToggleTheme }) {
+  const [dataReady, setDataReady] = useState(false);
+  const [minimumElapsed, setMinimumElapsed] = useState(false);
+  const [splashLeaving, setSplashLeaving] = useState(false);
+  const [splashDone, setSplashDone] = useState(false);
+
+  useEffect(() => {
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const timer = window.setTimeout(
+      () => setMinimumElapsed(true),
+      reducedMotion ? 350 : LANDING_SCREEN_MINIMUM_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!minimumElapsed || !dataReady) return undefined;
+    setSplashLeaving(true);
+    const timer = window.setTimeout(() => setSplashDone(true), LANDING_SCREEN_EXIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [minimumElapsed, dataReady]);
+
+  return (
+    <>
+      <ShopApp uid={user.uid} user={user} theme={theme} onToggleTheme={onToggleTheme} onReady={setDataReady} />
+      {!splashDone && <LandingScreen leaving={splashLeaving} />}
+    </>
+  );
+}
+
 
 export default function App() {
   const [user, setUser] = useState(undefined);
@@ -9297,14 +9328,10 @@ export default function App() {
   }
 
   if (user === undefined) {
-    return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "sans-serif", color: "#0B4A7A" }}>
-        กำลังโหลด...
-      </div>
-    );
+    return <LandingScreen />;
   }
 
   if (!user || user.isAnonymous) return <Login />;
 
-  return <ShopApp uid={user.uid} user={user} theme={theme} onToggleTheme={toggleTheme} />;
+  return <AdminDashboard user={user} theme={theme} onToggleTheme={toggleTheme} />;
 }
