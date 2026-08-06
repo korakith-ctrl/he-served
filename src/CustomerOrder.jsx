@@ -1144,6 +1144,8 @@ export default function CustomerOrder({ shopUid }) {
   const [headerRipple, setHeaderRipple] = useState(false);
 
   const mainRef = useRef(null);
+  const categoryNavRef = useRef(null);
+  const categoryButtonRefs = useRef({});
   const sectionRefs = useRef({});
   const offerCarouselRef = useRef(null);
   const offerInteractionAtRef = useRef(0);
@@ -1436,21 +1438,64 @@ export default function CustomerOrder({ shopUid }) {
   }, [splashDone, acceptingOrders, step, activePromotions]);
 
   useEffect(() => {
-    if (step !== "menu" || !mainRef.current || categories.length === 0) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-        if (visible[0]) setActiveCategory(visible[0].target.dataset.category);
-      },
-      { root: mainRef.current, rootMargin: "-10% 0px -75% 0px", threshold: 0 }
-    );
-    Object.values(sectionRefs.current).forEach((el) => el && observer.observe(el));
-    return () => observer.disconnect();
+    const container = mainRef.current;
+    if (step !== "menu" || !container || categories.length === 0) return undefined;
+    let frame = 0;
+    const updateActiveCategory = () => {
+      frame = 0;
+      const containerRect = container.getBoundingClientRect();
+      const activationLine = containerRect.top + Math.min(32, containerRect.height * .12);
+      let nextCategory = categories[0];
+
+      if (container.scrollTop + container.clientHeight >= container.scrollHeight - 8) {
+        nextCategory = categories[categories.length - 1];
+      } else {
+        for (const category of categories) {
+          const section = sectionRefs.current[category];
+          if (!section) continue;
+          if (section.getBoundingClientRect().top <= activationLine) nextCategory = category;
+          else break;
+        }
+      }
+      setActiveCategory((current) => current === nextCategory ? current : nextCategory);
+    };
+    const scheduleUpdate = () => {
+      if (!frame) frame = requestAnimationFrame(updateActiveCategory);
+    };
+    updateActiveCategory();
+    container.addEventListener("scroll", scheduleUpdate, { passive: true });
+    window.addEventListener("resize", scheduleUpdate);
+    return () => {
+      container.removeEventListener("scroll", scheduleUpdate);
+      window.removeEventListener("resize", scheduleUpdate);
+      if (frame) cancelAnimationFrame(frame);
+    };
   }, [step, categories, menus]);
+
+  useEffect(() => {
+    const nav = categoryNavRef.current;
+    const button = activeCategory ? categoryButtonRefs.current[activeCategory] : null;
+    if (!nav || !button) return undefined;
+    const frame = requestAnimationFrame(() => {
+      const navRect = nav.getBoundingClientRect();
+      const buttonRect = button.getBoundingClientRect();
+      const edgePadding = 8;
+      if (buttonRect.top < navRect.top + edgePadding) {
+        nav.scrollBy({ top: buttonRect.top - navRect.top - edgePadding, behavior: "smooth" });
+      } else if (buttonRect.bottom > navRect.bottom - edgePadding) {
+        nav.scrollBy({ top: buttonRect.bottom - navRect.bottom + edgePadding, behavior: "smooth" });
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [activeCategory]);
 
   function scrollToCategory(cat) {
     setActiveCategory(cat);
-    sectionRefs.current[cat]?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const container = mainRef.current;
+    const section = sectionRefs.current[cat];
+    if (!container || !section) return;
+    const top = section.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+    container.scrollTo({ top, behavior: "smooth" });
   }
 
   function groupsForMenu(menu) {
@@ -2649,12 +2694,13 @@ export default function CustomerOrder({ shopUid }) {
         <div style={{ padding: 24, textAlign: "center", color: COLORS.espresso2, fontSize: 13 }}>ร้านยังไม่มีเมนู</div>
       ) : (
         <div style={{ display: "flex", flex: 1, minHeight: 0, gap: 10, padding: "10px 10px 0" }}>
-          <nav className="customer-category-nav" style={{ ...GLASS_PANEL, width: 88, flexShrink: 0, overflowY: "auto", borderRadius: 16, padding: "8px 0" }}>
+          <nav ref={categoryNavRef} className="customer-category-nav" style={{ ...GLASS_PANEL, width: 88, flexShrink: 0, overflowY: "auto", borderRadius: 16, padding: "8px 0" }}>
             {categories.map((cat) => {
               const active = activeCategory === cat;
               return (
                 <button
                   key={cat}
+                  ref={(element) => { categoryButtonRefs.current[cat] = element; }}
                   className={`customer-category-tab${active ? " active" : ""}`}
                   onClick={() => scrollToCategory(cat)}
                   style={{
