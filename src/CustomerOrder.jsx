@@ -1437,40 +1437,41 @@ export default function CustomerOrder({ shopUid }) {
     };
   }, [splashDone, acceptingOrders, step, activePromotions]);
 
-  useEffect(() => {
+  const syncActiveCategoryToScroll = useCallback(() => {
     const container = mainRef.current;
-    if (step !== "menu" || !container || categories.length === 0) return undefined;
-    let frame = 0;
-    const updateActiveCategory = () => {
-      frame = 0;
-      const containerRect = container.getBoundingClientRect();
-      const activationLine = containerRect.top + Math.min(32, containerRect.height * .12);
-      let nextCategory = categories[0];
+    if (step !== "menu" || !container || categories.length === 0) return;
+    const containerRect = container.getBoundingClientRect();
+    const visibleTop = Math.max(0, containerRect.top);
+    const activationLine = visibleTop + Math.min(36, Math.max(18, containerRect.height * .12));
+    const internalScrollAtBottom = container.scrollHeight > container.clientHeight + 1 &&
+      container.scrollTop + container.clientHeight >= container.scrollHeight - 8;
+    const pageScrollAtBottom = window.scrollY > 0 &&
+      window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 8;
+    let nextCategory = categories[0];
 
-      if (container.scrollTop + container.clientHeight >= container.scrollHeight - 8) {
-        nextCategory = categories[categories.length - 1];
-      } else {
-        for (const category of categories) {
-          const section = sectionRefs.current[category];
-          if (!section) continue;
-          if (section.getBoundingClientRect().top <= activationLine) nextCategory = category;
-          else break;
-        }
+    if (internalScrollAtBottom || pageScrollAtBottom) {
+      nextCategory = categories[categories.length - 1];
+    } else {
+      for (const category of categories) {
+        const section = sectionRefs.current[category];
+        if (!section) continue;
+        if (section.getBoundingClientRect().top <= activationLine) nextCategory = category;
+        else break;
       }
-      setActiveCategory((current) => current === nextCategory ? current : nextCategory);
-    };
-    const scheduleUpdate = () => {
-      if (!frame) frame = requestAnimationFrame(updateActiveCategory);
-    };
-    updateActiveCategory();
-    container.addEventListener("scroll", scheduleUpdate, { passive: true });
-    window.addEventListener("resize", scheduleUpdate);
+    }
+    setActiveCategory((current) => current === nextCategory ? current : nextCategory);
+  }, [step, categories]);
+
+  useEffect(() => {
+    if (step !== "menu") return undefined;
+    syncActiveCategoryToScroll();
+    window.addEventListener("scroll", syncActiveCategoryToScroll, { passive: true });
+    window.addEventListener("resize", syncActiveCategoryToScroll);
     return () => {
-      container.removeEventListener("scroll", scheduleUpdate);
-      window.removeEventListener("resize", scheduleUpdate);
-      if (frame) cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", syncActiveCategoryToScroll);
+      window.removeEventListener("resize", syncActiveCategoryToScroll);
     };
-  }, [step, categories, menus]);
+  }, [step, menus, syncActiveCategoryToScroll]);
 
   useEffect(() => {
     const nav = categoryNavRef.current;
@@ -1494,8 +1495,12 @@ export default function CustomerOrder({ shopUid }) {
     const container = mainRef.current;
     const section = sectionRefs.current[cat];
     if (!container || !section) return;
-    const top = section.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
-    container.scrollTo({ top, behavior: "smooth" });
+    if (container.scrollHeight > container.clientHeight + 1) {
+      const top = section.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+      container.scrollTo({ top, behavior: "smooth" });
+    } else {
+      section.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   }
 
   function groupsForMenu(menu) {
@@ -2716,7 +2721,7 @@ export default function CustomerOrder({ shopUid }) {
             })}
           </nav>
 
-          <main ref={mainRef} style={{ flex: 1, overflowY: "auto", padding: "0 0 100px" }}>
+          <main ref={mainRef} onScroll={syncActiveCategoryToScroll} style={{ flex: 1, minHeight: 0, height:"100%", overflowY: "auto", overscrollBehavior:"contain", padding: "0 0 100px" }}>
             {error && step === "menu" && (
               <div style={{ margin: "10px 12px 0", padding: "9px 11px", border: `1px solid ${COLORS.danger}55`, borderRadius: 10, background: "#FFF2F0", color: COLORS.danger, fontSize: 11.5, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
                 <span>{error}</span>
