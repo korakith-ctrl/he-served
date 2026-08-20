@@ -899,7 +899,7 @@ const GLOBAL_CSS = `
   .customer-quick-reorder__copy strong { color: #003B5C; font-size: 12.5px; }
   .customer-quick-reorder__copy small { margin-top: 2px; color: #55778A; font-size: 10.5px; }
   .customer-quick-reorder__button { min-height: 38px; flex-shrink: 0; padding: 0 12px; border: 0; border-radius: 11px; color: #FFFFFF; background: #0077A8; font-size: 11.5px; font-weight: 800; box-shadow: 0 5px 13px rgba(0,119,168,.22); }
-  .customer-taste-filters { display: flex; gap: 7px; margin-top: 10px; padding: 0 10px 2px; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; }
+  .customer-taste-filters { display: flex; gap: 7px; margin-top: 10px; padding: 0 16px 2px; overflow-x: auto; scrollbar-width: none; scroll-padding-inline: 16px; scroll-snap-type: x proximity; }
   .customer-taste-filter { min-height: 38px; padding: 0 11px; flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; scroll-snap-align: start; border: 1px solid rgba(0,163,224,.18); border-radius: 999px; color: #55778A; background: rgba(255,255,255,.78); font-size: 11.5px; font-weight: 700; transition: color .2s ease, background .2s ease, border-color .2s ease, transform .2s ease; }
   .customer-taste-filter.active { color: #FFFFFF; background: #0077A8; border-color: #0077A8; box-shadow: 0 5px 13px rgba(0,119,168,.2); }
   .customer-taste-filter:active { transform: scale(.96); }
