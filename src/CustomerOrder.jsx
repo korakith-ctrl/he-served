@@ -4023,11 +4023,11 @@ export default function CustomerOrder({ shopUid }) {
           const isQty = effectivePromo && effectivePromo.type === "qty";
           const priceOverride = effectivePromo ? (isQty ? qtyPromoUnitPrice(effectivePromo, pickingMenu, qty) : singlePromoPrice(effectivePromo, pickingMenu)) : undefined;
           addToCart(pickingMenu, qty, options, priceOverride, effectivePromo ? effectivePromo.id : null, effectivePromo ? (isQty ? "qty" : "single") : null);
-          runViewTransition(() => {
-            setPickingMenu(null);
-            setPickingPromo(null);
-            setPickingRefKey("");
-          });
+          // The cart already has its own fly-to-cart animation. Closing the
+          // picker with another shared transition creates a second image clone.
+          setPickingMenu(null);
+          setPickingPromo(null);
+          setPickingRefKey("");
         }}
       />
 
