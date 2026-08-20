@@ -2800,6 +2800,7 @@ export default function CustomerOrder({ shopUid }) {
         setQrDataUrl(null);
       }
       setOrder({ id: orderId, ...orderData });
+      setActiveOrderSummary({ id: orderId, ...orderData });
       setStep("pay");
     } catch (e) {
       const isAuthIssue = e.code === "PERMISSION_DENIED" || e.code === "functions/unauthenticated" ||
@@ -2847,7 +2848,7 @@ export default function CustomerOrder({ shopUid }) {
       },
     ));
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
-  }, [authUid, shopUid]);
+  }, [authUid, shopUid, order?.id]);
 
   const hasActiveOrder = Boolean(activeOrderSummary);
 
