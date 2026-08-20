@@ -60,34 +60,85 @@ function runSharedMenuTransition(source, transitionName, update) {
   }
 }
 
-function runSharedCartTransition(source, cartIconRef, update) {
+function runSharedCartTransition(source, cartIconRef, afterArrival, onDeparture) {
   const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
   if (!source || !document.startViewTransition || reduceMotion) {
-    update();
+    onDeparture?.();
+    afterArrival();
     return;
   }
 
   const transitionName = "cart-fly";
   const root = document.documentElement;
+  const cartRect = cartIconRef.current?.getBoundingClientRect();
+  const size = cartRect?.width || 40;
+  const destination = source.cloneNode(true);
+  const targetLeft = cartRect?.left ?? Math.max(16, (window.innerWidth - 420) / 2) + 12;
+  const targetTop = cartRect?.top ?? window.innerHeight - 64;
+
+  Object.assign(destination.style, {
+    position: "fixed",
+    left: `${targetLeft}px`,
+    top: `${targetTop}px`,
+    width: `${size}px`,
+    height: `${size}px`,
+    margin: "0",
+    padding: "0",
+    borderRadius: "13px",
+    overflow: "hidden",
+    opacity: "1",
+    pointerEvents: "none",
+    transform: "none",
+    zIndex: "2147483646",
+    viewTransitionName: transitionName,
+  });
+  if (destination.firstElementChild instanceof HTMLElement) {
+    Object.assign(destination.firstElementChild.style, {
+      width: "100%",
+      height: "100%",
+      margin: "0",
+      borderRadius: "13px",
+    });
+  }
+
   source.style.viewTransitionName = transitionName;
   root.classList.add("cart-shared-transition");
 
+  let departureApplied = false;
+  let arrivalApplied = false;
+  const applyDeparture = () => {
+    if (departureApplied) return;
+    departureApplied = true;
+    onDeparture?.();
+  };
+  const applyArrival = () => {
+    if (arrivalApplied) return;
+    arrivalApplied = true;
+    afterArrival();
+  };
+
   const cleanup = () => {
     source.style.removeProperty("view-transition-name");
-    cartIconRef.current?.style.removeProperty("view-transition-name");
+    destination.remove();
     root.classList.remove("cart-shared-transition");
+  };
+
+  const finish = () => {
+    cleanup();
+    flushSync(applyArrival);
   };
 
   try {
     const transition = document.startViewTransition(() => {
       source.style.viewTransitionName = "none";
-      flushSync(update);
-      if (cartIconRef.current) cartIconRef.current.style.viewTransitionName = transitionName;
+      document.body.appendChild(destination);
+      if (onDeparture) flushSync(applyDeparture);
     });
-    transition.finished.then(cleanup, cleanup);
+    transition.finished.then(finish, finish);
   } catch {
     cleanup();
-    update();
+    applyDeparture();
+    applyArrival();
   }
 }
 
@@ -2163,8 +2214,8 @@ export default function CustomerOrder({ shopUid }) {
     return linesForMenu(menuId, promoId).reduce((s, l) => s + l.qty, 0);
   }
 
-  function transitionMenuToCart(refKey, update, source = menuThumbRefs.current[refKey]) {
-    runSharedCartTransition(source, cartIconRef, update);
+  function transitionMenuToCart(refKey, afterArrival, source = menuThumbRefs.current[refKey], onDeparture) {
+    runSharedCartTransition(source, cartIconRef, afterArrival, onDeparture);
   }
 
   function scrollOfferCarousel(dir) {
@@ -4033,10 +4084,11 @@ export default function CustomerOrder({ shopUid }) {
           const priceOverride = effectivePromo ? (isQty ? qtyPromoUnitPrice(effectivePromo, pickingMenu, qty) : singlePromoPrice(effectivePromo, pickingMenu)) : undefined;
           transitionMenuToCart(refKey, () => {
             addToCart(pickingMenu, qty, options, priceOverride, effectivePromo ? effectivePromo.id : null, effectivePromo ? (isQty ? "qty" : "single") : null);
+          }, pickerThumbRef.current, () => {
             setPickingMenu(null);
             setPickingPromo(null);
             setPickingRefKey("");
-          }, pickerThumbRef.current);
+          });
         }}
       />
 
