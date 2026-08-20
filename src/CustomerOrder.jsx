@@ -675,9 +675,13 @@ const GLOBAL_CSS = `
   @keyframes zone2LoaderIn { to { opacity: 1; } }
   @keyframes zone2BeanBounce { 0%,60%,100% { transform: translateY(0) scale(1); opacity: .35; } 30% { transform: translateY(-7px) scale(1.1); opacity: 1; } }
   @keyframes zone2AmbientFloat { to { transform: translate3d(28px,18px,0) scale(1.08); } }
-  .banner-carousel { touch-action: pan-y; }
-  .banner-slide { transition: opacity .45s ease; }
+  .banner-carousel { height: 84px; touch-action: pan-y; }
+  .banner-slide { object-fit: cover; transition: opacity .45s ease; }
   .banner-carousel:focus-visible { outline: 3px solid rgba(0,163,224,.42); outline-offset: 2px; }
+  @media (max-width: 640px) {
+    .banner-carousel { height: auto; aspect-ratio: 3 / 1; background: #10091A; }
+    .banner-slide { object-fit: contain; }
+  }
   @keyframes offerRipple { 0% { transform: scale(0); opacity: .5; } 100% { transform: scale(2.4); opacity: 0; } }
   .offer-ripple { position: absolute; inset: 0; border-radius: inherit; background: rgba(0,163,224,0.22); animation: offerRipple .5s ease-out; pointer-events: none; }
   .coffee-pass-buy-border { position: relative; isolation: isolate; overflow: hidden; padding: 2px; border-radius: 14px; background: #FFFFFF; box-shadow: 0 7px 20px rgba(0,59,92,.22); }
@@ -1093,7 +1097,7 @@ function BannerSlide({ url, active, position, total }) {
       aria-hidden={!active}
       className="banner-slide"
       style={{
-        position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover",
+        position: "absolute", inset: 0, width: "100%", height: "100%",
         opacity: active ? 1 : 0,
       }}
       onError={() => setFailed(true)}
@@ -1156,7 +1160,7 @@ function BannerCarousel({ images }) {
       }}
       onPointerCancel={() => { pointerStartRef.current = null; }}
       style={{
-      margin: "10px 10px 0", borderRadius: 16, overflow: "hidden", position: "relative", height: 84,
+      margin: "10px 10px 0", borderRadius: 16, overflow: "hidden", position: "relative",
       border: "1px solid rgba(0,163,224,0.16)", boxShadow: "0 8px 24px rgba(0,91,133,0.10)", flexShrink: 0,
       cursor: validImages.length > 1 ? "pointer" : "default",
     }}>
