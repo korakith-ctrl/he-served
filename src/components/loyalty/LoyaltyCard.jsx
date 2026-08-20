@@ -29,7 +29,7 @@ function CardShell({ children, state = "default", className = "", live = false }
   return (
     <section
       className={`loyalty-card loyalty-card--${state} ${className}`.trim()}
-      aria-label="สะสมเมล็ดรับเครื่องดื่มฟรี"
+      aria-label="สะสมเมล็ดรับส่วนลดเครื่องดื่ม"
       {...(live ? { "aria-live": "polite" } : {})}
     >
       {children}
@@ -44,9 +44,9 @@ function CardHeader({ pending = 0 }) {
         <span className="loyalty-card__medallion" aria-hidden="true">
           <CoffeeBeanIcon status="earned" size={21} />
         </span>
-        <h2 className="loyalty-card__title">สะสมเมล็ดรับเครื่องดื่มฟรี</h2>
+        <h2 className="loyalty-card__title">สะสมเมล็ดรับส่วนลด</h2>
       </div>
-      {pending > 0 && <span className="loyalty-card__badge">+{pending} เมล็ด</span>}
+      {pending > 0 && <span className="loyalty-card__badge">+{pending} รอยืนยัน</span>}
     </div>
   );
 }
@@ -80,6 +80,7 @@ export default function LoyaltyCard({
   loyaltyStatus,
   beanRecord,
   loyaltyBeanGoal,
+  loyaltyRewardValue,
   onRetry,
   cart,
   cartCount,
@@ -93,10 +94,13 @@ export default function LoyaltyCard({
 }) {
   const digits = phone.replace(/\D/g, "");
   const target = Math.max(1, Math.floor(Number(loyaltyBeanGoal) || 10));
+  const rewardValue = Math.min(10000, Math.max(1, Number(loyaltyRewardValue) || 60));
+  const rewardValueLabel = rewardValue.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const earned = Math.max(0, Math.floor(Number(beanRecord?.beans) || 0));
-  // The existing checkout rule awards one pending bean per drink in this cart.
+  // Pending beans preview what this cart can earn, but they are not part of the
+  // member's balance until the shop delivers the drinks.
   const pending = Math.max(0, Math.floor(Number(cartCount) || 0));
-  const remaining = Math.max(target - earned - pending, 0);
+  const remaining = Math.max(target - earned, 0);
   const rewardReady = earned >= target;
   const rewardEligibleCart = cart.filter((line) => line.productType !== "food");
   const tier = loyaltyTierFor(beanRecord?.lifetimeBeans);
@@ -134,12 +138,12 @@ export default function LoyaltyCard({
     setAnimatedIndexes(Array.from({ length: Math.max(0, last - first) }, (_, index) => first + index));
     setAnnouncement(
       previousEarned < target && earned >= target
-        ? "คุณมีรางวัลเครื่องดื่มฟรี 1 แก้วพร้อมใช้"
+        ? `คุณมีรางวัลส่วนลดเครื่องดื่ม ${rewardValueLabel} บาทพร้อมใช้`
         : `ได้รับ ${earned - previousEarned} เมล็ด ตอนนี้คุณมี ${earned} จาก ${target} เมล็ด`,
     );
     const timer = window.setTimeout(() => setAnimatedIndexes([]), 520);
     return () => window.clearTimeout(timer);
-  }, [animationKey, earned, recordIdentity, target]);
+  }, [animationKey, earned, recordIdentity, rewardValueLabel, target]);
 
   if (digits.length < 9) {
     return (
@@ -179,14 +183,14 @@ export default function LoyaltyCard({
         {rewardReady ? (
           <>
             <p className="loyalty-card__primary loyalty-card__primary--reward">คุณมีรางวัลพร้อมใช้!</p>
-            <p className="loyalty-card__reward-copy">รับเครื่องดื่มฟรี 1 แก้ว</p>
+            <p className="loyalty-card__reward-copy">ส่วนลดเครื่องดื่ม {rewardValueLabel} บาท</p>
           </>
         ) : (
           <>
             <p className="loyalty-card__primary">
               {beanRecord.isNew && earned === 0
                 ? "เริ่มสะสมเมล็ดจากออเดอร์นี้ได้เลย"
-                : `อีก ${remaining} เมล็ด รับฟรี 1 แก้ว`}
+                : `อีก ${remaining} เมล็ด รับส่วนลด ${rewardValueLabel} บาท`}
             </p>
             <span className="sr-only">{announcement}</span>
           </>
@@ -220,7 +224,7 @@ export default function LoyaltyCard({
             </div>
           ) : (
             <fieldset className="loyalty-redeem__choices">
-              <legend>เลือกแก้วที่อยากแลกฟรี</legend>
+              <legend>เลือกแก้วที่ต้องการใช้ส่วนลด {rewardValueLabel} บาท</legend>
               {rewardEligibleCart.map((line) => (
                 <label key={line.lineId}>
                   <input
@@ -251,9 +255,11 @@ export default function LoyaltyCard({
                 <button
                   type="button"
                   className="loyalty-button loyalty-button--quiet"
+                  aria-label="ย้อนกลับ"
+                  title="ย้อนกลับ"
                   onClick={() => { setRedeemMode(false); setRedeemLineId(null); }}
                 >
-                  ย้อนกลับ
+                  <i className="ti ti-arrow-left" aria-hidden="true" />
                 </button>
               </div>
             </fieldset>

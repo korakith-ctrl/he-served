@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { Fragment, useState, useEffect, useMemo, useRef } from "react";
 import { auth, db, cloudFunctions } from "./firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { ref, onValue, set, update, push, runTransaction } from "firebase/database";
+import { ref, onValue, set, update, push, runTransaction, increment } from "firebase/database";
 import { httpsCallable } from "firebase/functions";
 import QRCode from "qrcode";
 import Login from "./Login.jsx";
@@ -24,6 +24,28 @@ const PRODUCT_TYPES = [
   { id: "drink", label: "เครื่องดื่ม", unit: "แก้ว", icon: "cup" },
   { id: "food", label: "อาหาร / ขนมปัง", unit: "ชิ้น", icon: "bread" },
 ];
+const MENU_TAG_PRESETS = [
+  { id: "none", name: "ไม่แสดง Tag", label: "", color: "#00A3E0", textColor: "#FFFFFF" },
+  { id: "new", name: "เมนูใหม่", label: "เมนูใหม่", color: "#00A3E0", textColor: "#FFFFFF" },
+  { id: "seasonal", name: "Seasonal", label: "Seasonal", color: "#7C3AED", textColor: "#FFFFFF" },
+  { id: "bestseller", name: "ขายดี", label: "ขายดี", color: "#F59E0B", textColor: "#3B2600" },
+  { id: "limited", name: "Limited", label: "Limited", color: "#DC2626", textColor: "#FFFFFF" },
+  { id: "signature", name: "Signature", label: "Signature", color: "#005B85", textColor: "#FFFFFF" },
+];
+
+function validMenuTagColor(value, fallback) {
+  return /^#[0-9a-f]{6}$/i.test(String(value || "")) ? String(value).toUpperCase() : fallback;
+}
+
+function normalizeMenuTag(menu) {
+  const preset = MENU_TAG_PRESETS.find((item) => item.id === menu?.tagPreset) || MENU_TAG_PRESETS[0];
+  return {
+    tagPreset: preset.id,
+    tagLabel: String(menu?.tagLabel ?? preset.label).trim().slice(0, 30),
+    tagColor: validMenuTagColor(menu?.tagColor, preset.color),
+    tagTextColor: validMenuTagColor(menu?.tagTextColor, preset.textColor),
+  };
+}
 
 function productTypeOf(item) {
   if (item?.productType === "pass") return "pass";
@@ -91,6 +113,7 @@ const ACCOUNTING_ASSET_CATEGORIES = [
 function accountingPaymentAccount(paymentMethod) {
   // PromptPay ของร้านเข้าบัญชีธนาคารเดียวกัน จึงต้องอยู่ใน ledger ธนาคารสำหรับการกระทบยอด
   if (paymentMethod === "promptpay") return "bank";
+  if (paymentMethod === "bank" || paymentMethod === "delivery") return "bank";
   if (paymentMethod === "cash" || paymentMethod === "thaihelpthai") return "cash";
   if (paymentMethod === "credit_card") return "credit_card";
   return "unassigned";
@@ -154,23 +177,54 @@ function money(n) {
   return v.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function customerThemeForTime(date = new Date()) {
-  const hour = date.getHours();
-  return hour >= 19 || hour < 6 ? "dark" : "light";
+const DEFAULT_CUSTOMER_THEME = { mode: "schedule", darkStart: "19:00", lightStart: "06:00" };
+const CUSTOMER_THEME_MODES = new Set(["light", "dark", "schedule"]);
+
+function normalizeCustomerThemeSettings(raw) {
+  const timeValue = (value, fallback) => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value || "")) ? String(value) : fallback;
+  return {
+    mode: CUSTOMER_THEME_MODES.has(raw?.mode) ? raw.mode : DEFAULT_CUSTOMER_THEME.mode,
+    darkStart: timeValue(raw?.darkStart, DEFAULT_CUSTOMER_THEME.darkStart),
+    lightStart: timeValue(raw?.lightStart, DEFAULT_CUSTOMER_THEME.lightStart),
+  };
 }
 
-function nextCustomerThemeChange(date = new Date()) {
-  const next = new Date(date);
-  if (date.getHours() < 6) next.setHours(6, 0, 0, 0);
-  else if (date.getHours() < 19) next.setHours(19, 0, 0, 0);
-  else {
-    next.setDate(next.getDate() + 1);
-    next.setHours(6, 0, 0, 0);
+function customerThemeMinutes(date = new Date()) {
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+    }).formatToParts(date);
+    const hour = Number(parts.find((part) => part.type === "hour")?.value) || 0;
+    const minute = Number(parts.find((part) => part.type === "minute")?.value) || 0;
+    return hour * 60 + minute;
+  } catch {
+    return date.getHours() * 60 + date.getMinutes();
   }
-  return next.getTime();
+}
+
+function customerThemeForSettings(raw, date = new Date()) {
+  const settings = normalizeCustomerThemeSettings(raw);
+  if (settings.mode === "light" || settings.mode === "dark") return settings.mode;
+  const [darkHour, darkMinute] = settings.darkStart.split(":").map(Number);
+  const [lightHour, lightMinute] = settings.lightStart.split(":").map(Number);
+  const darkStart = darkHour * 60 + darkMinute;
+  const lightStart = lightHour * 60 + lightMinute;
+  const current = customerThemeMinutes(date);
+  if (darkStart === lightStart) return "light";
+  if (darkStart < lightStart) return current >= darkStart && current < lightStart ? "dark" : "light";
+  return current >= darkStart || current < lightStart ? "dark" : "light";
 }
 
 function round4(n) { return Math.round(n * 10000) / 10000; }
+
+function orderItemRewardDiscount(item) {
+  if (!item?.freeUnit) return 0;
+  const unitPrice = Math.max(0, Number(item.unitPrice) || 0);
+  const savedDiscount = Number(item.rewardDiscount);
+  // Orders from the previous full-cup reward did not store rewardDiscount.
+  if (!Number.isFinite(savedDiscount) || savedDiscount < 0) return round4(unitPrice);
+  return round4(Math.min(unitPrice, savedDiscount));
+}
 
 function movingWeightedAverageCost(currentQty, currentCost, addedQty, totalPaid) {
   const oldQty = Math.max(0, Number(currentQty) || 0);
@@ -301,9 +355,10 @@ function defaultState() {
     menus,
     sales: [],
     purchases: [],
-    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true, slipTestMode: false, bannerImageUrl: "", bannerImageUrls: [], categoryOrder: [], defaultPackagingLines: [], loyaltyBeanGoal: 10, seasonalEffect: "auto", coffeePass: { name: "Coffee Pass", enabled: false, uses: 5, price: 250, validityDays: 30, menuIds: [] } },
+    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true, slipTestMode: false, bannerImageUrl: "", bannerImageUrls: [], bannerEnabledStates: [], categoryOrder: [], defaultPackagingLines: [], loyaltyBeanGoal: 10, loyaltyRewardValue: 60, seasonalEffect: "auto", customerTheme: { ...DEFAULT_CUSTOMER_THEME }, coffeePass: { name: "Coffee Pass", enabled: false, uses: 5, price: 250, validityDays: 30, menuIds: [] } },
     optionGroups,
     promotions: [],
+    popupAds: [],
   };
 }
 
@@ -339,7 +394,7 @@ function normalizeData(raw) {
       else if (/brazil/i.test(choice.label || "") && coffeePacamara) ingredientId = coffeePacamara.id;
     }
     return {
-      ...choice, ingredientId, qtyPercent, isDefault: choice.isDefault || false,
+      ...choice, ingredientId, qtyPercent, isDefault: choice.isDefault || false, enabled: choice.enabled !== false,
       extraAdjustments: (choice.extraAdjustments || []).filter(Boolean).map((a) => ({ ingredientId: a.ingredientId || null, qtyPercent: a.qtyPercent != null ? a.qtyPercent : 100 })),
     };
   }
@@ -350,12 +405,13 @@ function normalizeData(raw) {
     ingredients,
     menus: (raw.menus || []).filter(Boolean).map((m) => ({
       ...m, ingredients: (m.ingredients || []).filter(Boolean), optionGroupIds: (m.optionGroupIds || []).filter(Boolean),
-      available: m.available ?? true, category: m.category || "อื่นๆ", imageUrl: m.imageUrl || "", productType: productTypeOf(m),
+      available: m.available ?? true, category: m.category || "อื่นๆ", description: String(m.description || ""), imageUrl: m.imageUrl || "", productType: productTypeOf(m),
+      recommended: m.recommended === true, ...normalizeMenuTag(m),
     })),
     // sales ย้ายไปอยู่โหนดแยก sales/{uid} แล้ว (ดู useEffect ที่ subscribe ใน ShopApp) — เหลือ field นี้ไว้เป็น [] เฉยๆ
     // เพื่อไม่ต้องแก้ shape ของ data ทั้งระบบ ของจริงมาจาก dataForDisplay.sales ที่ override ทับอีกที
     sales: [],
-    purchases: (raw.purchases || []).filter(Boolean),
+    purchases: (Array.isArray(raw.purchases) ? raw.purchases : Object.values(raw.purchases || {})).filter(Boolean),
     settings: {
       overheadPerCup: raw.settings?.overheadPerCup ?? 3.1,
       shopName: raw.settings?.shopName ?? "ร้านกาแฟของฉัน",
@@ -365,10 +421,13 @@ function normalizeData(raw) {
       slipTestMode: raw.settings?.slipTestMode ?? false,
       bannerImageUrl: raw.settings?.bannerImageUrl || "",
       bannerImageUrls: raw.settings?.bannerImageUrls || [],
+      bannerEnabledStates: raw.settings?.bannerEnabledStates || [],
       categoryOrder: raw.settings?.categoryOrder || [],
       defaultPackagingLines: raw.settings?.defaultPackagingLines || [],
       loyaltyBeanGoal: raw.settings?.loyaltyBeanGoal || 10,
+      loyaltyRewardValue: Math.min(10000, Math.max(1, Number(raw.settings?.loyaltyRewardValue) || 60)),
       seasonalEffect: ["off", "auto", "christmas", "songkran"].includes(raw.settings?.seasonalEffect) ? raw.settings.seasonalEffect : "auto",
+      customerTheme: normalizeCustomerThemeSettings(raw.settings?.customerTheme),
       coffeePass: {
         name: String(raw.settings?.coffeePass?.name || "Coffee Pass"),
         enabled: raw.settings?.coffeePass?.enabled === true,
@@ -393,6 +452,18 @@ function normalizeData(raw) {
       endAt: p.endAt || null,
       showAsPopup: p.showAsPopup === true,
       popupImageUrl: p.popupImageUrl || "",
+    })),
+    popupAds: (Array.isArray(raw.popupAds) ? raw.popupAds : Object.values(raw.popupAds || {})).filter(Boolean).map((ad) => ({
+      ...ad,
+      title: String(ad.title || ""),
+      description: String(ad.description || ""),
+      imageUrl: String(ad.imageUrl || ""),
+      ctaLabel: String(ad.ctaLabel || ""),
+      ctaUrl: String(ad.ctaUrl || ""),
+      active: ad.active !== false,
+      openInNewTab: ad.openInNewTab !== false,
+      startAt: ad.startAt || null,
+      endAt: ad.endAt || null,
     })),
   };
 }
@@ -485,13 +556,17 @@ function milkChoiceFor(menu, ingredientsById) {
 
 function groupsForMenu(menu, optionGroups) {
   const ids = menu.optionGroupIds || [];
-  return optionGroups.filter((g) => ids.includes(g.id));
+  const groupsById = new Map(optionGroups.filter(Boolean).map((group) => [group.id, group]));
+  return ids.map((id) => groupsById.get(id)).filter(Boolean).map((group) => ({
+    ...group,
+    choices: (group.choices || []).filter((choice) => choice.enabled !== false),
+  })).filter((group) => group.choices.length > 0);
 }
 
 function defaultOptionsFor(groups) {
   const sel = {};
   for (const g of groups) {
-    const def = g.choices.find((c) => c.isDefault);
+    const def = g.choices.find((c) => c.enabled !== false && c.isDefault);
     if (def) sel[g.id] = { ...def, groupId: g.id, groupName: g.name };
   }
   return sel;
@@ -674,23 +749,44 @@ function TextField({ value, onChange, ...rest }) {
 }
 
 const TABS = [
-  { id: "dashboard", label: "Dashboard", icon: "layout-dashboard" },
-  { id: "sell", label: "Sell", icon: "cash-register" },
-  { id: "orders", label: "Orders", icon: "receipt" },
-  { id: "menus", label: "Menu & Recipes", icon: "cup" },
-  { id: "promotions", label: "Promotions", icon: "discount" },
-  { id: "packages", label: "Packages", icon: "calendar-repeat" },
-  { id: "loyalty", label: "Loyalty Beans", icon: "coffee" },
-  { id: "options", label: "Add-on Options", icon: "list-details" },
-  { id: "ingredients", label: "Inventory & Stock", icon: "box-multiple" },
-  { id: "reports", label: "Reports", icon: "chart-line" },
-  { id: "accounting", label: "Accounting", icon: "book-2" },
-  { id: "settings", label: "Settings", icon: "settings" },
+  { id: "dashboard", label: "ภาพรวม", icon: "layout-dashboard" },
+  { id: "sell", label: "ขายหน้าร้าน", icon: "cash-register" },
+  { id: "orders", label: "ออเดอร์", icon: "receipt" },
+  { id: "menus", label: "เมนูและสูตร", icon: "cup" },
+  { id: "promotions", label: "โปรโมชั่น", icon: "discount" },
+  { id: "ads", label: "โฆษณา Popup", icon: "speakerphone" },
+  { id: "packages", label: "Coffee Pass", icon: "calendar-repeat" },
+  { id: "loyalty", label: "ลูกค้าและเมล็ดสะสม", icon: "coffee" },
+  { id: "options", label: "ตัวเลือกเสริม", icon: "list-details" },
+  { id: "ingredients", label: "วัตถุดิบและสต็อก", icon: "box-multiple" },
+  { id: "reports", label: "รายงาน", icon: "chart-line" },
+  { id: "accounting", label: "บัญชี", icon: "book-2" },
+  { id: "settings", label: "ตั้งค่าร้าน", icon: "settings" },
 ];
+
+function buildFirebasePatch(previous, next, path = "", patch = {}) {
+  if (Object.is(previous, next)) return patch;
+  const previousIsObject = previous !== null && typeof previous === "object";
+  const nextIsObject = next !== null && typeof next === "object";
+  if (previousIsObject && nextIsObject && Array.isArray(previous) === Array.isArray(next)) {
+    const keys = new Set([...Object.keys(previous), ...Object.keys(next)]);
+    for (const key of keys) buildFirebasePatch(previous[key], next[key], path ? `${path}/${key}` : key, patch);
+    return patch;
+  }
+  if (path) patch[path] = next === undefined ? null : next;
+  return patch;
+}
 
 function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
   const [data, setData] = useState(null);
-  const [tab, setTab] = useState("dashboard");
+  const dataRef = useRef(null);
+  const [tab, setTab] = useState(() => {
+    const fromHash = typeof window !== "undefined" ? window.location.hash.replace(/^#/, "") : "";
+    return TABS.some((item)=>item.id === fromHash) ? fromHash : "dashboard";
+  });
+  const [settingsDirty, setSettingsDirty] = useState(false);
+  const [pendingTab, setPendingTab] = useState(null);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => typeof window !== "undefined" && window.matchMedia("(max-width: 1024px)").matches
@@ -707,6 +803,7 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
   const [ownerCapitalMovements, setOwnerCapitalMovements] = useState([]);
   const [accountingSettings, setAccountingSettings] = useState({ vatRegistered:false, vatRate:7, taxId:"", vatRegistrationDate:"" });
   const [accountingPeriodClosings, setAccountingPeriodClosings] = useState({});
+  const [auditLogs, setAuditLogs] = useState([]);
   // เช็คแค่ตอน mount ครั้งเดียวไม่พอ — ถ้าหน้าจอเปลี่ยนขนาดทีหลัง (resize, หมุนแท็บเล็ต) โดยไม่ reload หน้า
   // sidebarCollapsed จะค้างค่าตอน mount ตลอด ทำให้ sidebar เต็มบีบเนื้อหาแคบเกินจนอ่านไม่ออกบนจอมือถือจริง
   useEffect(() => {
@@ -720,6 +817,32 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
   const isFirstOrdersSnapshot = useRef(true);
   const autoRecordedRef = useRef(new Set());
   const loyaltyRepairAttemptedRef = useRef(new Set());
+
+  useEffect(() => {
+    const onNavigation = () => {
+      const next = window.location.hash.replace(/^#/, "");
+      if (TABS.some((item)=>item.id === next)) setTab(next);
+    };
+    window.addEventListener("hashchange", onNavigation);
+    window.addEventListener("popstate", onNavigation);
+    return () => {
+      window.removeEventListener("hashchange", onNavigation);
+      window.removeEventListener("popstate", onNavigation);
+    };
+  }, []);
+
+  function navigateTab(nextTab, replace = false) {
+    setTab(nextTab);
+    const url = `${window.location.pathname}${window.location.search}#${nextTab}`;
+    window.history[replace ? "replaceState" : "pushState"](null, "", url);
+  }
+
+  function requestTab(nextTab) {
+    if (nextTab === tab) { setMobileNavOpen(false); return; }
+    if (tab === "settings" && settingsDirty) { setPendingTab(nextTab); return; }
+    navigateTab(nextTab);
+    setMobileNavOpen(false);
+  }
 
   const shopRef = ref(db, "shops/" + uid);
   const isFirstSnapshot = useMemo(() => ({ current: true }), [uid]);
@@ -845,12 +968,20 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
   }, [uid]);
 
   useEffect(() => {
+    const unsub=onValue(ref(db,`auditLogs/${uid}`),(snap)=>{const value=snap.val()||{};const rows=Object.entries(value).map(([id,entry])=>({id,...entry})).sort((a,b)=>new Date(b.createdAt||0)-new Date(a.createdAt||0)).slice(0,50);setAuditLogs(rows);});
+    return ()=>unsub();
+  },[uid]);
+
+  useEffect(() => {
     const unsub = onValue(shopRef, (snap) => {
       if (snap.exists()) {
-        setData(normalizeData(snap.val()));
+        const normalized = normalizeData(snap.val());
+        dataRef.current = normalized;
+        setData(normalized);
       } else {
         const seeded = defaultState();
         set(shopRef, seeded).catch((err) => showToast("บันทึกไม่สำเร็จ: " + err.message));
+        dataRef.current = seeded;
         setData(seeded);
       }
       isFirstSnapshot.current = false;
@@ -873,30 +1004,16 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
         !autoRecordedRef.current.has(o.id)
       ) {
         autoRecordedRef.current.add(o.id);
-        for (const item of o.items) {
-          const upcharge = (item.options || []).reduce((s, x) => s + (x.priceDelta || 0), 0);
-          const itemMenu = data.menus.find((m) => m.id === item.menuId);
-          const substitutions = itemMenu ? resolveIngredientAdjustmentsFromOptions(itemMenu, item.options, ingredientsById) : {};
-          const promoDiscount = item.freeUnit && itemMenu ? itemMenu.priceStore + upcharge : 0;
-          recordSale(item.menuId, item.qty, "online", { upcharge, unitPriceOverride: Number(item.unitPrice), substitutions, promoDiscount, milkLabel: (item.options || []).map((x) => x.label).join(", ") || null, orderId: o.id, paymentMethod: o.paymentMethod });
-        }
-        // สลิปยืนยันอัตโนมัติทำให้ order ค้างที่ status "paid" ซึ่งไม่ใช่หนึ่งใน 4 คอลัมน์ Kanban แล้ว
-        // ต้องเลื่อนเข้า "preparing" ทันที เหมือนตอนบาริสต้ากดยืนยันรับเงินสดเอง ไม่งั้นการ์ดจะหายไปจากบอร์ด
-        update(ref(db, `orders/${uid}/${o.id}`), { status: "preparing", saleRecorded: true }).catch(() => {});
-        showToast(`สลิปยืนยันอัตโนมัติ: ออเดอร์ ${o.customerName || o.customerPhone} ชำระเงินแล้ว`);
+        commitOnlineOrder(o)
+          .then(() => showToast(`สลิปยืนยันอัตโนมัติ: ออเดอร์ ${o.customerName || o.customerPhone} ชำระเงินแล้ว`))
+          .catch((error) => {
+            autoRecordedRef.current.delete(o.id);
+            showToast("บันทึกยอดขายจากสลิปอัตโนมัติไม่สำเร็จ: " + error.message);
+          });
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orders, data]);
-
-  useEffect(() => {
-    if (!data || isFirstSnapshot.current) return;
-    const t = setTimeout(() => {
-      set(shopRef, data).catch((err) => showToast("บันทึกไม่สำเร็จ: " + err.message));
-    }, 400);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
 
   useEffect(() => {
     if (data) onReady?.(true);
@@ -935,6 +1052,7 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
       channel: transaction.channel || null,
       vatAmount: Math.max(0, Math.round((Number(transaction.vatAmount) || 0) * 100) / 100),
       taxInvoiceNumber: String(transaction.taxInvoiceNumber || "").trim(),
+      receiptUrl: String(transaction.receiptUrl || "").trim(),
       createdAt: transaction.createdAt || now,
       updatedAt: now,
     };
@@ -942,14 +1060,23 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
     if (payload.type === "income" && payload.paymentAccount === "owner_advance") throw new Error("รายรับไม่สามารถเลือกเจ้าของสำรองจ่ายได้");
     const existing = transaction.id ? accountingTransactions.find((item) => item.id === transaction.id) : null;
     if (existing && ownerAllocationTotal(transaction.id) > 0 && (payload.paymentAccount !== existing.paymentAccount || Math.abs(payload.amount - (Number(existing.amount) || 0)) > 0.009)) throw new Error("รายการนี้ถูกผูกกับการคืนเงินแล้ว กรุณาลบรายการคืนเงินที่เกี่ยวข้องก่อนเปลี่ยนยอดหรือช่องทางเงิน");
-    await set(ref(db, `accounting/${uid}/transactions/${id}`), payload);
+    if (payload.receiptUrl) { try { const parsed=new URL(payload.receiptUrl); if(!["http:","https:"].includes(parsed.protocol))throw new Error(); } catch (_) { throw new Error("ลิงก์เอกสารแนบไม่ถูกต้อง"); } }
+    const auditRef=push(ref(db,`auditLogs/${uid}`));
+    await update(ref(db),{
+      [`accounting/${uid}/transactions/${id}`]:payload,
+      [`auditLogs/${uid}/${auditRef.key}`]:{action:existing?"accounting_update":"accounting_create",actorUid:uid,createdAt:now,details:{transactionId:id,type:payload.type,amount:payload.amount,date:payload.transactionDate}},
+    });
   }
 
   async function deleteAccountingTransaction(transaction) {
     if (transaction.sourceType && transaction.sourceType !== "manual") throw new Error("รายการจากระบบต้องยกเลิกจากเอกสารต้นทาง");
     if (accountingPeriodClosings[String(transaction.transactionDate || "").slice(0,7)]) throw new Error("งวดบัญชีเดือนนี้ถูกปิดแล้ว");
     if (ownerAllocationTotal(transaction.id) > 0) throw new Error("รายการนี้ถูกผูกกับการคืนเงินแล้ว กรุณาลบรายการคืนเงินที่เกี่ยวข้องก่อน");
-    await set(ref(db, `accounting/${uid}/transactions/${transaction.id}`), null);
+    const auditRef=push(ref(db,`auditLogs/${uid}`));
+    await update(ref(db),{
+      [`accounting/${uid}/transactions/${transaction.id}`]:null,
+      [`auditLogs/${uid}/${auditRef.key}`]:{action:"accounting_delete",actorUid:uid,createdAt:new Date().toISOString(),details:{transactionId:transaction.id,type:transaction.type,amount:transaction.amount,date:transaction.transactionDate}},
+    });
   }
 
   async function saveAccountingAsset(asset) {
@@ -1163,6 +1290,7 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
   useEffect(() => {
     if (recurringExpenses.length === 0) return;
     const currentMonth = todayStr().slice(0, 7);
+    if (accountingPeriodClosings[currentMonth]) return;
     const existing = new Set(accountingTransactions.filter((transaction) => transaction.sourceType === "recurring" && transaction.recurringMonth === currentMonth).map((transaction) => transaction.sourceId));
     const dueTemplates = recurringExpenses.filter((template) => template.active !== false && template.startMonth <= currentMonth && (!template.endMonth || template.endMonth >= currentMonth) && !existing.has(template.id));
     if (dueTemplates.length === 0) return;
@@ -1179,7 +1307,7 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
     }
     update(ref(db), patch).catch((error)=>showToast("สร้างค่าใช้จ่ายประจำไม่สำเร็จ: "+error.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recurringExpenses, accountingTransactions, uid]);
+  }, [recurringExpenses, accountingTransactions, accountingPeriodClosings, uid]);
 
   // รุ่นที่เริ่มบันทึก completedAt เคยตั้ง beansAwarded ก่อนเรียกฟังก์ชันเพิ่มเมล็ด และฟังก์ชันไม่ได้ถูกส่งเข้า OrdersPanel
   // ทำให้ order ดูเหมือนนับแล้วทั้งที่ transaction ลูกค้าไม่เคยเกิดขึ้น กู้เฉพาะออเดอร์ช่วงนั้นอัตโนมัติจาก marker ราย order
@@ -1210,17 +1338,24 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
   }
 
   function updateData(fn) {
-    setData((prev) => {
-      const next = JSON.parse(JSON.stringify(prev));
-      fn(next);
-      return next;
+    const previous = dataRef.current;
+    if (!previous) return Promise.resolve();
+    const next = JSON.parse(JSON.stringify(previous));
+    fn(next);
+    const patch = buildFirebasePatch(previous, next);
+    dataRef.current = next;
+    setData(next);
+    if (Object.keys(patch).length === 0) return Promise.resolve();
+    return update(shopRef, patch).catch((error) => {
+      showToast("บันทึกไม่สำเร็จ: " + error.message);
+      throw error;
     });
   }
 
-  function recordSale(menuId, qty, channel, opts) {
+  function buildSaleRecord(menuId, qty, channel, opts, saleId, timestamp) {
     opts = opts || {};
     const menu = data.menus.find((m) => m.id === menuId);
-    if (!menu) return;
+    if (!menu) throw new Error("ไม่พบเมนูที่ต้องการบันทึกยอดขาย");
     const substitutions = opts.substitutions || {};
     const { ingredientCost } = calcRecipeCost(menu, ingredientsById, substitutions);
     const lines = resolveLines(menu, substitutions, ingredientsById);
@@ -1245,17 +1380,6 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
     const ingredientCostTotal = ingredientCost * qty;
     const overheadAllocated = overhead * qty;
     const totalCost = ingredientCostTotal + overheadAllocated;
-    updateData((next) => {
-      for (const line of lines) {
-        const ing = next.ingredients.find((i) => i.id === line.ingredientId);
-        // วัตถุดิบ "ไม่จำกัดสต็อก" (เช่น น้ำประปากรอง/น้ำแข็ง) ไม่ตัดสต็อก — ต้นทุนในสูตรยังคิดตามปกติ
-        if (ing && !ing.unlimited) ing.stockQty = round4(ing.stockQty - line.qty * qty);
-      }
-    });
-    // ยอดขายเขียนตรงไปโหนด sales/{uid} แยกจาก updateData ข้างบน (ซึ่งยังแก้ next.ingredients ในก้อนใหญ่ตามเดิม) —
-    // กัน full-object set() ของ shops/{uid} ทับยอดขายที่เพิ่งเพิ่มหายไปเวลาเปิดแดชบอร์ดพร้อมกันหลายแท็บ (ดู useEffect ที่ subscribe sales/{uid} ด้านบนสำหรับรายละเอียด)
-    const saleId = genId("sale");
-    const timestamp = new Date().toISOString();
     const sale = {
       id: saleId, timestamp, menuId, menuName: menu.name,
       productType: productTypeOf(menu),
@@ -1269,17 +1393,55 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
       orderId: opts.orderId || null,
       paymentMethod: opts.paymentMethod || null,
     };
-    const salePatch = { [`sales/${uid}/${saleId}`]: sale };
-    if (netRevenue > 0) salePatch[`accounting/${uid}/transactions/sale_${saleId}`] = accountingTransactionFromSale(sale, opts.paymentMethod);
-    update(ref(db), salePatch).catch((err) => showToast("บันทึกยอดขายไม่สำเร็จ: " + err.message));
-    showToast(`บันทึกการขาย ${menu.name} x${qty} (${channel === "delivery" ? (platform ? platform.name : "เดลิเวอรี่") : "หน้าร้าน"}) แล้ว`);
+    return { sale, lines };
   }
 
-  // ออเดอร์ที่ขายจากหน้า admin ต้องขึ้นบอร์ด Kanban เหมือนออเดอร์ลูกค้า ไม่งั้นบาริสต้าจะไม่มีการ์ดให้ไล่ทำตามสถานะ
-  // จ่ายเงินแล้วที่หน้าร้านตอนกดขาย จึงเข้าคอลัมน์ "กำลังดำเนินการ" ทันที ข้ามสถานะ "รอยืนยัน" (เหมือนสลิปยืนยันอัตโนมัติ)
-  function createInstoreOrder(cart, note, customerPhone) {
+  function appendSaleBatchToPatch(patch, stockUsage, entries, orderId, timestamp, paymentMethod) {
+    entries.forEach((entry, index) => {
+      const saleId = `sale_${orderId}_${index}`;
+      const { sale, lines } = buildSaleRecord(entry.menuId, entry.qty, entry.channel, {
+        substitutions: entry.substitutions || {}, upcharge: entry.upcharge || 0,
+        unitPriceOverride: Number(entry.unitPrice), platformId: entry.platformId,
+        milkLabel: entry.optionsLabel || null, netRevenueOverride: entry.netRevenueOverride,
+        promoDiscount: entry.promoDiscount || 0, note: entry.note || null,
+        orderId, paymentMethod,
+      }, saleId, timestamp);
+      patch[`sales/${uid}/${saleId}`] = sale;
+      if (sale.netRevenue > 0) patch[`accounting/${uid}/transactions/sale_${saleId}`] = accountingTransactionFromSale(sale, paymentMethod);
+      for (const line of lines) {
+        const ingredient = ingredientsById[line.ingredientId];
+        if (ingredient && !ingredient.unlimited) stockUsage[line.ingredientId] = round4((stockUsage[line.ingredientId] || 0) + line.qty * entry.qty);
+      }
+    });
+  }
+
+  function appendStockIncrementsToPatch(patch, stockUsage, direction = -1) {
+    const indexById = new Map(data.ingredients.map((ingredient, index) => [ingredient.id, index]));
+    for (const [ingredientId, quantity] of Object.entries(stockUsage)) {
+      const index = indexById.get(ingredientId);
+      if (index == null || !quantity) continue;
+      patch[`shops/${uid}/ingredients/${index}/stockQty`] = increment(round4(direction * quantity));
+    }
+  }
+
+  function appendAuditToPatch(patch, action, details) {
+    const auditRef = push(ref(db, `auditLogs/${uid}`));
+    patch[`auditLogs/${uid}/${auditRef.key}`] = {
+      action, details: details || null, actorUid: uid,
+      actorEmail: user?.email || "", createdAt: new Date().toISOString(),
+    };
+  }
+
+  // POS: order + sales + accounting + stock are committed in one multi-location update.
+  // Server-side increment prevents two devices from overwriting the same stock count.
+  async function commitAdminCheckout(cart, note, customerPhone, paymentMethod) {
+    const timestamp = new Date().toISOString();
+    if (accountingPeriodClosings[timestamp.slice(0, 7)]) throw new Error("งวดบัญชีเดือนนี้ถูกปิดแล้ว กรุณาปลดล็อกก่อนขาย");
+    const orderRef = push(ref(db, `orders/${uid}`));
+    const orderId = orderRef.key;
     const items = cart.map((line) => ({
-      menuId: line.menuId, name: line.menuName, productType: productTypeOf(line), unitPrice: line.unitPrice, qty: line.qty, options: line.options,
+      menuId: line.menuId, name: line.menuName, productType: productTypeOf(line), unitPrice: line.unitPrice,
+      qty: line.qty, options: line.options, channel: line.channel, platformName: line.platformName || null,
     }));
     const total = round4(cart.reduce((sum, line) => {
       const lineTotal = line.channel === "delivery" && Number.isFinite(line.netRevenueOverride)
@@ -1289,25 +1451,83 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
     }, 0));
     const platformNames = [...new Set(cart.filter((l) => l.channel === "delivery" && l.platformName).map((l) => l.platformName))];
     const customerName = platformNames.length > 0 ? platformNames.join(", ") : "ขายหน้าร้าน";
-    const newRef = push(ref(db, `orders/${uid}`));
-    set(newRef, {
+    const patch = {};
+    patch[`orders/${uid}/${orderId}`] = {
       customerName, customerPhone: customerPhone || "", note: note || "",
-      paymentMethod: "cash", pickupDate: new Date().toISOString().slice(0, 10),
-      items, total, status: "preparing", createdAt: new Date().toISOString(),
+      paymentMethod, pickupDate: timestamp.slice(0, 10), items, total,
+      status: "preparing", createdAt: timestamp,
       saleRecorded: true, source: "admin-pos",
-    }).catch((err) => showToast("บันทึกออเดอร์ไม่สำเร็จ: " + err.message));
-    return newRef.key;
+    };
+    const stockUsage = {};
+    appendSaleBatchToPatch(patch, stockUsage, cart.map((line) => ({ ...line, note: note || null })), orderId, timestamp, paymentMethod);
+    appendStockIncrementsToPatch(patch, stockUsage, -1);
+    appendAuditToPatch(patch, "admin_checkout", { orderId, paymentMethod, total, itemCount: items.length });
+    await update(ref(db), patch);
+    return orderId;
+  }
+
+  async function commitOnlineOrder(order) {
+    if (order.saleRecorded) {
+      await update(ref(db, `orders/${uid}/${order.id}`), { status: "preparing" });
+      return { alreadyRecorded: true };
+    }
+    const orderRef = ref(db, `orders/${uid}/${order.id}`);
+    const claim = await runTransaction(orderRef, (current) => {
+      if (!current || current.saleRecorded || current.saleRecording) return;
+      return { ...current, saleRecording: true, saleRecordingAt: new Date().toISOString(), saleRecordingBy: uid };
+    });
+    if (!claim.committed) return { alreadyRecorded: true };
+    try {
+      const timestamp = new Date().toISOString();
+      if (accountingPeriodClosings[timestamp.slice(0, 7)]) throw new Error("งวดบัญชีเดือนนี้ถูกปิดแล้ว กรุณาปลดล็อกก่อนยืนยันออเดอร์");
+      const entries = (order.items || []).map((item) => {
+        const menu = data.menus.find((candidate) => candidate.id === item.menuId);
+        if (!menu) throw new Error(`ไม่พบเมนู ${item.name || item.menuId}`);
+        const options = Array.isArray(item.options) ? item.options : Object.values(item.options || {});
+        return {
+          menuId: item.menuId, qty: Number(item.qty) || 1, channel: "online",
+          substitutions: resolveIngredientAdjustmentsFromOptions(menu, options, ingredientsById),
+          upcharge: options.reduce((sum, option) => sum + (Number(option.priceDelta) || 0), 0),
+          unitPrice: Number(item.unitPrice), promoDiscount: orderItemRewardDiscount(item),
+          optionsLabel: options.map((option) => option.label).filter(Boolean).join(", ") || null,
+        };
+      });
+      const patch = {
+        [`orders/${uid}/${order.id}/status`]: "preparing",
+        [`orders/${uid}/${order.id}/saleRecorded`]: true,
+        [`orders/${uid}/${order.id}/saleRecording`]: false,
+        [`orders/${uid}/${order.id}/saleRecordedAt`]: timestamp,
+        [`orders/${uid}/${order.id}/saleRecordedBy`]: uid,
+      };
+      const stockUsage = {};
+      appendSaleBatchToPatch(patch, stockUsage, entries, order.id, timestamp, order.paymentMethod);
+      appendStockIncrementsToPatch(patch, stockUsage, -1);
+      appendAuditToPatch(patch, "confirm_online_order", { orderId: order.id, paymentMethod: order.paymentMethod, total: order.total });
+      await update(ref(db), patch);
+      return { alreadyRecorded: false };
+    } catch (error) {
+      await update(orderRef, { saleRecording: false, saleRecordingError: error.message }).catch(() => {});
+      throw error;
+    }
   }
 
   // ยกเลิกออเดอร์ที่ตัดสต็อก/บันทึกยอดขายไปแล้ว (saleRecorded=true — ผ่าน preparing มาแล้วอย่างน้อยหนึ่งครั้ง แม้จะถูกลากการ์ด
   // กลับมา "รอยืนยัน" ก่อนกดยกเลิกก็ตาม) ต้องคืนสต็อกและลบยอดขายที่ผูกกับออเดอร์นี้ออกด้วย ไม่งั้นยอดขาย/สต็อกจะเพี้ยนค้างอยู่
   // ทั้งที่ออเดอร์ถูกยกเลิกไปแล้ว — ถ้ายังไม่เคยบันทึกยอดขาย (ยังไม่ผ่าน preparing) ก็แค่เปลี่ยนสถานะเฉยๆ เหมือนเดิม
-  function cancelOrder(order) {
+  async function cancelOrder(order) {
+    if (order.status === "cancelled") return;
+    const orderRef = ref(db, `orders/${uid}/${order.id}`);
+    const claim = await runTransaction(orderRef, (current) => {
+      if (!current || current.status === "cancelled" || current.cancellationInProgress) return;
+      return { ...current, cancellationInProgress:true, cancellationStartedAt:new Date().toISOString(), cancellationStartedBy:uid };
+    });
+    if (!claim.committed) return;
+    const restoreTasks = [];
     if (order.passRedemption?.passId) {
       const phoneKey = normalizeThaiPhone(order.customerPhone);
       if (phoneKey) {
         const passRef = ref(db, `customers/${uid}/${phoneKey}/passes/${order.passRedemption.passId}`);
-        runTransaction(passRef, (current) => {
+        restoreTasks.push(runTransaction(passRef, (current) => {
           if (!current) return current;
           const restoredRedemptions = current.restoredRedemptions || {};
           if (restoredRedemptions[order.id]) return current;
@@ -1320,29 +1540,45 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
             restoredRedemptions: { ...restoredRedemptions, [order.id]: { restoredAt: Date.now(), restoredBy: uid } },
             updatedAt: Date.now(),
           };
-        }).catch((err) => showToast("คืนสิทธิ์ Pass ไม่สำเร็จ: " + err.message));
+        }));
       }
     }
+    if (order.redeemedBeans && order.redemptionAttemptId) {
+      const phoneKey = normalizeThaiPhone(order.customerPhone);
+      if (phoneKey) {
+        restoreTasks.push(runTransaction(ref(db, `customers/${uid}/${phoneKey}`), (current) => {
+          if (!current) return current;
+          const rewardRestorations = current.rewardRestorations || {};
+          if (rewardRestorations[order.id]) return current;
+          const beansUsed = Math.max(1, Number(order.beansUsed) || Number(data.settings.loyaltyBeanGoal) || 10);
+          return {
+            ...current,
+            beans: Math.max(0, Number(current.beans) || 0) + beansUsed,
+            redeemedCount: Math.max(0, (Number(current.redeemedCount) || 0) - 1),
+            rewardRestorations: { ...rewardRestorations, [order.id]: { beansRestored:beansUsed, restoredAt:Date.now(), restoredBy:uid } },
+            updatedAt: new Date().toISOString(),
+          };
+        }));
+      }
+    }
+    const patch = {};
+    const cancelledAt = order.cancelledAt || new Date().toISOString();
     if (order.saleRecorded) {
-      updateData((next) => {
-        const nextIngredientsById = {};
-        for (const ing of next.ingredients) nextIngredientsById[ing.id] = ing;
-        for (const item of order.items) {
-          const itemMenu = next.menus.find((m) => m.id === item.menuId);
-          if (!itemMenu) continue;
-          const substitutions = resolveIngredientAdjustmentsFromOptions(itemMenu, item.options || [], nextIngredientsById);
-          const lines = resolveLines(itemMenu, substitutions, nextIngredientsById);
-          for (const line of lines) {
-            const ing = next.ingredients.find((i) => i.id === line.ingredientId);
-            if (ing && !ing.unlimited) ing.stockQty = round4(ing.stockQty + line.qty * item.qty);
-          }
+      const stockUsage = {};
+      for (const item of order.items || []) {
+        const itemMenu = data.menus.find((menu) => menu.id === item.menuId);
+        if (!itemMenu) continue;
+        const options = Array.isArray(item.options) ? item.options : Object.values(item.options || {});
+        const substitutions = resolveIngredientAdjustmentsFromOptions(itemMenu, options, ingredientsById);
+        for (const line of resolveLines(itemMenu, substitutions, ingredientsById)) {
+          const ingredient = ingredientsById[line.ingredientId];
+          if (ingredient && !ingredient.unlimited) stockUsage[line.ingredientId] = round4((stockUsage[line.ingredientId] || 0) + line.qty * (Number(item.qty) || 1));
         }
-      });
+      }
+      appendStockIncrementsToPatch(patch, stockUsage, 1);
       // ตัดยอดขายออกจากรายงานเดิม แต่เก็บ audit trail ฝั่งบัญชีด้วยรายการกลับยอดที่ใช้ sale id เดิมเป็น idempotency key
       const toRemove = salesRecords.filter((s) => s.orderId === order.id);
       if (toRemove.length > 0) {
-        const patch = {};
-        const cancelledAt = new Date().toISOString();
         for (const sale of toRemove) {
           patch[`sales/${uid}/${sale.id}`] = null;
           if (Number(sale.netRevenue) > 0) {
@@ -1365,17 +1601,26 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
             };
           }
         }
-        update(ref(db), patch).catch((err) => showToast("ตัดยอดขายออกจากบัญชีไม่สำเร็จ: " + err.message));
       }
     }
-    update(ref(db, `orders/${uid}/${order.id}`), {
-      status: "cancelled",
-      saleRecorded: false,
-      cancelledAt: order.cancelledAt || new Date().toISOString(),
-      cancelledBy: order.cancelledBy || uid,
-    })
-      .catch((err) => showToast("ยกเลิกไม่สำเร็จ: " + err.message));
-    showToast(order.saleRecorded ? "ยกเลิกออเดอร์แล้ว คืนสต็อกและตัดยอดขายออกให้อัตโนมัติ" : "ยกเลิกออเดอร์แล้ว");
+    patch[`orders/${uid}/${order.id}/status`] = "cancelled";
+    patch[`orders/${uid}/${order.id}/saleRecorded`] = false;
+    patch[`orders/${uid}/${order.id}/cancellationInProgress`] = false;
+    patch[`orders/${uid}/${order.id}/cancelledAt`] = cancelledAt;
+    patch[`orders/${uid}/${order.id}/cancelledBy`] = uid;
+    appendAuditToPatch(patch, "cancel_order", { orderId:order.id, total:order.total, restoredStock:order.saleRecorded === true });
+    try {
+      await update(ref(db), patch);
+      const restored = await Promise.allSettled(restoreTasks);
+      const failedRestores = restored.filter((result)=>result.status === "rejected");
+      showToast(failedRestores.length
+        ? `ยกเลิกออเดอร์แล้ว แต่คืนสิทธิ์/เมล็ดไม่สำเร็จ ${failedRestores.length} รายการ กรุณาตรวจใน Loyalty`
+        : order.saleRecorded ? "ยกเลิกออเดอร์แล้ว คืนสต็อกและลงรายการกลับยอดให้อัตโนมัติ" : "ยกเลิกออเดอร์แล้ว");
+    } catch (error) {
+      await update(orderRef, { cancellationInProgress:false, cancellationError:error.message }).catch(()=>{});
+      showToast("ยกเลิกไม่สำเร็จ ข้อมูลยังไม่ถูกเปลี่ยน: " + error.message);
+      throw error;
+    }
   }
 
   // ให้เมล็ดสะสมตอนออเดอร์ถึงสถานะ "เสร็จ" (done) เท่านั้น และนับเฉพาะเครื่องดื่ม
@@ -1453,12 +1698,14 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
   }
 
   // แอดมินปรับเมล็ดมือ (เช่น ลูกค้าทำใบเสร็จหาย/ชดเชยกรณีพิเศษ) — บวก/ลบตรงจากค่าปัจจุบัน กันชนกันด้วย transaction เหมือนกัน
-  function adjustCustomerBeans(phoneKey, delta, name) {
-    runTransaction(ref(db, `customers/${uid}/${phoneKey}`), (cur) => {
-      const prev = cur || { phone: phoneKey, name: name || "", beans: 0, lifetimeBeans: 0, redeemedCount: 0, createdAt: new Date().toISOString() };
-      return { ...prev, phone: phoneKey, beans: Math.max(0, (prev.beans || 0) + delta), updatedAt: new Date().toISOString() };
-    }).then(() => showToast(delta > 0 ? `เพิ่มเมล็ดให้แล้ว +${delta}` : `หักเมล็ดแล้ว ${delta}`))
-      .catch((err) => showToast("ปรับเมล็ดไม่สำเร็จ: " + err.message));
+  async function adjustCustomerBeans(phoneKey, delta, name, reason) {
+    const adjustBeans = httpsCallable(cloudFunctions, "adjustLoyaltyBeans");
+    const adjustmentId = globalThis.crypto?.randomUUID
+      ? globalThis.crypto.randomUUID().replace(/-/g, "")
+      : genId("loyalty_adjust");
+    const response = await adjustBeans({ shopUid:uid, customerPhone:phoneKey, customerName:name || "", delta, reason:String(reason || "").trim(), adjustmentId });
+    const appliedDelta = Number(response.data?.appliedDelta) || 0;
+    showToast(appliedDelta >= 0 ? `เพิ่มเมล็ดให้แล้ว +${appliedDelta}` : `หักเมล็ดแล้ว ${Math.abs(appliedDelta)}`);
   }
 
   async function createLoyaltyCustomer(name, phone) {
@@ -1483,8 +1730,16 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
     await resetPasscode({ shopUid: uid, customerPhone, passId, newPasscode });
   }
 
-  function updateLoyaltyGoal(goal) {
-    updateData((next) => { next.settings.loyaltyBeanGoal = Math.max(1, Number(goal) || 10); });
+  async function cancelCustomerPass(customerPhone, passId, reason) {
+    const cancelPass = httpsCallable(cloudFunctions, "cancelCoffeePass");
+    await cancelPass({ shopUid: uid, customerPhone, passId, reason:String(reason || "").trim() });
+  }
+
+  function updateLoyaltyReward(goal, rewardValue) {
+    updateData((next) => {
+      next.settings.loyaltyBeanGoal = Math.max(1, Math.floor(Number(goal) || 10));
+      next.settings.loyaltyRewardValue = Math.min(10000, Math.max(1, Math.round((Number(rewardValue) || 60) * 100) / 100));
+    });
   }
 
   // ให้เมล็ดย้อนหลังสำหรับออเดอร์ "เสร็จ" เก่าที่มีมาก่อนระบบสะสมเมล็ดจะเปิดใช้งาน (ยังไม่เคยติดแฟลก beansAwarded)
@@ -1514,17 +1769,18 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
         .cbtn { border: 1px solid var(--line); background: var(--surface); color: var(--espresso-4); border-radius: 9px; padding: 8px 14px; font-size: 13px; font-weight: 500; transition: background .15s ease, border-color .15s ease; }
         .cbtn:hover { background: var(--cream-2); }
         .cbtn:active { transform: scale(0.97); }
-        .cbtn-accent { background: var(--sage); color: #fff; border-color: var(--sage); }
+        .cbtn-accent { background: var(--sage); color: #fff; border-color: var(--sage); box-shadow: 0 6px 16px rgba(0,163,224,.18); }
         .cbtn-accent:hover { background: var(--sage-dark); }
         .cbtn-danger { color: var(--danger); border-color: var(--danger-line); background: var(--danger-light); }
         .cbtn-danger:hover { background: var(--danger-line); }
         .cbtn-edit { color: var(--info-dark); border-color: var(--info); background: var(--info-light); }
         .cbtn-edit:hover { background: var(--info); color: #fff; }
         .cfield { border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font-size: 13px; background: var(--surface); color: var(--espresso-4); width: 100%; }
-        .cfield:focus { outline: 2px solid var(--sage); outline-offset: 1px; }
+        .cfield:focus { outline: 2px solid var(--sage); outline-offset: 1px; box-shadow: 0 0 0 3px rgba(0,163,224,.10); }
         .navitem { border: none; border-left: 3px solid transparent; background: transparent; color: var(--espresso-3); padding: 11px 14px 11px 12px; margin: 1px 0; font-family: var(--f-body); font-size: 13.5px; font-weight: 500; border-radius: 10px; display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; transition: background .15s ease, color .15s ease, border-color .15s ease; }
-        .navitem:hover { background: rgba(37,99,235,.06); color: var(--primary-text); }
-        .navitem.active { background: rgba(37,99,235,.08); border-left-color: #2563EB; color: var(--primary-text); font-weight: 700; }
+        .navitem:hover { background: rgba(0,163,224,.08); color: var(--primary-text); }
+        .navitem.active { background: rgba(0,163,224,.13); border-left-color: #00A3E0; color: var(--primary-text); font-weight: 700; }
+        .navitem.active i { color: #00A3E0; }
         table.cdata { width: 100%; border-collapse: collapse; font-size: 13px; }
         table.cdata th { text-align: left; font-weight: 500; color: var(--espresso-2); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
         table.cdata td { padding: 8px; border-bottom: 1px solid var(--line-soft); }
@@ -1532,13 +1788,16 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
         .table-scroll table.cdata { min-width: 640px; }
         .chpill { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 500; }
         @keyframes paidFlash {
-          0% { box-shadow: 0 0 0 0 rgba(206,86,13,0); background: var(--surface); }
+          0% { box-shadow: 0 0 0 0 rgba(0,163,224,0); background: var(--surface); }
           15% { box-shadow: 0 0 0 4px var(--sage); background: var(--sage-light); }
-          100% { box-shadow: 0 0 0 0 rgba(206,86,13,0); background: var(--surface); }
+          100% { box-shadow: 0 0 0 0 rgba(0,163,224,0); background: var(--surface); }
         }
         .sidebar-toggle { border: none; background: var(--cream-2); color: var(--espresso-3); width: 26px; height: 26px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background .15s ease, color .15s ease; }
         .sidebar-toggle:hover { background: var(--sage-light); color: var(--sage-dark); }
-        .admin-sidebar { transition: width .18s ease; }
+        .admin-sidebar { transition: width .18s ease; background: rgba(255,255,255,.94) !important; border-right-color: rgba(0,163,224,.16) !important; box-shadow: 8px 0 30px rgba(0,91,133,.07) !important; }
+        .admin-header { background: rgba(255,255,255,.88) !important; border-color: rgba(0,163,224,.16) !important; box-shadow: 0 10px 32px rgba(0,91,133,.08) !important; }
+        .admin-mobile-nav { display:none; }
+        .admin-mobile-backdrop { display:none; }
         @keyframes pulseBadge {
           0%, 100% { box-shadow: 0 4px 14px rgba(178,58,46,0.35); }
           50% { box-shadow: 0 4px 20px rgba(178,58,46,0.6); }
@@ -1548,7 +1807,7 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
         .theme-toggle:hover { background: var(--cream-2); }
         .coffeeapp[data-theme="dark"] { color-scheme: dark; }
         .coffeeapp[data-theme="dark"] .admin-sidebar,
-        .coffeeapp[data-theme="dark"] .admin-header { background: rgba(17,24,39,.82) !important; border-color: rgba(255,255,255,.10) !important; box-shadow: 0 10px 32px rgba(0,0,0,.28) !important; }
+        .coffeeapp[data-theme="dark"] .admin-header { background: rgba(6,25,35,.90) !important; border-color: rgba(0,163,224,.18) !important; box-shadow: 0 10px 32px rgba(0,0,0,.28) !important; }
         .coffeeapp[data-theme="dark"] input,
         .coffeeapp[data-theme="dark"] select,
         .coffeeapp[data-theme="dark"] textarea { background: var(--surface) !important; color: var(--espresso-4) !important; border-color: var(--line) !important; }
@@ -1565,32 +1824,40 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
         .coffeeapp[data-theme="dark"] .promo-inspector,
         .coffeeapp[data-theme="dark"] .loy-table,
         .coffeeapp[data-theme="dark"] .acc-table { background: var(--surface) !important; border-color: var(--line) !important; }
+        @media (max-width:760px) {
+          .admin-mobile-nav { display:inline-flex; }
+          .admin-sidebar { position:fixed !important; inset:0 auto 0 0; width:min(286px,86vw) !important; height:100dvh !important; transform:translateX(-105%); transition:transform .22s ease !important; z-index:90 !important; padding:16px 14px !important; }
+          .admin-sidebar.mobile-open { transform:translateX(0); }
+          .admin-mobile-backdrop { display:block; position:fixed; inset:0; z-index:85; border:0; background:rgba(0,30,45,.42); }
+          .admin-main { padding:10px 10px 48px !important; width:100%; }
+          .admin-header { padding:12px 14px !important; border-radius:15px !important; margin-bottom:14px !important; }
+        }
       `}</style>
       <div className="coffeeapp" data-theme={theme} style={{
-        "--cream": theme === "dark" ? "#0B111A" : "#F4F6F4", "--cream-2": theme === "dark" ? "#1A2533" : "#EBEFEA", "--surface": theme === "dark" ? "#121B27" : "#FFFFFF",
-        "--espresso-5": theme === "dark" ? "#F4F7FB" : "#063360", "--espresso-4": theme === "dark" ? "#E5EAF1" : "#26364A", "--espresso-3": theme === "dark" ? "#B7C1CE" : "#5B6B7C", "--espresso-2": theme === "dark" ? "#8E9AAA" : "#8B98A5",
-        "--sage": "#CE560D", "--sage-dark": theme === "dark" ? "#FF9A58" : "#A8440A", "--sage-light": theme === "dark" ? "rgba(216,92,8,.20)" : "#FBEBDD",
-        "--gold": "#CE560D", "--gold-dark": theme === "dark" ? "#FF9A58" : "#A8440A", "--gold-light": theme === "dark" ? "rgba(216,92,8,.20)" : "#FBEBDD",
-        "--info": "#3D6E8C", "--info-dark": theme === "dark" ? "#93C5FD" : "#2C5069", "--info-light": theme === "dark" ? "rgba(59,130,246,.18)" : "#E4EDF2",
-        // "--sage"/"--gold" ทั้งคู่คือสีส้มแบรนด์ (ดูคอมเมนต์บรรทัดถัดไป) — ต้องมีโทนเขียวแยกต่างหากไว้ใช้กับ
-        // สถานะสำเร็จ/เปิดร้าน เพราะใช้สีส้มไม่ได้ (ดูเหมือนคำเตือน ไม่ใช่สถานะปกติ) เลขสีเดียวกับ COLORS.success ใน CustomerOrder.jsx
+        "--cream": theme === "dark" ? "#061923" : "#F7FCFE", "--cream-2": theme === "dark" ? "#0D2A38" : "#E8F7FC", "--surface": theme === "dark" ? "#0B2230" : "#FFFFFF",
+        "--espresso-5": theme === "dark" ? "#F2FBFE" : "#003B5C", "--espresso-4": theme === "dark" ? "#DDF3FA" : "#164F6B", "--espresso-3": theme === "dark" ? "#A9CAD8" : "#4F7487", "--espresso-2": theme === "dark" ? "#7FA8BA" : "#718A99",
+        "--sage": "#0077A8", "--sage-dark": theme === "dark" ? "#74D1EE" : "#005E86", "--sage-light": theme === "dark" ? "rgba(0,163,224,.20)" : "#D9F3FC",
+        "--gold": "#0077A8", "--gold-dark": theme === "dark" ? "#74D1EE" : "#005E86", "--gold-light": theme === "dark" ? "rgba(0,163,224,.20)" : "#D9F3FC",
+        "--info": "#00A3E0", "--info-dark": theme === "dark" ? "#74D1EE" : "#0077A8", "--info-light": theme === "dark" ? "rgba(0,163,224,.18)" : "#E8F7FC",
+        // สี interactive ทั้งระบบใช้ CI ร้าน ส่วนเขียว/เหลือง/แดงสงวนไว้สำหรับสถานะสำเร็จ/เตือน/ผิดพลาด
         "--success": "#2E9E4F", "--success-dark": theme === "dark" ? "#6EE7A0" : "#1F7A38", "--success-light": theme === "dark" ? "rgba(34,197,94,.16)" : "#DFF3E3",
         "--danger": theme === "dark" ? "#F87171" : "#B23A2E", "--danger-line": theme === "dark" ? "rgba(248,113,113,.38)" : "#E7CAC5", "--danger-light": theme === "dark" ? "rgba(239,68,68,.16)" : "#FAEEEC",
         "--warning-light": theme === "dark" ? "rgba(245,158,11,.16)" : "#FFF4E5", "--warning-text": theme === "dark" ? "#FBBF24" : "#92400E",
-        "--primary-text": theme === "dark" ? "#7DA2FF" : "#1D4ED8", "--purple-light": theme === "dark" ? "rgba(168,85,247,.18)" : "#F3E8FF",
+        "--primary-text": theme === "dark" ? "#74D1EE" : "#0077A8", "--purple-light": theme === "dark" ? "rgba(168,85,247,.18)" : "#F3E8FF",
         "--avatar-blue-bg": theme === "dark" ? "rgba(59,130,246,.20)" : "#DBEAFE", "--avatar-blue-fg": theme === "dark" ? "#93C5FD" : "#1E3A8A",
         "--avatar-green-bg": theme === "dark" ? "rgba(34,197,94,.18)" : "#DCFCE7", "--avatar-green-fg": theme === "dark" ? "#86EFAC" : "#14532D",
         "--avatar-purple-bg": theme === "dark" ? "rgba(168,85,247,.20)" : "#EDE9FE", "--avatar-purple-fg": theme === "dark" ? "#D8B4FE" : "#4C1D95",
         "--avatar-pink-bg": theme === "dark" ? "rgba(236,72,153,.18)" : "#FCE7F3", "--avatar-pink-fg": theme === "dark" ? "#F9A8D4" : "#831843",
         "--avatar-orange-bg": theme === "dark" ? "rgba(249,115,22,.18)" : "#FFEDD5", "--avatar-orange-fg": theme === "dark" ? "#FDBA74" : "#7C2D12",
         "--avatar-teal-bg": theme === "dark" ? "rgba(20,184,166,.18)" : "#CCFBF1", "--avatar-teal-fg": theme === "dark" ? "#5EEAD4" : "#134E4A",
-        "--line": theme === "dark" ? "#2D3A4B" : "#E4E8E5", "--line-soft": theme === "dark" ? "#202C3A" : "#EEF1EF",
+        "--line": theme === "dark" ? "#244657" : "#CDEAF5", "--line-soft": theme === "dark" ? "#173646" : "#E8F7FC",
         "--f-display": "'Fraunces', serif", "--f-body": "'Manrope', 'Inter', sans-serif", "--f-mono": "'IBM Plex Mono', monospace",
         fontFamily: "var(--f-body)", color: "var(--espresso-4)",
         display: "flex", minHeight: "100vh",
-        background: theme === "dark" ? "radial-gradient(circle at 12% 8%, rgba(216,92,8,.16) 0%, transparent 42%), radial-gradient(circle at 90% 12%, rgba(37,99,235,.12) 0%, transparent 45%), var(--cream)" : "radial-gradient(circle at 12% 8%, #FDEBDD 0%, transparent 42%), radial-gradient(circle at 90% 12%, #DCEAE3 0%, transparent 45%), radial-gradient(circle at 50% 100%, #E4EEF5 0%, transparent 55%), var(--cream)",
+        background: theme === "dark" ? "radial-gradient(circle at 12% 8%, rgba(0,163,224,.18) 0%, transparent 42%), radial-gradient(circle at 90% 12%, rgba(116,209,238,.08) 0%, transparent 45%), var(--cream)" : "radial-gradient(circle at 12% 8%, rgba(0,163,224,.15) 0%, transparent 42%), radial-gradient(circle at 90% 12%, rgba(116,209,238,.18) 0%, transparent 45%), radial-gradient(circle at 50% 100%, rgba(191,234,248,.30) 0%, transparent 55%), var(--cream)",
       }}>
-        <aside className="admin-sidebar" style={{
+        {mobileNavOpen && <button className="admin-mobile-backdrop" aria-label="ปิดเมนู" onClick={()=>setMobileNavOpen(false)} />}
+        <aside className={`admin-sidebar${mobileNavOpen ? " mobile-open" : ""}`} style={{
           width: sidebarCollapsed ? 68 : 236, flexShrink: 0, ...glass({ borderRadius: 0, borderRight: "1px solid rgba(255,255,255,0.7)", borderTop: "none", borderBottom: "none", borderLeft: "none" }),
           display: "flex", flexDirection: "column", padding: sidebarCollapsed ? "18px 10px" : "18px 14px",
           position: "sticky", top: 0, height: "100vh", overflow: "hidden", zIndex: 5,
@@ -1622,7 +1889,7 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
                   )}
                   <button
                     className={"navitem" + (tab === t.id ? " active" : "")}
-                    onClick={() => setTab(t.id)}
+                    onClick={() => requestTab(t.id)}
                     title={sidebarCollapsed ? t.label : undefined}
                     style={sidebarCollapsed ? { justifyContent: "center", padding: "10px", position: "relative" } : undefined}
                   >
@@ -1680,12 +1947,13 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
           </button>
         </aside>
 
-        <main style={{ flex: 1, minWidth: 0, padding: "20px 28px 60px" }}>
+        <main className="admin-main" style={{ flex: 1, minWidth: 0, padding: "20px 28px 60px" }}>
           <div className="admin-header" style={{
             display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 14, marginBottom: 22,
             ...glass({ borderRadius: 20, padding: "16px 22px" }),
           }}>
             <div style={{ minWidth: 0 }}>
+              <button className="theme-toggle admin-mobile-nav" style={{ marginBottom:6 }} onClick={()=>{setSidebarCollapsed(false);setMobileNavOpen(true);}} aria-label="เปิดเมนู"><Icon name="menu-2" size={19}/></button>
               <p style={{ margin: 0, fontSize: 11.5, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--espresso-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{data.settings.shopName}</p>
               <h1 style={{ margin: "2px 0 0", fontFamily: "var(--f-display)", fontWeight: 600, fontSize: "clamp(19px, 5vw, 27px)", color: "var(--espresso-5)", whiteSpace: "nowrap" }}>{activeTabInfo?.label}</h1>
             </div>
@@ -1695,7 +1963,7 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
               </button>
               {pendingOrderCount > 0 && (
                 <button
-                  onClick={() => setTab("orders")}
+                  onClick={() => requestTab("orders")}
                   style={{
                     display: "flex", alignItems: "center", gap: 6, background: "var(--danger)", color: "#fff",
                     padding: "8px 16px", borderRadius: 999, fontWeight: 700, fontSize: 13, border: "none",
@@ -1709,18 +1977,21 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
             </div>
           </div>
 
-          {tab === "dashboard" && <Dashboard data={dataForDisplay} setTab={setTab} />}
-          {tab === "sell" && <SellPanel data={dataForDisplay} ingredientsById={ingredientsById} recordSale={recordSale} createInstoreOrder={createInstoreOrder} />}
-          {tab === "orders" && <OrdersPanel uid={uid} orders={orders} recordSale={recordSale} cancelOrder={cancelOrder} awardLoyaltyBeans={awardLoyaltyBeans} revokeLoyaltyBeans={revokeLoyaltyBeans} showToast={showToast} data={data} ingredientsById={ingredientsById} />}
+          {data.settings.slipTestMode && <div style={{ display:"flex", alignItems:"center", gap:8, margin:"-10px 0 18px", padding:"10px 13px", borderRadius:12, background:"var(--danger-light)", border:"1px solid var(--danger-line)", color:"var(--danger)", fontSize:12.5, fontWeight:700 }}><Icon name="alert-triangle" size={16}/> โหมดทดสอบสลิปเปิดอยู่ — สลิปทุกใบจะผ่านโดยไม่ตรวจสอบจริง <button className="cbtn cbtn-danger" style={{ marginLeft:"auto" }} onClick={()=>requestTab("settings")}>ไปปิด</button></div>}
+
+          {tab === "dashboard" && <Dashboard data={dataForDisplay} setTab={requestTab} />}
+          {tab === "sell" && <SellPanel data={dataForDisplay} ingredientsById={ingredientsById} commitAdminCheckout={commitAdminCheckout} showToast={showToast} />}
+          {tab === "orders" && <OrdersPanel uid={uid} orders={orders} commitOnlineOrder={commitOnlineOrder} cancelOrder={cancelOrder} awardLoyaltyBeans={awardLoyaltyBeans} revokeLoyaltyBeans={revokeLoyaltyBeans} showToast={showToast} data={data} ingredientsById={ingredientsById} />}
           {tab === "menus" && <MenusPanel data={dataForDisplay} ingredientsById={ingredientsById} updateData={updateData} showToast={showToast} />}
           {tab === "promotions" && <PromotionsPanel data={data} orders={orders} updateData={updateData} showToast={showToast} />}
-          {tab === "packages" && <CoffeePassPanel data={data} orders={orders} updateData={updateData} showToast={showToast} />}
+          {tab === "ads" && <PopupAdsPanel data={data} updateData={updateData} showToast={showToast} />}
+          {tab === "packages" && <CoffeePassPanel data={data} orders={orders} customers={customers} updateData={updateData} showToast={showToast} onCancelPass={cancelCustomerPass} />}
           {tab === "ingredients" && <IngredientsPanel uid={uid} data={data} updateData={updateData} showToast={showToast} onSaveAccounting={saveAccountingTransaction} isAccountingPeriodClosed={isAccountingPeriodClosed} />}
-          {tab === "reports" && <ReportsPanel data={dataForDisplay} orders={orders} shopName={data.settings.shopName} showToast={showToast} />}
+          {tab === "reports" && <ReportsPanel data={dataForDisplay} orders={orders} accountingTransactions={accountingTransactions} shopName={data.settings.shopName} showToast={showToast} />}
           {tab === "accounting" && <AccountingPanel transactions={accountingTransactions} assets={accountingAssets} recurringExpenses={recurringExpenses} accounts={accountingAccounts} reconciliations={accountReconciliations} ownerReimbursements={ownerReimbursements} ownerCapitalMovements={ownerCapitalMovements} accountingSettings={accountingSettings} periodClosings={accountingPeriodClosings} sales={dataForDisplay.sales} overheadPerCup={data.settings.overheadPerCup} onSave={saveAccountingTransaction} onDelete={deleteAccountingTransaction} onSaveAsset={saveAccountingAsset} onDeleteAsset={deleteAccountingAsset} onSaveRecurring={saveRecurringExpense} onDeleteRecurring={deleteRecurringExpense} onUpdateOccurrence={updateRecurringOccurrence} onUpdateAccount={updateAccountingAccount} onSaveReconciliation={saveAccountReconciliation} onSaveOwnerReimbursement={saveOwnerReimbursement} onDeleteOwnerReimbursement={deleteOwnerReimbursement} onSaveOwnerCapitalMovement={saveOwnerCapitalMovement} onDeleteOwnerCapitalMovement={deleteOwnerCapitalMovement} onSaveSettings={saveAccountingSettings} onSetPeriodClosed={setAccountingPeriodClosed} showToast={showToast} />}
-          {tab === "loyalty" && <LoyaltyPanel customers={customers} orders={orders} loyaltyBeanGoal={data.settings.loyaltyBeanGoal} adjustCustomerBeans={adjustCustomerBeans} createLoyaltyCustomer={createLoyaltyCustomer} resetCustomerPasscode={resetCustomerPasscode} updateLoyaltyGoal={updateLoyaltyGoal} showToast={showToast} backfillEligibleCount={backfillEligibleOrders.length} backfillLoyaltyBeans={backfillLoyaltyBeans} />}
+          {tab === "loyalty" && <LoyaltyPanel customers={customers} orders={orders} loyaltyBeanGoal={data.settings.loyaltyBeanGoal} loyaltyRewardValue={data.settings.loyaltyRewardValue} adjustCustomerBeans={adjustCustomerBeans} createLoyaltyCustomer={createLoyaltyCustomer} resetCustomerPasscode={resetCustomerPasscode} cancelCustomerPass={cancelCustomerPass} updateLoyaltyReward={updateLoyaltyReward} showToast={showToast} backfillEligibleCount={backfillEligibleOrders.length} backfillLoyaltyBeans={backfillLoyaltyBeans} />}
           {tab === "options" && <OptionGroupsPanel data={data} updateData={updateData} showToast={showToast} />}
-          {tab === "settings" && <SettingsPanel data={data} updateData={updateData} showToast={showToast} uid={uid} />}
+          {tab === "settings" && <SettingsPanel data={data} updateData={updateData} showToast={showToast} uid={uid} auditLogs={auditLogs} onDirtyChange={setSettingsDirty} />}
         </main>
 
         {toast && (
@@ -1729,6 +2000,7 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
             background: "var(--espresso-5)", color: "#fff", padding: "9px 18px", borderRadius: 10, fontSize: 13, zIndex: 40,
           }}>{toast}</div>
         )}
+        {pendingTab && <InvConfirmDialog title="ออกจากหน้าตั้งค่า?" message="มีการเปลี่ยนแปลงที่ยังไม่ได้บันทึก หากออกตอนนี้ข้อมูลที่แก้ไว้จะหาย" confirmLabel="ออกโดยไม่บันทึก" onConfirm={()=>{const next=pendingTab;setPendingTab(null);setSettingsDirty(false);navigateTab(next);setMobileNavOpen(false);}} onCancel={()=>setPendingTab(null)} />}
       </div>
     </div>
   );
@@ -1743,10 +2015,9 @@ function ChannelPill({ channel }) {
   return <span className="chpill" style={style}>{CHANNELS[channel]}</span>;
 }
 
-// โทนสีเฉพาะหน้าภาพรวม (Dashboard) — ระบบสีความหมาย (semantic) แยกจาก --sage/--gold ของแท็บอื่นที่จริงๆ เป็นสีส้มล้วน
-// ตามที่ตั้งใจให้หน้านี้ลดการใช้สีส้มลง ใช้น้ำเงินเป็นสีหลักของปุ่ม/สถานะ interactive แทน
+// Dashboard ใช้ CI ร้านเป็นสี interactive หลัก และคงสี semantic สำหรับสถานะเท่านั้น
 const DASH = {
-  primary: "#2563EB", primaryDark: "var(--primary-text)", primarySoft: "rgba(37,99,235,.12)",
+  primary: "#0077A8", primaryDark: "var(--primary-text)", primarySoft: "rgba(0,163,224,.12)",
   success: "#16A34A", successSoft: "var(--success-light)",
   warning: "#D97706", warningSoft: "var(--warning-light)",
   danger: "#DC2626", dangerSoft: "var(--danger-light)",
@@ -1771,7 +2042,7 @@ function DashSectionHeader({ icon, text, hint }) {
 
 function DashKpiCard({ icon, label, value, sub, tone, big }) {
   const tones = {
-    primary: { fg: DASH.primaryDark, iconBg: "var(--surface)", iconFg: DASH.primary, bg: DASH.primarySoft, border: "rgba(37,99,235,.18)" },
+    primary: { fg: DASH.primaryDark, iconBg: "var(--surface)", iconFg: DASH.primary, bg: DASH.primarySoft, border: "rgba(0,163,224,.18)" },
     success: { fg: DASH.success, iconBg: DASH.successSoft, iconFg: DASH.success, bg: "var(--surface)", border: DASH.border },
     warning: { fg: DASH.warning, iconBg: DASH.warningSoft, iconFg: DASH.warning, bg: "var(--surface)", border: DASH.border },
     danger: { fg: DASH.danger, iconBg: DASH.dangerSoft, iconFg: DASH.danger, bg: "var(--surface)", border: DASH.border },
@@ -1821,7 +2092,7 @@ function DashStockAlertCard({ ing }) {
 
 function DashRankCard({ rank, name, qty, maxQty }) {
   const medals = ["🥇", "🥈", "🥉"];
-  const barTones = [DASH.primary, "#7C9CF0", "#B7C6F5"];
+  const barTones = [DASH.primary, "#74D1EE", "#BFEAF8"];
   const pct = maxQty > 0 ? Math.max(8, Math.round((qty / maxQty) * 100)) : 0;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0" }}>
@@ -1832,7 +2103,7 @@ function DashRankCard({ rank, name, qty, maxQty }) {
           <span style={{ color: DASH.gray, fontWeight: 500, fontSize: 12, flexShrink: 0, marginLeft: 8 }}>{qty} หน่วย</span>
         </div>
         <div style={{ height: 7, borderRadius: 999, background: DASH.neutralSoft, overflow: "hidden" }}>
-          <div style={{ height: "100%", width: pct + "%", borderRadius: 999, background: barTones[rank] || "#C7D2E8", transition: "width 400ms ease" }} />
+          <div style={{ height: "100%", width: pct + "%", borderRadius: 999, background: barTones[rank] || "#CDEAF5", transition: "width 400ms ease" }} />
         </div>
       </div>
     </div>
@@ -1848,7 +2119,7 @@ function DashTrendChart({ days }) {
           <span style={{ fontSize: 10, color: DASH.gray, fontWeight: 600 }}>{d.value > 0 ? money(d.value) : ""}</span>
           <div title={`฿${money(d.value)}`} style={{
             width: "100%", maxWidth: 30, height: Math.max(4, (d.value / max) * 62), borderRadius: 6,
-            background: i === days.length - 1 ? DASH.primary : "#C7D6FB", transition: "height 300ms ease",
+            background: i === days.length - 1 ? DASH.primary : "#BFEAF8", transition: "height 300ms ease",
           }} />
           <span style={{ fontSize: 10.5, color: DASH.gray }}>{d.label}</span>
         </div>
@@ -1858,12 +2129,22 @@ function DashTrendChart({ days }) {
 }
 
 function Dashboard({ data, setTab }) {
+  const [range, setRange] = useState("today");
   const today = todayStr();
-  const todaySales = data.sales.filter((s) => s.timestamp.slice(0, 10) === today);
-  const revenue = todaySales.reduce((a, s) => a + s.netRevenue, 0);
-  const cost = todaySales.reduce((a, s) => a + s.totalCost, 0);
+  const weekStart = new Date();
+  weekStart.setHours(0,0,0,0);
+  weekStart.setDate(weekStart.getDate()-6);
+  const periodSales = data.sales.filter((sale) => {
+    const key = String(sale.timestamp || "").slice(0,10);
+    if (range === "today") return key === today;
+    if (range === "month") return key.startsWith(today.slice(0,7));
+    return new Date(sale.timestamp) >= weekStart;
+  });
+  const rangeLabel = range === "today" ? "วันนี้" : range === "week" ? "7 วันล่าสุด" : "เดือนนี้";
+  const revenue = periodSales.reduce((a, s) => a + s.netRevenue, 0);
+  const cost = periodSales.reduce((a, s) => a + s.totalCost, 0);
   const profit = revenue - cost;
-  const cups = todaySales.reduce((a, s) => a + s.qty, 0);
+  const cups = periodSales.reduce((a, s) => a + s.qty, 0);
   const avgPerCup = cups > 0 ? revenue / cups : 0;
 
   const lowStock = data.ingredients.filter((i) => !i.unlimited && !(i.components && i.components.length > 0) && i.stockQty <= i.lowStockThreshold);
@@ -1871,7 +2152,7 @@ function Dashboard({ data, setTab }) {
   const visibleLowStock = sortedLowStock.slice(0, 6);
 
   const menuCount = {};
-  for (const s of data.sales) menuCount[s.menuName] = (menuCount[s.menuName] || 0) + s.qty;
+  for (const s of periodSales) menuCount[s.menuName] = (menuCount[s.menuName] || 0) + s.qty;
   const topMenus = Object.entries(menuCount).sort((a, b) => b[1] - a[1]).slice(0, 3);
   const topMax = topMenus.length ? topMenus[0][1] : 0;
 
@@ -1898,10 +2179,15 @@ function Dashboard({ data, setTab }) {
         .dash-link-btn:hover { color: ${DASH.primaryDark}; }
       `}</style>
 
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10, marginBottom:14 }}>
+        <div style={{ color:DASH.gray, fontSize:12.5 }}>ภาพรวมผลประกอบการตามช่วงเวลา</div>
+        <Segmented dense value={range} onChange={setRange} options={[{value:"today",label:"วันนี้"},{value:"week",label:"7 วัน"},{value:"month",label:"เดือนนี้"}]} />
+      </div>
+
       <div className="dash-kpi-grid">
-        <DashKpiCard icon="cash" label="ยอดขายวันนี้ (สุทธิ)" value={"฿" + money(revenue)} sub={`${cups} หน่วย · เฉลี่ย ฿${money(avgPerCup)}/หน่วย`} tone="primary" big />
-        <DashKpiCard icon="receipt-2" label="ต้นทุนวันนี้" value={"฿" + money(cost)} tone="neutral" />
-        <DashKpiCard icon="trending-up" label="กำไรวันนี้" value={"฿" + money(profit)} tone={profit >= 0 ? "success" : "danger"} />
+        <DashKpiCard icon="cash" label={`ยอดขาย${rangeLabel} (สุทธิ)`} value={"฿" + money(revenue)} sub={`${cups} หน่วย · เฉลี่ย ฿${money(avgPerCup)}/หน่วย`} tone="primary" big />
+        <DashKpiCard icon="receipt-2" label={`ต้นทุน${rangeLabel}`} value={"฿" + money(cost)} tone="neutral" />
+        <DashKpiCard icon="trending-up" label={`กำไร${rangeLabel}`} value={"฿" + money(profit)} tone={profit >= 0 ? "success" : "danger"} />
         <DashKpiCard icon="alert-triangle" label="วัตถุดิบใกล้หมด" value={lowStock.length} sub={lowStock.length ? "ต้องเติมสต็อก" : "สต็อกปกติ"} tone={lowStock.length ? "warning" : "neutral"} />
       </div>
 
@@ -1910,6 +2196,14 @@ function Dashboard({ data, setTab }) {
           <div className="dash-card">
             <DashSectionHeader icon="chart-bar" text="ยอดขายสุทธิ 7 วันล่าสุด" />
             <DashTrendChart days={trendDays} />
+          </div>
+          <div className="dash-card">
+            <DashSectionHeader icon="bolt" text="งานด่วน" />
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))", gap:8 }}>
+              <button className="cbtn cbtn-accent" onClick={()=>setTab("sell")}><Icon name="cash-register" size={15}/> ขายหน้าร้าน</button>
+              <button className="cbtn" onClick={()=>setTab("orders")}><Icon name="receipt" size={15}/> ดูออเดอร์</button>
+              <button className="cbtn" onClick={()=>setTab("ingredients")}><Icon name="box-multiple" size={15}/> เติมสต็อก</button>
+            </div>
           </div>
         </div>
 
@@ -1932,7 +2226,7 @@ function Dashboard({ data, setTab }) {
           </div>
 
           <div className="dash-card">
-            <DashSectionHeader icon="trophy" text="เมนูขายดี (สะสม)" />
+            <DashSectionHeader icon="trophy" text={`เมนูขายดี (${rangeLabel})`} />
             {topMenus.length === 0 ? <EmptyNote text="ยังไม่มีข้อมูลการขาย" /> : (
               <div>{topMenus.map(([name, q], idx) => <DashRankCard key={name} rank={idx} name={name} qty={q} maxQty={topMax} />)}</div>
             )}
@@ -1985,10 +2279,9 @@ function EmptyNote({ text }) {
   return <p style={{ fontSize: 12.5, color: "var(--espresso-2)", fontStyle: "italic", margin: 0 }}>{text}</p>;
 }
 
-// พาเลตสีเฉพาะหน้าขายเครื่องดื่ม (POS) — แยกจากธีม sage/espresso ของแอดมินหน้าอื่นๆ ตามที่ตั้งใจให้หน้านี้
-// ดูพรีเมียมแบบ POS ร้านกาแฟระดับสูง ไม่กระทบธีมของแท็บอื่น
+// POS ใช้ CI เดียวกับหน้าแอดมินส่วนอื่น เพื่อให้จุดขายและงานหลังบ้านเป็นแบรนด์เดียวกัน
 const POS = {
-  primary: "#D85C08", primaryDark: "#C14F06", primarySoft: "var(--sage-light)",
+  primary: "#0077A8", primaryDark: "#005E86", primarySoft: "var(--sage-light)",
   navy: "var(--espresso-5)", warm: "var(--cream)", border: "var(--line)", gray: "var(--espresso-3)",
   chipBg: "var(--cream-2)",
 };
@@ -2102,7 +2395,7 @@ function PosOptionGroup({ group, selected, onPick }) {
   );
 }
 
-function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
+function SellPanel({ data, ingredientsById, commitAdminCheckout, showToast }) {
   const [state, setState] = useState({});
   const [cart, setCart] = useState([]);
   const [cartNote, setCartNote] = useState("");
@@ -2111,9 +2404,14 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
   const [channel, setChannel] = useState("store");
   const [platformId, setPlatformId] = useState(data.settings.platforms[0]?.id || "");
   const [deliveryNetReceived, setDeliveryNetReceived] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [query, setQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [infoFor, setInfoFor] = useState(null);
   const [warnOpen, setWarnOpen] = useState({});
   const [advOpen, setAdvOpen] = useState({});
+  const [stockOverride, setStockOverride] = useState({});
 
   function get(menuId, key, fallback) {
     return (state[menuId] && state[menuId][key] !== undefined) ? state[menuId][key] : fallback;
@@ -2192,7 +2490,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
     )));
   }
 
-  function checkout() {
+  async function checkout() {
     if (hasInvalidUnitPrice) return;
     const enteredDeliveryNet = Number(deliveryNetReceived);
     let allocatedNet = 0;
@@ -2208,20 +2506,20 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
       allocatedNet = round4(allocatedNet + netRevenueOverride);
       return { ...line, netRevenueOverride };
     });
-    const orderId = createInstoreOrder(checkoutCart, cartNote.trim(), cartPhone.trim());
-    for (const line of checkoutCart) {
-      recordSale(line.menuId, line.qty, line.channel, {
-        substitutions: line.substitutions, upcharge: line.upcharge,
-        unitPriceOverride: line.unitPrice,
-        platformId: line.platformId, milkLabel: line.optionsLabel,
-        netRevenueOverride: line.netRevenueOverride,
-        note: cartNote.trim() || null, orderId, paymentMethod: "cash",
-      });
+    setCheckoutBusy(true);
+    try {
+      await commitAdminCheckout(checkoutCart, cartNote.trim(), cartPhone.trim(), paymentMethod);
+      setCart([]);
+      setCartNote("");
+      setCartPhone("");
+      setDeliveryNetReceived("");
+      setStockOverride({});
+      showToast("ยืนยันออเดอร์และบันทึกยอดขาย/สต็อก/บัญชีแล้ว");
+    } catch (error) {
+      showToast("ยืนยันออเดอร์ไม่สำเร็จ ข้อมูลยังไม่ถูกตัด: " + error.message);
+    } finally {
+      setCheckoutBusy(false);
     }
-    setCart([]);
-    setCartNote("");
-    setCartPhone("");
-    setDeliveryNetReceived("");
   }
 
   const cartCups = cart.reduce((s, l) => s + l.qty, 0);
@@ -2239,9 +2537,24 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
   const today = todayStr();
   const todaySales = data.sales.filter((s) => s.timestamp.slice(0, 10) === today);
   const todayRevenue = todaySales.reduce((s, x) => s + x.netRevenue, 0);
-  const todayOrderCount = todaySales.length;
+  const todayOrderCount = new Set(todaySales.map((sale) => sale.orderId || sale.id)).size;
+  const phoneValid = !cartPhone.trim() || !!normalizeThaiPhone(cartPhone);
 
   const platform = data.settings.platforms.find((p) => p.id === platformId);
+  const categories = [...new Set(data.menus.map((menu) => menu.category).filter(Boolean))];
+  const visibleMenus = data.menus.filter((menu) => {
+    if (!menu.available) return false;
+    if (categoryFilter !== "all" && menu.category !== categoryFilter) return false;
+    const normalizedQuery = query.trim().toLowerCase();
+    return !normalizedQuery || `${menu.name} ${menu.category || ""}`.toLowerCase().includes(normalizedQuery);
+  });
+
+  function changeChannel(nextChannel) {
+    setChannel(nextChannel);
+    if (nextChannel === "store") setPaymentMethod("cash");
+    else if (nextChannel === "delivery") setPaymentMethod("bank");
+    else setPaymentMethod("promptpay");
+  }
 
   return (
     <div>
@@ -2274,6 +2587,8 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
         .pos-warn-btn { display: flex; align-items: center; gap: 5px; width: 100%; text-align: left; border: 1px solid #FBD5B5; background: var(--warning-light); color: var(--warning-text); border-radius: 10px; padding: 6px 10px; font-size: 11.5px; font-weight: 600; cursor: pointer; transition: background 200ms ease; }
         .pos-warn-btn:hover { background: var(--warning-light); }
         .pos-cart { position: sticky; top: 10px; background: ${POS.warm}; border: 1px solid ${POS.border}; border-radius: 24px; padding: 18px; box-shadow: 0 10px 30px rgba(0,0,0,.06); display: flex; flex-direction: column; max-height: calc(100vh - 40px); }
+        .pos-filter { height:42px; border:1px solid ${POS.border}; border-radius:11px; background:var(--surface); color:${POS.navy}; padding:0 11px; font:inherit; }
+        @media (max-width:760px) { .pos-cart { order:-1; position:sticky; top:6px; max-width:none !important; min-width:0 !important; flex-basis:100% !important; z-index:12; max-height:65vh; } }
       `}</style>
 
       {/* หัวข้อหน้า + สถิติวันนี้ + จำนวนในตะกร้า — ข้อมูลจริงทั้งหมดจาก data.sales/ตะกร้าปัจจุบัน ไม่มีตัวเลขสมมติ */}
@@ -2300,7 +2615,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
             title: k === "delivery" && data.settings.platforms.length === 0 ? "เพิ่มแพลตฟอร์มในแท็บตั้งค่าก่อน" : undefined,
           }))}
           value={channel}
-          onChange={setChannel}
+          onChange={changeChannel}
         />
         {channel === "delivery" && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -2314,9 +2629,17 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
         )}
       </div>
 
+      <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:18 }}>
+        <div style={{ position:"relative", flex:"1 1 220px" }}>
+          <Icon name="search" size={15} style={{ position:"absolute", left:12, top:13, color:POS.gray }} />
+          <input className="pos-filter" style={{ width:"100%", paddingLeft:36 }} value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="ค้นหาเมนู..." />
+        </div>
+        <select className="pos-filter" value={categoryFilter} onChange={(event)=>setCategoryFilter(event.target.value)}><option value="all">ทุกหมวด</option>{categories.map((category)=><option key={category} value={category}>{category}</option>)}</select>
+      </div>
+
       <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
         <div className="pos-grid" style={{ flex: "3 1 600px", minWidth: 0 }}>
-          {data.menus.map((menu) => {
+          {visibleMenus.map((menu) => {
             const groups = groupsForMenu(menu, data.optionGroups);
             const qty = get(menu.id, "qty", 1);
             const options = get(menu.id, "options") || defaultOptionsFor(groups);
@@ -2334,6 +2657,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
             const showAdvToggle = advancedGroups.length > 0;
             const isAdvOpen = !!advOpen[menu.id];
             const isWarnOpen = !!warnOpen[menu.id];
+            const overrideAllowed = !!stockOverride[menu.id];
 
             function pick(g, c) {
               set(menu.id, { options: { ...options, [g.id]: { ...c, groupId: g.id, groupName: g.name } } });
@@ -2389,8 +2713,9 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
                     </button>
                     {isWarnOpen && (
                       <div style={{ fontSize: 11, color: "var(--warning-text)", marginTop: 4, paddingLeft: 4, lineHeight: 1.5 }}>
-                        {!ok && <div>สต็อกวัตถุดิบไม่พอ (รวมของในตะกร้าแล้ว ยังหยิบเพิ่มได้ แต่สต็อกจะติดลบ)</div>}
+                        {!ok && <div>สต็อกวัตถุดิบไม่พอ หากจำเป็นต้องขายต่อให้อนุมัติเป็นกรณีพิเศษ</div>}
                         {missingRequired && <div>กรุณาเลือกตัวเลือกที่จำเป็นให้ครบก่อนหยิบใส่ตะกร้า</div>}
+                        {!ok && <button type="button" className="cbtn" style={{ marginTop:6 }} onClick={() => setStockOverride((current)=>({ ...current, [menu.id]:!current[menu.id] }))}>{overrideAllowed ? "ยกเลิกการอนุมัติ" : "อนุมัติขายเกินสต็อก"}</button>}
                       </div>
                     )}
                   </div>
@@ -2403,7 +2728,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
                     <button onClick={() => set(menu.id, { qty: qty + 1 })}>+</button>
                   </div>
                   <button
-                    className="pos-add-btn" disabled={missingRequired}
+                    className="pos-add-btn" disabled={missingRequired || (!ok && !overrideAllowed)}
                     onClick={() => addToCart(menu, { qty, channel, options, platformId })}
                   >
                     <Icon name="shopping-cart-plus" size={16} /> เพิ่มลงตะกร้า
@@ -2412,6 +2737,7 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
               </div>
             );
           })}
+          {visibleMenus.length === 0 && <div style={{ padding:32, textAlign:"center", color:POS.gray, background:"var(--surface)", border:`1px solid ${POS.border}`, borderRadius:18 }}>ไม่พบเมนูที่เปิดขายและตรงกับตัวกรอง</div>}
         </div>
 
         <div className="pos-cart" style={{ flex: "1 1 300px", maxWidth: 360, minWidth: 280 }}>
@@ -2480,6 +2806,12 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
             placeholder="เช่น 0812345678" inputMode="tel"
             style={{ marginBottom: 10, fontFamily: "inherit", padding: "9px 11px", borderRadius: 12, border: `1px solid ${POS.border}`, fontSize: 13.5, width: "100%", boxSizing: "border-box" }}
           />
+          {!phoneValid && <div style={{ color:"var(--danger)", fontSize:10.5, margin:"-6px 0 9px" }}>กรุณากรอกเบอร์โทรศัพท์ไทย 10 หลัก หรือเว้นว่าง</div>}
+
+          <label style={{ fontSize:11, color:POS.gray, marginBottom:4, fontWeight:600 }}>รับเงินผ่าน</label>
+          <select className="pos-filter" style={{ width:"100%", marginBottom:10 }} value={paymentMethod} onChange={(event)=>setPaymentMethod(event.target.value)}>
+            <option value="cash">เงินสด</option><option value="promptpay">PromptPay / โอนธนาคาร</option><option value="credit_card">บัตรเครดิต</option>
+          </select>
 
           <label style={{ fontSize: 11, color: POS.gray, marginBottom: 4, fontWeight: 600 }}>หมายเหตุ (ถ้ามี)</label>
           <textarea
@@ -2511,8 +2843,8 @@ function SellPanel({ data, ingredientsById, recordSale, createInstoreOrder }) {
             <span style={{ fontSize: 13, fontWeight: 600, color: POS.gray }}>ยอดรับสุทธิรวม</span><span style={{ color: POS.navy }}>{checkoutIsValid ? `฿${money(cartTotal)}` : "—"}</span>
           </div>
           {hasInvalidUnitPrice && <div style={{ margin: "-5px 0 9px", color: "var(--danger)", fontSize: 10.5 }}>กรุณากรอกราคาขายให้ถูกต้องก่อนยืนยันออเดอร์</div>}
-          <button className="pos-add-btn" style={{ width: "100%", opacity: cart.length === 0 || !checkoutIsValid ? 0.5 : 1 }} disabled={cart.length === 0 || !checkoutIsValid} onClick={checkout}>
-            <Icon name="check" size={16} /> ยืนยันออเดอร์ / ชำระเงิน
+          <button className="pos-add-btn" style={{ width: "100%", opacity: cart.length === 0 || !checkoutIsValid || !phoneValid || checkoutBusy ? 0.5 : 1 }} disabled={cart.length === 0 || !checkoutIsValid || !phoneValid || checkoutBusy} onClick={checkout}>
+            <Icon name={checkoutBusy ? "loader-2" : "check"} size={16} /> {checkoutBusy ? "กำลังบันทึก..." : "ยืนยันออเดอร์ / ชำระเงิน"}
           </button>
         </div>
       </div>
@@ -2777,12 +3109,13 @@ function TierBadge({ lifetimeBeans, size }) {
   );
 }
 
-function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans, createLoyaltyCustomer, resetCustomerPasscode, updateLoyaltyGoal, showToast, backfillEligibleCount, backfillLoyaltyBeans }) {
+function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, loyaltyRewardValue, adjustCustomerBeans, createLoyaltyCustomer, resetCustomerPasscode, cancelCustomerPass, updateLoyaltyReward, showToast, backfillEligibleCount, backfillLoyaltyBeans }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [tierFilter, setTierFilter] = useState("all");
   const [sortBy, setSortBy] = useState("beans");
   const [goalInput, setGoalInput] = useState(String(loyaltyBeanGoal));
+  const [rewardValueInput, setRewardValueInput] = useState(String(loyaltyRewardValue));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [newName, setNewName] = useState("");
@@ -2791,6 +3124,9 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans,
   const [adding, setAdding] = useState(false);
   const [adjustFor, setAdjustFor] = useState(null);
   const [adjustAmount, setAdjustAmount] = useState("1");
+  const [adjustReason, setAdjustReason] = useState("");
+  const [adjustingBeans, setAdjustingBeans] = useState(false);
+  const [customerLimit, setCustomerLimit] = useState(50);
   const [confirmBackfill, setConfirmBackfill] = useState(false);
   const [detailPhone, setDetailPhone] = useState(null);
   const [actionMenuPhone, setActionMenuPhone] = useState(null);
@@ -2841,18 +3177,32 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans,
   const eligibleCount = customerRows.filter((customer) => customer._status === "eligible").length;
   const repeatCount = customerRows.filter((customer) => customer._metric.doneOrders >= 2).length;
   const detailCustomer = customers.find((customer) => customer.phone === detailPhone) || null;
+  const previewGoal = Math.max(1, Math.floor(Number(goalInput) || loyaltyBeanGoal));
+  const previewEligibleCount = customers.filter((customer)=>(Number(customer.beans)||0)>=previewGoal).length;
 
   function saveGoal() {
-    updateLoyaltyGoal(goalInput);
+    updateLoyaltyReward(goalInput, rewardValueInput);
     setSettingsOpen(false);
-    showToast("บันทึกเกณฑ์แลกรางวัลแล้ว");
+    showToast("บันทึกเกณฑ์และมูลค่ารางวัลแล้ว");
   }
 
-  function submitAdjust(sign) {
+  async function submitAdjust(sign) {
+    if (adjustingBeans) return;
+    if (!adjustReason.trim()) { showToast("กรุณาระบุเหตุผลในการปรับเมล็ด"); return; }
     const amount = Math.max(1, Number(adjustAmount) || 1);
-    adjustCustomerBeans(adjustFor.phone, amount * sign, adjustFor.name);
-    setAdjustFor(null);
-    setAdjustAmount("1");
+    setAdjustingBeans(true);
+    try {
+      await adjustCustomerBeans(adjustFor.phone, amount * sign, adjustFor.name, adjustReason);
+      setAdjustFor(null); setAdjustAmount("1"); setAdjustReason("");
+    } catch (error) { showToast("ปรับเมล็ดไม่สำเร็จ: "+error.message); }
+    finally { setAdjustingBeans(false); }
+  }
+
+  function exportCustomers() {
+    const header=["ชื่อ","เบอร์โทร","เมล็ดคงเหลือ","เมล็ดสะสมตลอด","จำนวนออเดอร์สำเร็จ","ระดับ"];
+    const rows=customerRows.map((customer)=>[customer.name||"",customer.phone||"",Number(customer.beans)||0,Number(customer.lifetimeBeans)||0,customer._metric.doneOrders,loyaltyTierFor(customer.lifetimeBeans).label]);
+    const csv="\uFEFF"+[header,...rows].map((row)=>row.map((value)=>`"${String(value).replace(/"/g,'""')}"`).join(",")).join("\r\n");
+    const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));const link=document.createElement("a");link.href=url;link.download=`loyalty-customers-${todayStr()}.csv`;link.click();URL.revokeObjectURL(url);
   }
 
   async function submitNewCustomer() {
@@ -2899,7 +3249,7 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans,
         .loy-row:hover { background:var(--cream-2); }
         .loy-customer { display:flex; align-items:center; gap:12px; min-width:0; }
         .loy-progress { height:6px; border-radius:999px; overflow:hidden; background:var(--cream-2); margin-top:6px; }
-        .loy-progress > span { display:block; height:100%; border-radius:inherit; background:#2563EB; }
+        .loy-progress > span { display:block; height:100%; border-radius:inherit; background:#0077A8; }
         .loy-action-menu { position:absolute; z-index:12; right:12px; top:46px; width:160px; padding:6px; background:var(--surface); border:1px solid ${POS.border}; border-radius:11px; box-shadow:0 12px 30px rgba(0,0,0,.14); }
         .loy-action-menu button { width:100%; display:flex; align-items:center; gap:7px; border:0; border-radius:8px; background:transparent; padding:8px 9px; color:${POS.navy}; font:inherit; font-size:12.5px; text-align:left; }
         .loy-action-menu button:hover { background:${POS.chipBg}; }
@@ -2922,7 +3272,8 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans,
           <p style={{ margin:0, color:POS.gray, fontSize:12.5 }}>ติดตามความคืบหน้า ระดับสมาชิก และประวัติการกลับมาซื้อซ้ำ</p>
         </div>
         <div className="loy-head-actions">
-          <button className="cbtn" onClick={() => { setGoalInput(String(loyaltyBeanGoal)); setSettingsOpen(true); }}><IconRewardSettings size={16} /> <span style={{marginLeft:5}}>ตั้งค่ารางวัล</span></button>
+          <button className="cbtn" onClick={() => { setGoalInput(String(loyaltyBeanGoal)); setRewardValueInput(String(loyaltyRewardValue)); setSettingsOpen(true); }}><IconRewardSettings size={16} /> <span style={{marginLeft:5}}>ตั้งค่ารางวัล</span></button>
+          <button className="cbtn" onClick={exportCustomers}><Icon name="download" size={15}/> <span style={{marginLeft:5}}>Export CSV</span></button>
           <button className="cbtn cbtn-accent" onClick={() => { setAddError(""); setAddOpen(true); }}><IconAddCustomer size={16} /> <span style={{marginLeft:5}}>เพิ่มลูกค้า</span></button>
         </div>
       </div>
@@ -2953,7 +3304,7 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans,
       {filtered.length === 0 ? <EmptyNote text="ไม่พบลูกค้าที่ตรงกับตัวกรอง" /> : (
         <div className="loy-table">
           <div className="loy-table-head"><span>ลูกค้า</span><span>ระดับ</span><span>ความคืบหน้า</span><span>ซื้อทั้งหมด</span><span className="loy-col-lifetime">ล่าสุด</span><span>สถานะ</span><span /></div>
-          {filtered.map((customer) => {
+          {filtered.slice(0,customerLimit).map((customer) => {
             const beans = Number(customer.beans) || 0;
             const progress = Math.min(100, (beans / Math.max(1, loyaltyBeanGoal)) * 100);
             const status = statusMeta[customer._status];
@@ -2961,7 +3312,7 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans,
               <div key={customer.phone} className="loy-row" role="button" tabIndex={0} onClick={() => setDetailPhone(customer.phone)} onKeyDown={(e)=>{if(e.key==="Enter")setDetailPhone(customer.phone);}}>
                 <div className="loy-customer"><CustomerAvatar customer={customer}/><div style={{minWidth:0}}><div style={{fontWeight:700,fontSize:13.5,color:POS.navy,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{customer.name||"(ไม่ทราบชื่อ)"}</div><div style={{fontSize:11.5,color:POS.gray,marginTop:2}}>{customer.phone}</div></div></div>
                 <div className="loy-col-tier"><TierBadge lifetimeBeans={customer.lifetimeBeans} size="sm"/></div>
-                <div className="loy-col-progress"><div style={{display:"flex",justifyContent:"space-between",fontSize:11.5,color:POS.gray}}><span>{beans} / {loyaltyBeanGoal} เมล็ด</span><b style={{color:POS.navy}}>{Math.round(progress)}%</b></div><div className="loy-progress"><span style={{width:`${progress}%`,background:customer._status==="eligible"?"#16A34A":"#2563EB"}}/></div></div>
+                <div className="loy-col-progress"><div style={{display:"flex",justifyContent:"space-between",fontSize:11.5,color:POS.gray}}><span>{beans} / {loyaltyBeanGoal} เมล็ด</span><b style={{color:POS.navy}}>{Math.round(progress)}%</b></div><div className="loy-progress"><span style={{width:`${progress}%`,background:customer._status==="eligible"?"#16A34A":POS.primary}}/></div></div>
                 <div className="loy-col-cups" style={{fontSize:12.5,color:POS.navy,fontWeight:600}}>{customer._metric.cups} แก้ว</div>
                 <div className="loy-col-lifetime" style={{fontSize:11.5,color:POS.gray}}>{customer._metric.lastAt?new Date(customer._metric.lastAt).toLocaleDateString("th-TH",{day:"numeric",month:"short",year:"2-digit"}):"ยังไม่มี"}</div>
                 <div className="loy-col-status"><span style={{display:"inline-flex",padding:"4px 8px",borderRadius:999,fontSize:10.5,fontWeight:700,color:status.color,background:status.bg,whiteSpace:"nowrap"}}>{status.label}</span></div>
@@ -2971,12 +3322,13 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans,
           })}
         </div>
       )}
+      {filtered.length>customerLimit&&<button className="cbtn" style={{ display:"block", margin:"12px auto" }} onClick={()=>setCustomerLimit((current)=>current+50)}>โหลดเพิ่ม ({filtered.length-customerLimit} คน)</button>}
 
-      {detailCustomer && <LoyaltyDetailDrawer customer={detailCustomer} orders={orders} loyaltyBeanGoal={loyaltyBeanGoal} onResetPasscode={resetCustomerPasscode} showToast={showToast} onClose={()=>setDetailPhone(null)} onAdjust={()=>{setDetailPhone(null);setAdjustFor(detailCustomer);}} />}
+      {detailCustomer && <LoyaltyDetailDrawer customer={detailCustomer} orders={orders} loyaltyBeanGoal={loyaltyBeanGoal} onResetPasscode={resetCustomerPasscode} onCancelPass={cancelCustomerPass} showToast={showToast} onClose={()=>setDetailPhone(null)} onAdjust={()=>{setDetailPhone(null);setAdjustFor(detailCustomer);}} />}
 
-      {adjustFor && <div className="loy-modal-backdrop" onClick={()=>setAdjustFor(null)}><div className="loy-modal" role="dialog" aria-modal="true" aria-label={`ปรับเมล็ด ${adjustFor.name||adjustFor.phone}`} onClick={(e)=>e.stopPropagation()}><h3 style={{margin:"0 0 4px",color:POS.navy}}>ปรับเมล็ด — {adjustFor.name||adjustFor.phone}</h3><p style={{margin:"0 0 14px",fontSize:12,color:POS.gray}}>ปัจจุบัน {adjustFor.beans||0} เมล็ด</p><input className="loy-field" value={adjustAmount} onChange={(e)=>setAdjustAmount(e.target.value)} inputMode="numeric"/><div style={{display:"flex",gap:8,marginTop:14}}><button className="cbtn cbtn-accent" style={{flex:1}} onClick={()=>submitAdjust(1)}>+ เพิ่ม</button><button className="cbtn cbtn-danger" style={{flex:1}} onClick={()=>submitAdjust(-1)}>− หัก</button></div></div></div>}
+      {adjustFor && <div className="loy-modal-backdrop" onClick={()=>!adjustingBeans&&setAdjustFor(null)}><div className="loy-modal" role="dialog" aria-modal="true" aria-label={`ปรับเมล็ด ${adjustFor.name||adjustFor.phone}`} onClick={(e)=>e.stopPropagation()}><h3 style={{margin:"0 0 4px",color:POS.navy}}>ปรับเมล็ด — {adjustFor.name||adjustFor.phone}</h3><p style={{margin:"0 0 14px",fontSize:12,color:POS.gray}}>ปัจจุบัน {adjustFor.beans||0} เมล็ด · ระบบจะเก็บผู้ทำรายการ เวลา และเหตุผล</p><label style={{fontSize:11.5,fontWeight:700,color:POS.gray}}>จำนวนเมล็ด</label><input className="loy-field" type="number" min="1" step="1" value={adjustAmount} onChange={(e)=>setAdjustAmount(e.target.value)} inputMode="numeric"/><label style={{display:"block",margin:"10px 0 5px",fontSize:11.5,fontWeight:700,color:POS.gray}}>เหตุผล <span style={{color:"var(--danger)"}}>*</span></label><input className="loy-field" value={adjustReason} onChange={(e)=>setAdjustReason(e.target.value)} placeholder="ต้องระบุก่อนกด เช่น ชดเชยออเดอร์ #123456"/><div style={{display:"flex",gap:8,marginTop:14}}><button disabled={adjustingBeans} className="cbtn cbtn-accent" style={{flex:1}} onClick={()=>submitAdjust(1)}>{adjustingBeans?"กำลังบันทึก...":"+ เพิ่ม"}</button><button disabled={adjustingBeans} className="cbtn cbtn-danger" style={{flex:1}} onClick={()=>submitAdjust(-1)}>{adjustingBeans?"กำลังบันทึก...":"− หัก"}</button></div></div></div>}
 
-      {settingsOpen && <div className="loy-modal-backdrop" onClick={()=>setSettingsOpen(false)}><div className="loy-modal" role="dialog" aria-modal="true" aria-label="ตั้งค่ารางวัล" onClick={(e)=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><h3 style={{margin:0,color:POS.navy}}>ตั้งค่ารางวัล</h3><button className="cbtn" style={{width:32,height:32,padding:0}} onClick={()=>setSettingsOpen(false)}><Icon name="x"/></button></div><p style={{fontSize:12.5,color:POS.gray,lineHeight:1.5}}>กำหนดจำนวนเมล็ดที่ลูกค้าต้องใช้สำหรับแลกเครื่องดื่มฟรี 1 แก้ว</p><label style={{display:"block",fontSize:12,fontWeight:700,color:POS.navy,marginBottom:6}}>จำนวนเมล็ด</label><input className="loy-field" value={goalInput} onChange={(e)=>setGoalInput(e.target.value)} inputMode="numeric"/><button className="cbtn cbtn-accent" style={{width:"100%",marginTop:14}} onClick={saveGoal}>บันทึกการตั้งค่า</button></div></div>}
+      {settingsOpen && <div className="loy-modal-backdrop" onClick={()=>setSettingsOpen(false)}><div className="loy-modal" role="dialog" aria-modal="true" aria-label="ตั้งค่ารางวัล" onClick={(e)=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><h3 style={{margin:0,color:POS.navy}}>ตั้งค่ารางวัล</h3><button className="cbtn" style={{width:32,height:32,padding:0}} onClick={()=>setSettingsOpen(false)}><Icon name="x"/></button></div><p style={{fontSize:12.5,color:POS.gray,lineHeight:1.5}}>กำหนดจำนวนเมล็ดและมูลค่าส่วนลดสำหรับเครื่องดื่ม 1 แก้ว หากราคาเกินมูลค่ารางวัล ลูกค้าชำระเฉพาะส่วนต่าง</p><label style={{display:"block",fontSize:12,fontWeight:700,color:POS.navy,marginBottom:6}}>จำนวนเมล็ดที่ใช้แลก</label><input className="loy-field" type="number" min="1" step="1" value={goalInput} onChange={(e)=>setGoalInput(e.target.value)} inputMode="numeric"/><label style={{display:"block",fontSize:12,fontWeight:700,color:POS.navy,margin:"12px 0 6px"}}>มูลค่ารางวัล (บาท)</label><input className="loy-field" type="number" min="1" max="10000" step="0.01" value={rewardValueInput} onChange={(e)=>setRewardValueInput(e.target.value)} inputMode="decimal"/><div style={{marginTop:8,padding:"8px 10px",borderRadius:9,background:"var(--cream-2)",color:POS.gray,fontSize:11.5}}>ตัวอย่าง: รางวัล ฿{money(Number(rewardValueInput)||60)} · เมนู ฿70 ลูกค้าชำระ ฿{money(Math.max(0,70-(Number(rewardValueInput)||60)))}<br/><b>หลังบันทึกจะมีลูกค้าพร้อมแลก {previewEligibleCount} คน</b></div><button className="cbtn cbtn-accent" style={{width:"100%",marginTop:14}} onClick={saveGoal}>บันทึกการตั้งค่า</button></div></div>}
 
       {addOpen && <div className="loy-modal-backdrop" onClick={()=>setAddOpen(false)}><div className="loy-modal" role="dialog" aria-modal="true" aria-label="เพิ่มลูกค้า" onClick={(e)=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><h3 style={{margin:0,color:POS.navy}}>เพิ่มลูกค้า</h3><button className="cbtn" style={{width:32,height:32,padding:0}} onClick={()=>setAddOpen(false)}><Icon name="x"/></button></div><label style={{display:"block",fontSize:12,fontWeight:700,color:POS.navy,marginBottom:6}}>ชื่อลูกค้า</label><input className="loy-field" value={newName} onChange={(e)=>setNewName(e.target.value)} placeholder="ไม่บังคับ"/><label style={{display:"block",fontSize:12,fontWeight:700,color:POS.navy,margin:"12px 0 6px"}}>เบอร์โทรศัพท์</label><input className="loy-field" value={newPhone} onChange={(e)=>setNewPhone(e.target.value)} inputMode="tel" placeholder="0xx-xxx-xxxx"/>{addError&&<p style={{fontSize:12,color:"var(--danger)",margin:"8px 0 0"}}>{addError}</p>}<button className="cbtn cbtn-accent" disabled={adding} style={{width:"100%",marginTop:14,opacity:adding?.65:1}} onClick={submitNewCustomer}>{adding?"กำลังเพิ่ม...":"เพิ่มลูกค้า"}</button></div></div>}
 
@@ -2986,13 +3338,17 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, adjustCustomerBeans,
 }
 
 // Drawer โปรไฟล์ลูกค้า — เก็บข้อมูลสำคัญและ audit trail ไว้ในหน้าเดียวโดยไม่พาผู้ใช้หลุดจากตาราง CRM
-function LoyaltyDetailDrawer({ customer, orders, loyaltyBeanGoal, onResetPasscode, showToast, onClose, onAdjust }) {
+function LoyaltyDetailDrawer({ customer, orders, loyaltyBeanGoal, onResetPasscode, onCancelPass, showToast, onClose, onAdjust }) {
   useEscape(onClose);
   const [resetPassId, setResetPassId] = useState(null);
   const [newPasscode, setNewPasscode] = useState("");
   const [confirmPasscode, setConfirmPasscode] = useState("");
   const [passcodeError, setPasscodeError] = useState("");
   const [resettingPasscode, setResettingPasscode] = useState(false);
+  const [cancelPassId, setCancelPassId] = useState(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelError, setCancelError] = useState("");
+  const [cancellingPass, setCancellingPass] = useState(false);
   const normalizedPhone = normalizeThaiPhone(customer.phone);
   const last9 = normalizedPhone.slice(-9);
   const matches = useMemo(() => (orders || [])
@@ -3033,6 +3389,22 @@ function LoyaltyDetailDrawer({ customer, orders, loyaltyBeanGoal, onResetPasscod
     }
   }
 
+  async function submitPassCancellation(passId) {
+    setCancelError("");
+    if (!cancelReason.trim()) { setCancelError("กรุณาระบุเหตุผลในการยกเลิก Pass"); return; }
+    setCancellingPass(true);
+    try {
+      await onCancelPass(normalizedPhone, passId, cancelReason);
+      setCancelPassId(null);
+      setCancelReason("");
+      showToast("ยกเลิก Coffee Pass แล้ว");
+    } catch (error) {
+      setCancelError(error.message || "ยกเลิก Coffee Pass ไม่สำเร็จ");
+    } finally {
+      setCancellingPass(false);
+    }
+  }
+
   return (
     <div className="loy-drawer-backdrop" onClick={onClose}>
       <style>{`
@@ -3045,7 +3417,7 @@ function LoyaltyDetailDrawer({ customer, orders, loyaltyBeanGoal, onResetPasscod
         .loy-profile-stat { padding:11px; border:1px solid ${POS.border}; border-radius:12px; background:var(--cream-2); }
         .loy-timeline { position:relative; display:flex; flex-direction:column; gap:10px; }
         .loy-timeline-item { position:relative; margin-left:9px; padding:11px 12px 11px 17px; border:1px solid ${POS.border}; border-radius:12px; background:var(--surface); }
-        .loy-timeline-item:before { content:""; position:absolute; left:-14px; top:17px; width:8px; height:8px; border-radius:50%; background:#2563EB; border:3px solid #DBEAFE; }
+        .loy-timeline-item:before { content:""; position:absolute; left:-14px; top:17px; width:8px; height:8px; border-radius:50%; background:#00A3E0; border:3px solid #D9F3FC; }
         @keyframes loyDrawerIn { from { transform:translateX(24px); opacity:.5; } to { transform:translateX(0); opacity:1; } }
         @media(max-width:560px){ .loy-drawer{width:100%;} .loy-drawer-head,.loy-drawer-body{padding-left:16px;padding-right:16px;} .loy-drawer-foot{padding:12px 16px;} }
       `}</style>
@@ -3068,7 +3440,7 @@ function LoyaltyDetailDrawer({ customer, orders, loyaltyBeanGoal, onResetPasscod
               <div><div style={{ color:POS.gray, fontSize:11.5, fontWeight:700 }}>เมล็ดพร้อมใช้</div><div style={{ marginTop:2, color:POS.navy, fontSize:25, fontWeight:700 }}>{beans} <span style={{ fontSize:12, fontWeight:600, color:POS.gray }}>/ {loyaltyBeanGoal} เมล็ด</span></div></div>
               <span style={{ fontSize:11.5, fontWeight:700, color:beans >= loyaltyBeanGoal ? "#166534" : "#1D4ED8" }}>{beans >= loyaltyBeanGoal ? "พร้อมแลกรางวัล" : `เหลืออีก ${Math.max(0, loyaltyBeanGoal - beans)}`}</span>
             </div>
-            <div className="loy-progress" style={{ marginTop:10 }}><span style={{ width:`${progress}%`, background:beans >= loyaltyBeanGoal ? "#16A34A" : "#2563EB" }} /></div>
+            <div className="loy-progress" style={{ marginTop:10 }}><span style={{ width:`${progress}%`, background:beans >= loyaltyBeanGoal ? "#16A34A" : POS.primary }} /></div>
             <div style={{ marginTop:9, color:POS.gray, fontSize:11.5 }}>{nextTier ? `อีก ${Math.max(0, nextTier.min - lifetimeBeans)} เมล็ด ถึงระดับ ${nextTier.label}` : "ถึงระดับสมาชิกสูงสุดแล้ว"}</div>
             {loyaltyDebt>0&&<div style={{marginTop:9,padding:"8px 10px",borderRadius:9,background:"var(--warning-light)",color:"var(--warning-text)",fontSize:11.5}}>มียอดรอหัก {loyaltyDebt} เมล็ด จากออเดอร์ที่ย้ายออกจากสถานะเสร็จหลังใช้เมล็ดไปแล้ว</div>}
           </section>
@@ -3094,7 +3466,15 @@ function LoyaltyDetailDrawer({ customer, orders, loyaltyBeanGoal, onResetPasscod
                   <div><b style={{ display:"block", color:POS.navy, fontSize:12.5 }}>{pass.packageName || "Coffee Pass"}</b><div style={{ marginTop:3, color:POS.gray, fontSize:10.5 }}>หมดอายุ {pass.expiresAt ? new Date(Number(pass.expiresAt)).toLocaleDateString("th-TH", { day:"numeric", month:"short", year:"numeric" }) : "-"}</div></div>
                   <div style={{ textAlign:"right" }}><b style={{ color:active ? "var(--sage-dark)" : POS.gray, fontSize:13 }}>{Number(pass.remainingUses) || 0}/{Number(pass.totalUses) || 0} สิทธิ์</b><div style={{ marginTop:2, color:active ? "#15803D" : POS.gray, fontSize:10, fontWeight:700 }}>{active ? "ใช้งานได้" : expired ? "หมดอายุ" : exhausted ? "ใช้ครบแล้ว" : "ยกเลิก"}</div></div>
                 </div>
-                {!editing ? <button type="button" className="cbtn" style={{ width:"100%", marginTop:9, fontSize:11.5 }} onClick={() => { setResetPassId(pass.id); setNewPasscode(""); setConfirmPasscode(""); setPasscodeError(""); }}>ตั้ง Passcode ใหม่</button> : <div style={{ marginTop:9, paddingTop:9, borderTop:`1px solid ${POS.border}` }}>
+                {active && !editing && cancelPassId !== pass.id && <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:7, marginTop:9 }}><button type="button" className="cbtn" style={{ fontSize:11.5 }} onClick={() => { setResetPassId(pass.id); setNewPasscode(""); setConfirmPasscode(""); setPasscodeError(""); }}>ตั้ง Passcode ใหม่</button><button type="button" className="cbtn cbtn-danger" style={{ fontSize:11.5 }} onClick={() => { setCancelPassId(pass.id); setCancelReason(""); setCancelError(""); }}>ยกเลิก Pass</button></div>}
+                {active && cancelPassId === pass.id && <div style={{ marginTop:9, paddingTop:9, borderTop:`1px solid ${POS.border}` }}>
+                  <div style={{ color:"var(--danger)", fontSize:11.5, fontWeight:700 }}>ยืนยันยกเลิก Pass นี้?</div>
+                  <div style={{ marginTop:3, color:POS.gray, fontSize:10.5, lineHeight:1.45 }}>สิทธิ์คงเหลือจะใช้ไม่ได้ทันที ระบบไม่คืนเงินหรือสร้างรายการบัญชีคืนให้อัตโนมัติ</div>
+                  <input className="loy-field" style={{ marginTop:7 }} value={cancelReason} onChange={(event)=>setCancelReason(event.target.value)} placeholder="เหตุผลในการยกเลิก *" />
+                  {cancelError && <div style={{ marginTop:6, color:"var(--danger)", fontSize:10.5 }}>{cancelError}</div>}
+                  <div style={{ display:"flex", gap:7, marginTop:8 }}><button type="button" className="cbtn" style={{ flex:1 }} disabled={cancellingPass} onClick={()=>setCancelPassId(null)}>ไม่ยกเลิก</button><button type="button" className="cbtn cbtn-danger" style={{ flex:1 }} disabled={cancellingPass} onClick={()=>submitPassCancellation(pass.id)}>{cancellingPass ? "กำลังยกเลิก..." : "ยืนยันยกเลิก"}</button></div>
+                </div>}
+                {active && editing && <div style={{ marginTop:9, paddingTop:9, borderTop:`1px solid ${POS.border}` }}>
                   <div style={{ color:POS.gray, fontSize:10.5, marginBottom:6 }}>แอดมินดูรหัสเดิมไม่ได้ สามารถกำหนดรหัสใหม่ให้ลูกค้าได้เท่านั้น</div>
                   <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:7 }}>
                     <input className="loy-field" style={{ textAlign:"center", letterSpacing:".18em" }} type="password" inputMode="numeric" maxLength={6} value={newPasscode} onChange={(event)=>setNewPasscode(event.target.value.replace(/\D/g, "").slice(0,6))} placeholder="รหัสใหม่" />
@@ -3142,23 +3522,23 @@ function LoyaltyDetailDrawer({ customer, orders, loyaltyBeanGoal, onResetPasscod
 // เวิร์กโฟลว์การ์ด 4 สถานะหลัก (คอลัมน์ Kanban) — "ยกเลิก" เป็นสถานะพิเศษนอกบอร์ด
 const KANBAN_COLUMNS = [
   { id: "pending", label: "รอยืนยัน", icon: "receipt" },
-  { id: "preparing", label: "กำลังดำเนินการ", icon: "chef-hat" },
-  { id: "ready", label: "พร้อมเสิร์ฟ", icon: "bell" },
-  { id: "done", label: "เสร็จ", icon: "circle-check" },
+  { id: "preparing", label: "ยืนยันคำสั่งซื้อ", icon: "checks" },
+  { id: "ready", label: "กำลังเตรียม", icon: "chef-hat" },
+  { id: "done", label: "สำเร็จ", icon: "circle-check" },
 ];
-const ORDER_STATUS_LABEL = { pending: "รอยืนยัน", paid: "จ่ายแล้ว", preparing: "กำลังดำเนินการ", ready: "พร้อมเสิร์ฟ", done: "เสร็จ", cancelled: "ยกเลิก" };
+const ORDER_STATUS_LABEL = { pending: "รอยืนยัน", paid: "ยืนยันคำสั่งซื้อ", preparing: "ยืนยันคำสั่งซื้อ", ready: "กำลังเตรียม", done: "สำเร็จ", cancelled: "ยกเลิก" };
 // สีนำ ข้อความรอง — ให้บาริสต้ามองจากระยะไกลแล้วรู้สถานะทันทีจากสี ไม่ต้องเพ่งอ่านตัวหนังสือ
 const STATUS_COLORS = {
   pending: { dot: "#F59E0B", bg: "rgba(245,158,11,0.16)", color: "var(--warning-text)" },
   paid: { dot: "#16A34A", bg: "rgba(22,163,74,0.16)", color: "var(--success-dark)" },
-  preparing: { dot: "#2563EB", bg: "rgba(37,99,235,0.16)", color: "var(--primary-text)" },
-  ready: { dot: "#7C3AED", bg: "rgba(124,58,237,0.16)", color: "#6D28D9" },
+  preparing: { dot: "#16A34A", bg: "rgba(22,163,74,0.16)", color: "var(--success-dark)" },
+  ready: { dot: "#00A3E0", bg: "rgba(0,163,224,0.16)", color: "var(--primary-text)" },
   done: { dot: "#16A34A", bg: "#16A34A", color: "#fff", solid: true },
   cancelled: { dot: "#DC2626", bg: "rgba(220,38,38,0.16)", color: "var(--danger)" },
 };
-const PAYMENT_METHOD_LABEL = { cash: "เงินสด", promptpay: "พร้อมเพย์", thaihelpthai: "ไทยช่วยไทย", "coffee-pass": "Coffee Pass" };
+const PAYMENT_METHOD_LABEL = { cash: "เงินสด", promptpay: "พร้อมเพย์", thaihelpthai: "ไทยช่วยไทย", "coffee-pass": "Coffee Pass", reward: "รางวัลสมาชิก" };
 // วิธีชำระที่จ่ายหน้าร้านโดยตรง ไม่มีสลิปให้ตรวจสอบ — พฤติกรรมเหมือนเงินสดทุกอย่าง
-const CASH_LIKE_PAYMENT_METHODS = new Set(["cash", "thaihelpthai", "coffee-pass"]);
+const CASH_LIKE_PAYMENT_METHODS = new Set(["cash", "thaihelpthai", "coffee-pass", "reward"]);
 
 function StatusBadge({ status, big }) {
   const c = STATUS_COLORS[status] || { dot: "#8B98A5", bg: "var(--cream-2)", color: "var(--espresso-3)" };
@@ -3232,7 +3612,7 @@ function OrderItemLines({ items, note, compact, onEditItem }) {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: compact ? 5 : 10 }}>
             <span style={{ fontSize: compact ? 11.5 : 16, fontWeight: 700, color: "var(--espresso-5)", lineHeight: 1.25 }}>
               {i.name} <span style={{ color: "var(--sage-dark)" }}>x{i.qty}</span>
-              {i.freeUnit && <span style={{ marginLeft: 5, fontSize: compact ? 9.5 : 11, fontWeight: 700, color: "var(--warning-text)", background: "var(--warning-light)", borderRadius: 999, padding: "1px 7px" }}>🫘 ฟรี</span>}
+              {i.freeUnit && <span style={{ marginLeft: 5, fontSize: compact ? 9.5 : 11, fontWeight: 700, color: "var(--warning-text)", background: "var(--warning-light)", borderRadius: 999, padding: "1px 7px" }}>🫘 ลด ฿{money(orderItemRewardDiscount(i))}</span>}
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
               {onEditItem && !compact && (
@@ -3297,6 +3677,7 @@ function buildOrderStickerData(order) {
         cupNumber,
         totalCups,
         freeUnit: item.freeUnit === true,
+        rewardDiscount: orderItemRewardDiscount(item),
       });
     }
   }
@@ -3321,7 +3702,7 @@ function openOrderStickerPrint(orderOrOrders, shopName) {
       const stickerIndex = pageIndex * 30 + slotIndex - (startPosition - 1);
       const sticker = stickers[stickerIndex];
       if (!sticker) return '<div class="slot-wrap"><div class="label label--blank"></div></div>';
-      const details = [sticker.options, sticker.freeUnit ? "แลกรางวัลฟรี" : ""].filter(Boolean).join(" · ");
+      const details = [sticker.options, sticker.freeUnit ? `รางวัลลด ฿${money(sticker.rewardDiscount)}` : ""].filter(Boolean).join(" · ");
       return `
         <div class="slot-wrap">
           <article class="label">
@@ -3401,9 +3782,9 @@ function openOrderStickerPrint(orderOrOrders, shopName) {
   return true;
 }
 
-const KANBAN_NEXT_LABEL = { pending: "ยืนยันรับเงินแล้ว", preparing: "พร้อมเสิร์ฟ", ready: "เสร็จ / ลูกค้ารับแล้ว" };
+const KANBAN_NEXT_LABEL = { pending: "ยืนยันคำสั่งซื้อ", preparing: "เริ่มเตรียมออเดอร์", ready: "ทำรายการสำเร็จ" };
 
-function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, revokeLoyaltyBeans, showToast, data, ingredientsById }) {
+function OrdersPanel({ uid, orders, commitOnlineOrder, cancelOrder, awardLoyaltyBeans, revokeLoyaltyBeans, showToast, data, ingredientsById }) {
   const prevStatusRef = useRef({});
   const [justMovedIds, setJustMovedIds] = useState(new Set());
   const [dragId, setDragId] = useState(null);
@@ -3411,13 +3792,24 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, 
   const [overCol, setOverCol] = useState(null);
   const [editingItem, setEditingItem] = useState(null);
   const [editingPickupDate, setEditingPickupDate] = useState(null);
+  const [cancelFor, setCancelFor] = useState(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [query, setQuery] = useState("");
   const [selectedOrderIds, setSelectedOrderIds] = useState(() => new Set());
+  const [mobileColumn, setMobileColumn] = useState("pending");
   const dragInfoRef = useRef(null);
   // จอแคบ (เช่น iPad) ให้ทั้ง 4 คอลัมน์อัดพอดีจอโดยไม่ต้องเลื่อนแนวนอน แทนที่จะปล่อยให้ล้นแล้วสกอลล์
   const [compact, setCompact] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 1080px)").matches);
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 1080px)");
     const handler = (e) => setCompact(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 720px)").matches);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 720px)");
+    const handler = (event) => setNarrow(event.matches);
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
   }, []);
@@ -3550,16 +3942,12 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, 
       showToast(`ยืนยันออเดอร์ ${order.customerName || order.customerPhone} แล้ว`);
       return;
     }
-    update(ref(db, `orders/${uid}/${order.id}`), { status: "preparing", saleRecorded: true }).catch((err) => showToast("อัปเดตไม่สำเร็จ: " + err.message));
-    for (const item of order.items) {
-      const upcharge = (item.options || []).reduce((s, o) => s + (o.priceDelta || 0), 0);
-      const itemMenu = data.menus.find((m) => m.id === item.menuId);
-      const substitutions = itemMenu ? resolveIngredientAdjustmentsFromOptions(itemMenu, item.options, ingredientsById) : {};
-      // แลกเมล็ดฟรี 1 แก้ว — หักรายได้ที่บันทึกออกเท่าราคาแก้วนั้น (1 หน่วย) ไม่งั้นยอดขาย/กำไรจะเพี้ยนสูงเกินจริงทั้งที่ลูกค้าไม่ได้จ่าย
-      const promoDiscount = item.freeUnit && itemMenu ? itemMenu.priceStore + upcharge : 0;
-      recordSale(item.menuId, item.qty, "online", { upcharge, unitPriceOverride: Number(item.unitPrice), substitutions, promoDiscount, milkLabel: (item.options || []).map((o) => o.label).join(", ") || null, orderId: order.id, paymentMethod: order.paymentMethod });
+    try {
+      await commitOnlineOrder(order);
+      showToast(`ยืนยันออเดอร์ ${order.customerName || order.customerPhone} แล้ว บันทึกยอดขาย/สต็อก/บัญชีครบแล้ว`);
+    } catch (error) {
+      showToast("ยืนยันออเดอร์ไม่สำเร็จ ข้อมูลยังไม่ถูกตัด: " + error.message);
     }
-    showToast(`ยืนยันออเดอร์ ${order.customerName || order.customerPhone} แล้ว บันทึกยอดขายให้อัตโนมัติ`);
   }
 
   function advance(order) {
@@ -3634,7 +4022,9 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, 
       // ชั่วคราวจาก race condition ของสลิปยืนยันอัตโนมัติ ไม่ให้การ์ดหายไปจากบอร์ด
       const col = o.status === "paid" ? "preparing" : o.status;
       if (col === "done" && todayStr(new Date(o.completedAt || o.createdAt)) !== today) continue;
-      if (map[col]) map[col].push(o);
+      const normalizedQuery = query.trim().toLowerCase();
+      const searchable = `${o.id} ${o.customerName || ""} ${o.customerPhone || ""} ${(o.items || []).map((item)=>item.name).join(" ")}`.toLowerCase();
+      if (map[col] && (!normalizedQuery || searchable.includes(normalizedQuery))) map[col].push(o);
     }
     for (const k of Object.keys(map)) {
       map[k].sort((a, b) => {
@@ -3644,7 +4034,18 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, 
       });
     }
     return map;
-  }, [orders, today]);
+  }, [orders, today, query]);
+
+  async function confirmCancellation() {
+    if (!cancelFor || cancelBusy) return;
+    setCancelBusy(true);
+    try {
+      await cancelOrder(cancelFor);
+      setCancelFor(null);
+    } finally {
+      setCancelBusy(false);
+    }
+  }
 
   const cancelledToday = orders
     .filter((o) => o.status === "cancelled" && todayStr(new Date(o.cancelledAt || o.createdAt)) === today)
@@ -3705,6 +4106,10 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, 
   return (
     <div>
       <SectionTitle icon="layout-kanban" text={compact ? "บอร์ดออเดอร์ — เลื่อนบนการ์ดได้ · ลากที่ปุ่มจับเพื่อย้ายสถานะ" : "บอร์ดออเดอร์ — ลากการ์ดข้ามคอลัมน์เพื่ออัปเดตสถานะ"} />
+      <div style={{ position:"relative", marginBottom:10 }}><Icon name="search" size={15} style={{ position:"absolute", left:12, top:12, color:"var(--espresso-2)" }}/><input className="cfield" style={{ height:40, paddingLeft:36 }} value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="ค้นหาเลขออเดอร์ ชื่อ เบอร์โทร หรือเมนู..." /></div>
+      {narrow && <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:5, marginBottom:10 }}>
+        {KANBAN_COLUMNS.map((column) => <button key={column.id} type="button" className={`cbtn${mobileColumn===column.id?" cbtn-accent":""}`} onClick={()=>setMobileColumn(column.id)} style={{ padding:"8px 4px", fontSize:10.5, minWidth:0 }}><span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{column.label}</span><b style={{ marginLeft:3 }}>{columns[column.id].length}</b></button>)}
+      </div>}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap",
         margin: "0 0 12px", padding: "9px 12px", border: "1px solid var(--line)", borderRadius: 12, background: "rgba(255,255,255,.55)",
@@ -3734,10 +4139,10 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, 
       </div>
       <div style={{
         display: "grid",
-        gridTemplateColumns: compact ? "repeat(4, minmax(150px, 1fr))" : "repeat(4, minmax(260px, 1fr))",
+        gridTemplateColumns: narrow ? "minmax(0, 1fr)" : compact ? "repeat(4, minmax(150px, 1fr))" : "repeat(4, minmax(260px, 1fr))",
         gap: compact ? 7 : 14, overflowX: "auto", paddingBottom: 8, marginBottom: 26,
       }}>
-        {KANBAN_COLUMNS.map((col) => {
+        {KANBAN_COLUMNS.filter((col)=>!narrow||col.id===mobileColumn).map((col) => {
           const list = columns[col.id];
           const allInColumnSelected = list.length > 0 && list.every((order) => selectedOrderIds.has(order.id));
           const isOver = overCol === col.id && dragId;
@@ -3880,7 +4285,7 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, 
                         {(!o.coffeePass || col.id === "pending") && <button className="cbtn cbtn-accent" style={{ flex: 1, fontSize: compact ? 10.5 : 12.5, padding: compact ? "6px 4px" : "8px 10px" }} onClick={() => advance(o)}>{compact ? "→ ถัดไป" : KANBAN_NEXT_LABEL[col.id]}</button>}
                         <button
                           className="cbtn cbtn-danger" style={{ padding: compact ? "6px 6px" : "8px 9px" }}
-                          onClick={() => cancelOrder(o)}
+                          onClick={() => setCancelFor(o)}
                           title={o.saleRecorded ? "ยกเลิกออเดอร์ (คืนสต็อก/ตัดยอดขายที่บันทึกไปแล้วออกให้)" : "ยกเลิกออเดอร์"}
                         ><Icon name="x" size={13} /></button>
                         </>
@@ -3948,6 +4353,7 @@ function OrdersPanel({ uid, orders, recordSale, cancelOrder, awardLoyaltyBeans, 
           onSave={(newDate) => savePickupDate(editingPickupDate, newDate)}
         />
       )}
+      {cancelFor && <InvConfirmDialog title="ยกเลิกออเดอร์นี้?" message={`${cancelFor.customerName || cancelFor.customerPhone || "ออเดอร์"} · ฿${money(cancelFor.total)}${cancelFor.saleRecorded ? " ระบบจะคืนสต็อก ตัดยอดขาย และสร้างรายการกลับยอดบัญชีให้อัตโนมัติ" : " ออเดอร์นี้ยังไม่ตัดสต็อกหรือบันทึกยอดขาย"}`} confirmLabel={cancelBusy ? "กำลังยกเลิก..." : "ยืนยันยกเลิกออเดอร์"} onConfirm={confirmCancellation} onCancel={() => !cancelBusy && setCancelFor(null)} />}
     </div>
   );
 }
@@ -4112,6 +4518,7 @@ function MenuCardImage({ src, available, productType }) {
 // เมนูการ์ดแบบ Shopify-style: รูปเต็มความกว้างด้านบน สถานะซ้อนมุม, ชื่อ/ราคา/มาร์จิ้นตรงกลาง, action ด้านล่างไม่เกิน 3 ปุ่ม (ที่เหลืออยู่ในเมนู ⋮)
 function MenuCard({ menu, totalCost, margin, stockFlag, selected, selectMode, onToggleSelect, onOpenOverview, onOpenRecipe, moreItems }) {
   const typeMeta = productTypeMeta(menu);
+  const tag = normalizeMenuTag(menu);
   return (
     <div className="mnu-card" style={{ opacity: menu.available ? 1 : .72 }}>
       <div className="mnu-card-media" style={{ position: "relative" }}>
@@ -4130,9 +4537,15 @@ function MenuCard({ menu, totalCost, margin, stockFlag, selected, selectMode, on
             <Icon name="alert-triangle" size={11} /> {stockFlag === "out" ? "วัตถุดิบหมด" : "วัตถุดิบใกล้หมด"}
           </span>
         )}
+        {tag.tagLabel && (
+          <span style={{ position: "absolute", bottom: 10, right: 10, maxWidth: "calc(100% - 90px)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", padding: "4px 9px", borderRadius: 999, background: tag.tagColor, color: tag.tagTextColor, boxShadow: "0 4px 12px rgba(0,0,0,.16)", fontSize: 10.5, fontWeight: 800 }}>
+            {tag.tagLabel}
+          </span>
+        )}
       </div>
       <div style={{ padding: "14px 16px 16px", display: "flex", flexDirection: "column", flex: 1 }}>
         <div style={{ fontSize: 12, color: "#9C9690", letterSpacing: ".02em", marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><Icon name={typeMeta.icon} size={12} style={{ marginRight: 4, verticalAlign: -2 }} />{typeMeta.label} · {menu.category}</div>
+        {menu.recommended && <div style={{ display: "inline-flex", alignItems: "center", alignSelf: "flex-start", gap: 4, marginBottom: 5, padding: "3px 8px", borderRadius: 999, color: POS.primaryDark, background: POS.primarySoft, fontSize: 10.5, fontWeight: 800 }}><Icon name="star" size={11} /> เมนูแนะนำ</div>}
         <div style={{ fontSize: 16.5, fontWeight: 700, color: POS.navy, lineHeight: 1.25, marginBottom: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{menu.name}</div>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4, gap: 8 }}>
           <span style={{ fontSize: 17, fontWeight: 700, color: "var(--espresso-4)" }}>฿{money(menu.priceStore)}</span>
@@ -4344,12 +4757,14 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
 
   function newMenu() {
     const defaultPackaging = (data.settings.defaultPackagingLines || []).map((l) => ({ ...l }));
-    setInspector({ mode: "add", tab: "overview", menu: { id: null, name: "", productType: "drink", priceStore: 0, priceDelivery: 0, ingredients: defaultPackaging, optionGroupIds: [], available: true, category: categoryFilter !== "all" ? categoryFilter : "กาแฟ", imageUrl: "" } });
+    setInspector({ mode: "add", tab: "overview", menu: { id: null, name: "", description: "", productType: "drink", priceStore: 0, priceDelivery: 0, ingredients: defaultPackaging, optionGroupIds: [], available: true, category: categoryFilter !== "all" ? categoryFilter : "กาแฟ", imageUrl: "", recommended: false, ...normalizeMenuTag({}) } });
   }
 
   function saveMenu(menu) {
     const now = new Date().toISOString();
-    menu = { ...menu, productType: productTypeOf(menu), category: menu.category.trim() || "อื่นๆ" };
+    const requestedCategory = menu.category.trim() || "อื่นๆ";
+    const canonicalCategory = categories.find((category)=>category.toLocaleLowerCase("th") === requestedCategory.toLocaleLowerCase("th")) || requestedCategory;
+    menu = { ...menu, name:menu.name.trim(), description: String(menu.description || "").trim(), productType: productTypeOf(menu), category: canonicalCategory, recommended: menu.recommended === true, ...normalizeMenuTag(menu) };
     updateData((next) => {
       if (menu.id) {
         const idx = next.menus.findIndex((m) => m.id === menu.id);
@@ -4370,10 +4785,18 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
   }
 
   function deleteMenu(id) {
-    updateData((next) => { next.menus = next.menus.filter((m) => m.id !== id); });
+    updateData((next) => {
+      next.menus = next.menus.filter((m) => m.id !== id);
+      next.promotions = (next.promotions || []).map((promotion) => {
+        const menuIds = (promotion.menuIds || []).filter((menuId)=>menuId !== id);
+        const minimum = promotion.type === "bundle" ? 2 : Math.max(1, Number(promotion.chooseCount) || 1);
+        return { ...promotion, menuIds, active:menuIds.length < minimum ? false : promotion.active };
+      });
+      if (next.settings.coffeePass?.menuIds?.length) next.settings.coffeePass.menuIds = next.settings.coffeePass.menuIds.filter((menuId)=>menuId !== id);
+    });
     setConfirmDelete(null);
     setInspector(null);
-    showToast("ลบเมนูแล้ว");
+    showToast("ลบเมนูแล้ว และล้างการอ้างอิงจาก Promotion/Coffee Pass ให้แล้ว");
   }
 
   function duplicateMenu(menu) {
@@ -4456,7 +4879,7 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
     if (query.trim()) {
       const q = query.trim().toLowerCase();
       const ingredientNames = menu.ingredients.map((l) => ingredientsById[l.ingredientId]?.name || "").join(" ");
-      const hay = `${menu.name} ${menu.category} ${ingredientNames}`.toLowerCase();
+      const hay = `${menu.name} ${menu.category} ${menu.tagLabel || ""} ${menu.recommended ? "เมนูแนะนำ recommended" : ""} ${ingredientNames}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     if (statusFilter === "available" && !menu.available) return false;
@@ -4527,7 +4950,7 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
         .mnu-search input:focus { border-color: ${POS.primary}; box-shadow: 0 0 0 3px ${POS.primarySoft}; }
         .mnu-select { height: 44px; border: 1px solid ${POS.border}; border-radius: 12px; background: var(--surface); padding: 0 32px 0 14px; font-size: 13.5px; font-weight: 600; color: var(--espresso-4); cursor: pointer; outline: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; }
         .mnu-select:focus { border-color: ${POS.primary}; box-shadow: 0 0 0 3px ${POS.primarySoft}; }
-        .mnu-btn-primary { display: inline-flex; align-items: center; gap: 7px; height: 44px; padding: 0 18px; border: none; border-radius: 12px; background: ${POS.primary}; color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 6px 18px rgba(216,92,8,.28); transition: background 160ms; }
+        .mnu-btn-primary { display: inline-flex; align-items: center; gap: 7px; height: 44px; padding: 0 18px; border: none; border-radius: 12px; background: ${POS.primary}; color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 6px 18px rgba(0,119,168,.24); transition: background 160ms; }
         .mnu-btn-primary:hover { background: ${POS.primaryDark}; }
         .mnu-btn-primary:disabled { opacity: .55; cursor: not-allowed; }
         .mnu-btn-ghost-sel { height: 44px; padding: 0 16px; border: 1px solid ${POS.border}; border-radius: 12px; background: var(--surface); color: var(--espresso-4); font-size: 13.5px; font-weight: 600; cursor: pointer; }
@@ -4599,8 +5022,14 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
         .mnu-price-breakdown { display: flex; justify-content: space-between; font-size: 11.5px; color: #9C9690; margin-top: 8px; }
         .mnu-platform-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--cream-2); border-radius: 12px; padding: 10px 12px; }
         .mnu-option-row { display: flex; align-items: center; gap: 10px; padding: 10px 4px; border-bottom: 1px solid #F5F3EF; }
+        .mnu-option-row.selected { background: ${POS.primarySoft}; border-radius: 11px; padding-inline: 10px; margin-bottom: 4px; border-bottom-color: transparent; }
         .mnu-option-row:last-child { border-bottom: none; }
         .mnu-required-chip { font-size: 10px; font-weight: 700; color: var(--warning-text); background: var(--warning-light); border-radius: 999px; padding: 2px 8px; }
+        .mnu-option-order { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+        .mnu-option-order > span { color: ${POS.primary}; font-size: 10.5px; font-weight: 700; white-space: nowrap; }
+        .mnu-option-order button { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; color: ${POS.primary}; border: 1px solid ${POS.border}; border-radius: 8px; background: var(--surface); cursor: pointer; }
+        .mnu-option-order button:disabled { opacity: .32; cursor: not-allowed; }
+        @media (max-width: 480px) { .mnu-option-row { flex-wrap: wrap; }.mnu-option-order { width: 100%; padding-left: 46px; }.mnu-option-order > span { margin-right: auto; } }
         .inv-icon-btn { width: 36px; height: 36px; border: 1px solid ${POS.border}; border-radius: 9px; background: var(--surface); color: #6B7280; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
         .inv-icon-btn:hover { background: var(--cream-2); color: var(--espresso-4); }
         .inv-icon-btn:disabled { opacity: .4; cursor: not-allowed; }
@@ -4763,7 +5192,8 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
 function MenuInspector({ mode, initial, initialTab, ingredients, ingredientsById, optionGroups, categories, platforms, overheadPerCup, onSave, onClose, onDelete }) {
   const [form, setForm] = useState({
     ...initial, optionGroupIds: initial.optionGroupIds || [], available: initial.available ?? true,
-    category: initial.category || "", imageUrl: initial.imageUrl || "", productType: productTypeOf(initial),
+    category: initial.category || "", description: initial.description || "", imageUrl: initial.imageUrl || "", productType: productTypeOf(initial),
+    recommended: initial.recommended === true, ...normalizeMenuTag(initial),
   });
   const [tab, setTab] = useState(initialTab || "overview");
   const [imageError, setImageError] = useState(false);
@@ -4773,6 +5203,16 @@ function MenuInspector({ mode, initial, initialTab, ingredients, ingredientsById
     setForm((f) => {
       const has = f.optionGroupIds.includes(groupId);
       return { ...f, optionGroupIds: has ? f.optionGroupIds.filter((id) => id !== groupId) : [...f.optionGroupIds, groupId] };
+    });
+  }
+  function moveOptionGroup(groupId, delta) {
+    setForm((current) => {
+      const optionGroupIds = [...current.optionGroupIds];
+      const index = optionGroupIds.indexOf(groupId);
+      const target = index + delta;
+      if (index < 0 || target < 0 || target >= optionGroupIds.length) return current;
+      [optionGroupIds[index], optionGroupIds[target]] = [optionGroupIds[target], optionGroupIds[index]];
+      return { ...current, optionGroupIds };
     });
   }
   function addLine() { setForm((f) => ({ ...f, ingredients: [...f.ingredients, { ingredientId: ingredients[0]?.id, qty: 0 }] })); }
@@ -4792,7 +5232,18 @@ function MenuInspector({ mode, initial, initialTab, ingredients, ingredientsById
     });
   }
 
-  const canSave = form.name.trim() !== "";
+  const duplicateIngredientIds = form.ingredients.map((line)=>line.ingredientId).filter((id,index,all)=>id && all.indexOf(id)!==index);
+  const formErrors = [
+    !form.name.trim() ? "กรุณาใส่ชื่อเมนู" : "",
+    !form.category.trim() ? "กรุณาระบุหมวดหมู่" : "",
+    !Number.isFinite(Number(form.priceStore)) || Number(form.priceStore) < 0 ? "ราคาหน้าร้านต้องไม่ติดลบ" : "",
+    !Number.isFinite(Number(form.priceDelivery)) || Number(form.priceDelivery) < 0 ? "ราคาเดลิเวอรี่ต้องไม่ติดลบ" : "",
+    form.ingredients.some((line)=>!line.ingredientId || !Number.isFinite(Number(line.qty)) || Number(line.qty) < 0) ? "ตรวจวัตถุดิบและจำนวนในสูตรให้ครบ" : "",
+    duplicateIngredientIds.length ? "มีวัตถุดิบซ้ำในสูตร กรุณารวมเป็นบรรทัดเดียว" : "",
+    form.tagLabel && !/^#[0-9a-f]{6}$/i.test(form.tagColor) ? "สีพื้น Tag ต้องเป็นรหัสสีแบบ #00A3E0" : "",
+    form.tagLabel && !/^#[0-9a-f]{6}$/i.test(form.tagTextColor) ? "สีข้อความ Tag ต้องเป็นรหัสสีแบบ #FFFFFF" : "",
+  ].filter(Boolean);
+  const canSave = formErrors.length === 0;
   const { totalCost, margin, breakdown } = menuCostAndMargin(form, ingredientsById, overheadPerCup);
 
   const TABS = [
@@ -4830,12 +5281,13 @@ function MenuInspector({ mode, initial, initialTab, ingredients, ingredientsById
           {tab === "overview" && <MenuOverviewTab form={form} setForm={setForm} onProductTypeChange={changeProductType} categories={categories} imageError={imageError} setImageError={setImageError} totalCost={totalCost} margin={margin} />}
           {tab === "recipe" && <MenuRecipeTab form={form} ingredients={ingredients} updateLine={updateLine} addLine={addLine} removeLine={removeLine} ingredientsById={ingredientsById} />}
           {tab === "pricing" && <MenuPricingTab form={form} setForm={setForm} totalCost={totalCost} platforms={platforms} />}
-          {tab === "options" && <MenuOptionsTab form={form} optionGroups={optionGroups} toggleOptionGroup={toggleOptionGroup} />}
+          {tab === "options" && <MenuOptionsTab form={form} optionGroups={optionGroups} toggleOptionGroup={toggleOptionGroup} moveOptionGroup={moveOptionGroup} />}
         </div>
 
         <div className="mnu-insp-footer">
           {mode === "edit" && <button className="mnu-btn-danger-ghost" onClick={onDelete}><Icon name="trash" size={14} /> ลบเมนู</button>}
           <div style={{ flex: 1 }} />
+          {formErrors.length > 0 && <span title={formErrors.join(" · ")} style={{ color:"var(--danger)", fontSize:11.5, maxWidth:190 }}>{formErrors[0]}{formErrors.length>1?` (+${formErrors.length-1})`:""}</span>}
           <button className="inv-btn-ghost" onClick={onClose}>ยกเลิก</button>
           <button className="mnu-btn-primary" disabled={!canSave} onClick={() => onSave(form)}>{mode === "add" ? "บันทึกเมนู" : "บันทึกการแก้ไข"}</button>
         </div>
@@ -4873,6 +5325,19 @@ function MenuOverviewTab({ form, setForm, onProductTypeChange, categories, image
         <label style={lbl}>ชื่อเมนู</label>
         <input className="mnu-field" style={field} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={typeMeta.id === "food" ? "เช่น ขนมปังปิ้งเนยนม" : "เช่น Latte, Thai Tea"} />
       </div>
+      <div>
+        <label style={lbl}>คำอธิบายเมนู (ถ้ามี)</label>
+        <textarea
+          className="mnu-field"
+          value={form.description}
+          onChange={(e) => setForm({ ...form, description: e.target.value })}
+          maxLength={240}
+          rows={3}
+          placeholder="เช่น เอสเพรสโซเข้มข้น ผสมนมสด เนียนนุ่ม"
+          style={{ ...field, height: "auto", minHeight: 82, padding: "10px 12px", resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }}
+        />
+        <div style={{ marginTop: 4, textAlign: "right", color: "#9C9690", fontSize: 10.5 }}>{form.description.length}/240</div>
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         <div>
           <label style={lbl}>หมวดหมู่ (แสดงเป็นแท็บหน้าลูกค้า)</label>
@@ -4886,6 +5351,58 @@ function MenuOverviewTab({ form, setForm, onProductTypeChange, categories, image
             <span style={{ fontSize: 13, fontWeight: 600, color: form.available ? "#15803D" : "#B91C1C" }}>{form.available ? "เปิดขาย" : "ปิดขาย"}</span>
           </div>
         </div>
+      </div>
+      <div style={{ border: `1px solid ${POS.border}`, borderRadius: 16, padding: 14, background: "var(--cream-2)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: POS.navy }}>เมนูแนะนำ</div>
+            <div style={{ marginTop: 2, fontSize: 11, color: "#9C9690", lineHeight: 1.45 }}>แสดงเมนูนี้ซ้ำในหมวด “เมนูแนะนำ” หน้าลูกค้า</div>
+          </div>
+          <OptgToggle checked={form.recommended} onChange={(value) => setForm({ ...form, recommended: value })} color={POS.primary} />
+        </div>
+
+        <div style={{ height: 1, background: POS.border, margin: "14px 0" }} />
+        <label style={lbl}>Tag บนการ์ดเมนู</label>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(92px, 1fr))", gap: 7 }}>
+          {MENU_TAG_PRESETS.map((preset) => {
+            const selected = form.tagPreset === preset.id;
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                onClick={() => setForm({ ...form, tagPreset: preset.id, tagLabel: preset.label, tagColor: preset.color, tagTextColor: preset.textColor })}
+                style={{ minHeight: 40, borderRadius: 10, border: selected ? `1.5px solid ${POS.primary}` : `1px solid ${POS.border}`, background: selected ? POS.primarySoft : "var(--surface)", color: selected ? POS.primaryDark : "var(--espresso-4)", fontSize: 11.5, fontWeight: 700, padding: "7px 8px", cursor: "pointer" }}
+              >
+                {preset.id === "none" ? preset.name : <span style={{ display: "inline-block", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", padding: "3px 7px", borderRadius: 999, background: preset.color, color: preset.textColor, whiteSpace: "nowrap" }}>{preset.label}</span>}
+              </button>
+            );
+          })}
+        </div>
+
+        {form.tagPreset !== "none" && (
+          <div style={{ marginTop: 12 }}>
+            <label style={lbl}>ข้อความบน Tag</label>
+            <input className="mnu-field" style={field} maxLength={30} value={form.tagLabel} onChange={(event) => setForm({ ...form, tagLabel: event.target.value })} placeholder="เช่น มาใหม่, Summer 2026" />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
+              {[
+                ["สีพื้น", "tagColor", "#00A3E0"],
+                ["สีข้อความ", "tagTextColor", "#FFFFFF"],
+              ].map(([label, key, placeholder]) => (
+                <div key={key}>
+                  <label style={lbl}>{label}</label>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                    <input type="color" value={/^#[0-9a-f]{6}$/i.test(form[key]) ? form[key] : placeholder} onChange={(event) => setForm({ ...form, [key]: event.target.value.toUpperCase() })} aria-label={label} style={{ width: 42, height: 42, padding: 3, border: `1px solid ${POS.border}`, borderRadius: 10, background: "var(--surface)", cursor: "pointer", flexShrink: 0 }} />
+                    <input className="mnu-field" value={form[key]} maxLength={7} onChange={(event) => setForm({ ...form, [key]: event.target.value.toUpperCase() })} placeholder={placeholder} style={{ ...field, minWidth: 0 }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: "#9C9690" }}>
+              ตัวอย่าง
+              <span style={{ display: "inline-block", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", padding: "4px 9px", borderRadius: 999, background: validMenuTagColor(form.tagColor, "#00A3E0"), color: validMenuTagColor(form.tagTextColor, "#FFFFFF"), fontWeight: 800 }}>{form.tagLabel || "ข้อความ Tag"}</span>
+            </div>
+          </div>
+        )}
       </div>
       <div>
         <label style={lbl}>ลิงก์รูปเมนู (ถ้ามี)</label>
@@ -4997,18 +5514,25 @@ function MenuPricingTab({ form, setForm, totalCost, platforms }) {
   );
 }
 
-function MenuOptionsTab({ form, optionGroups, toggleOptionGroup }) {
+function MenuOptionsTab({ form, optionGroups, toggleOptionGroup, moveOptionGroup }) {
   if (optionGroups.length === 0) return <EmptyNote text='ยังไม่มีกลุ่มตัวเลือกให้เลือก (ตั้งค่าได้ในแท็บ "ตัวเลือกเสริม")' />;
+  const groupsById = new Map(optionGroups.map((group) => [group.id, group]));
+  const selectedGroups = form.optionGroupIds.map((id) => groupsById.get(id)).filter(Boolean);
+  const unselectedGroups = optionGroups.filter((group) => !form.optionGroupIds.includes(group.id));
+  const orderedGroups = [...selectedGroups, ...unselectedGroups];
   return (
     <div>
-      <p style={{ fontSize: 12, color: "#9C9690", margin: "0 0 8px", lineHeight: 1.5 }}>ตัวเลือกเสริมที่ลูกค้าจะเห็นตอนสั่งเมนูนี้</p>
-      {optionGroups.map((g) => (
-        <label key={g.id} className="mnu-option-row">
+      <p style={{ fontSize: 12, color: "#9C9690", margin: "0 0 8px", lineHeight: 1.5 }}>เปิดกลุ่มที่ต้องการ แล้วจัดลำดับด้วยลูกศร ลำดับนี้ใช้ทั้งหน้าร้านและหน้าสั่งของลูกค้า</p>
+      {orderedGroups.map((g) => {
+        const selectedIndex = form.optionGroupIds.indexOf(g.id);
+        const checked = selectedIndex >= 0;
+        return <div key={g.id} className={"mnu-option-row" + (checked ? " selected" : "")}>
           <OptgToggle checked={form.optionGroupIds.includes(g.id)} onChange={() => toggleOptionGroup(g.id)} color={POS.primary} />
           <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--espresso-4)", flex: 1 }}>{g.name}</span>
           {g.required && <span className="mnu-required-chip">บังคับเลือก</span>}
-        </label>
-      ))}
+          {checked && <div className="mnu-option-order" aria-label={`ลำดับของ ${g.name}`}><span>ลำดับ {selectedIndex + 1}</span><button type="button" disabled={selectedIndex === 0} onClick={() => moveOptionGroup(g.id, -1)} title="เลื่อนขึ้น" aria-label={`เลื่อน ${g.name} ขึ้น`}><Icon name="chevron-up" size={14} /></button><button type="button" disabled={selectedIndex === form.optionGroupIds.length - 1} onClick={() => moveOptionGroup(g.id, 1)} title="เลื่อนลง" aria-label={`เลื่อน ${g.name} ลง`}><Icon name="chevron-down" size={14} /></button></div>}
+        </div>;
+      })}
     </div>
   );
 }
@@ -5158,6 +5682,298 @@ function PromoCard({ promo, menusById, priceNode, status, daysRemaining, moreIte
   );
 }
 
+function PopupAdsPanel({ data, updateData, showToast }) {
+  const ads = data.popupAds || [];
+  const [editor, setEditor] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const blankAd = {
+    id: null, title: "", description: "", imageUrl: "", ctaLabel: "ดูเพิ่มเติม", ctaUrl: "",
+    active: true, openInNewTab: true, startAt: null, endAt: null,
+  };
+
+  function validHttpUrl(value) {
+    if (!String(value || "").trim()) return true;
+    try {
+      const url = new URL(String(value).trim());
+      return url.protocol === "http:" || url.protocol === "https:";
+    } catch {
+      return false;
+    }
+  }
+
+  function saveAd(form) {
+    const title = String(form.title || "").trim();
+    const description = String(form.description || "").trim();
+    const imageUrl = String(form.imageUrl || "").trim();
+    const ctaUrl = String(form.ctaUrl || "").trim();
+    const ctaLabel = String(form.ctaLabel || "").trim();
+    if (!title) { showToast("กรุณาใส่ชื่อโฆษณา"); return; }
+    if (description.length > 240) { showToast("คำอธิบายต้องไม่เกิน 240 ตัวอักษร"); return; }
+    if (!validHttpUrl(imageUrl)) { showToast("URL รูปภาพต้องขึ้นต้นด้วย http:// หรือ https://"); return; }
+    if (!validHttpUrl(ctaUrl)) { showToast("ลิงก์ปลายทางต้องขึ้นต้นด้วย http:// หรือ https://"); return; }
+    if (ctaUrl && !ctaLabel) { showToast("กรุณาใส่ข้อความบนปุ่ม"); return; }
+    if (form.startAt && form.endAt && Number(form.endAt) <= Number(form.startAt)) {
+      showToast("เวลาสิ้นสุดต้องอยู่หลังเวลาเริ่มแสดง"); return;
+    }
+    const saved = {
+      ...form,
+      id: form.id || genId("ad"),
+      title, description, imageUrl, ctaUrl, ctaLabel: ctaUrl ? ctaLabel : "",
+      createdAt: form.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    updateData((next) => {
+      if (!next.popupAds) next.popupAds = [];
+      const index = next.popupAds.findIndex((item) => item.id === saved.id);
+      if (index >= 0) next.popupAds[index] = saved;
+      else next.popupAds.push(saved);
+    });
+    setEditor(null);
+    showToast(form.id ? "บันทึกโฆษณาแล้ว" : "เพิ่มโฆษณา Popup แล้ว");
+  }
+
+  function toggleAd(id) {
+    updateData((next) => {
+      const ad = (next.popupAds || []).find((item) => item.id === id);
+      if (ad) ad.active = ad.active === false;
+    });
+  }
+
+  function moveAd(id, direction) {
+    updateData((next) => {
+      const list = next.popupAds || [];
+      const index = list.findIndex((item) => item.id === id);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= list.length) return;
+      [list[index], list[target]] = [list[target], list[index]];
+    });
+  }
+
+  function duplicateAd(ad) {
+    updateData((next) => {
+      if (!next.popupAds) next.popupAds = [];
+      const index = next.popupAds.findIndex((item) => item.id === ad.id);
+      next.popupAds.splice(index + 1, 0, {
+        ...ad, id: genId("ad"), title: `${ad.title || "โฆษณา"} (สำเนา)`, active: false,
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      });
+    });
+    showToast("ทำสำเนาโฆษณาแล้ว");
+  }
+
+  function deleteAd(id) {
+    updateData((next) => { next.popupAds = (next.popupAds || []).filter((item) => item.id !== id); });
+    setConfirmDelete(null);
+    if (editor?.id === id) setEditor(null);
+    showToast("ลบโฆษณา Popup แล้ว");
+  }
+
+  const statusCounts = ads.reduce((counts, ad) => {
+    const status = promoStatus(ad);
+    counts[status] = (counts[status] || 0) + 1;
+    return counts;
+  }, { live: 0, upcoming: 0, expired: 0, disabled: 0 });
+
+  return (
+    <div className="popup-ads-page">
+      <style>{`
+        .popup-ads-head { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; margin-bottom:20px; flex-wrap:wrap; }
+        .popup-ads-head h2 { margin:0; color:${POS.navy}; font-size:22px; }
+        .popup-ads-head p { margin:5px 0 0; color:#8A8580; font-size:13px; line-height:1.55; max-width:620px; }
+        .popup-ads-add { display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:44px; padding:0 18px; border:0; border-radius:12px; color:#fff; background:${POS.primary}; font-size:14px; font-weight:700; cursor:pointer; box-shadow:0 7px 18px rgba(0,119,168,.22); }
+        .popup-ads-stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:20px; }
+        .popup-ads-note { display:flex; align-items:flex-start; gap:9px; margin-bottom:18px; padding:12px 14px; border:1px solid ${POS.primarySoft}; border-radius:13px; color:${POS.navy}; background:${POS.primarySoft}; font-size:12.5px; line-height:1.5; }
+        .popup-ads-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(290px,1fr)); gap:18px; }
+        .popup-ad-card { overflow:hidden; display:flex; flex-direction:column; min-width:0; border:1px solid ${POS.border}; border-radius:19px; background:var(--surface); box-shadow:0 8px 24px rgba(0,0,0,.055); }
+        .popup-ad-image { position:relative; display:grid; place-items:center; width:100%; aspect-ratio:16/9; overflow:hidden; color:${POS.primary}; background:linear-gradient(135deg,${POS.primarySoft},var(--cream-2)); }
+        .popup-ad-image img { width:100%; height:100%; object-fit:cover; }
+        .popup-ad-body { padding:15px 16px 12px; }
+        .popup-ad-actions { display:flex; gap:7px; padding:0 16px 15px; margin-top:auto; }
+        .popup-ad-actions button { display:inline-flex; align-items:center; justify-content:center; gap:5px; min-height:37px; padding:0 11px; border:1px solid ${POS.border}; border-radius:10px; color:${POS.navy}; background:var(--surface); font-size:12px; font-weight:700; cursor:pointer; }
+        .popup-ad-actions button.primary { flex:1; }
+        .popup-ad-overlay { position:fixed; inset:0; z-index:75; display:flex; justify-content:flex-end; background:rgba(0,22,34,.42); }
+        .popup-ad-editor { display:flex; flex-direction:column; width:min(560px,100%); height:100%; background:var(--surface); box-shadow:-10px 0 42px rgba(0,0,0,.2); }
+        .popup-ad-editor-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:18px 22px; border-bottom:1px solid ${POS.border}; }
+        .popup-ad-editor-body { flex:1; overflow-y:auto; padding:20px 22px; }
+        .popup-ad-editor-foot { display:flex; align-items:center; justify-content:flex-end; gap:9px; padding:15px 22px; border-top:1px solid ${POS.border}; }
+        .popup-ad-field { width:100%; min-height:44px; box-sizing:border-box; border:1px solid ${POS.border}; border-radius:11px; outline:none; padding:0 12px; color:var(--espresso-4); background:var(--surface); font:inherit; font-size:14px; }
+        .popup-ad-field:focus { border-color:${POS.primary}; box-shadow:0 0 0 3px ${POS.primarySoft}; }
+        textarea.popup-ad-field { min-height:92px; padding-top:10px; resize:vertical; line-height:1.5; }
+        .popup-ad-label { display:block; margin:0 0 6px; color:#6B7280; font-size:12px; font-weight:700; }
+        .popup-ad-form-group { margin-bottom:16px; }
+        .popup-ad-preview { overflow:hidden; border:1px solid ${POS.border}; border-radius:17px; background:var(--surface); }
+        @media(max-width:720px){ .popup-ads-stats{grid-template-columns:repeat(2,minmax(0,1fr));} .popup-ads-grid{grid-template-columns:1fr;} .popup-ad-editor{width:100%;height:100dvh;} .popup-ad-editor-body{padding:17px;} }
+      `}</style>
+
+      <div className="popup-ads-head">
+        <div>
+          <h2>โฆษณา Popup</h2>
+          <p>สร้าง Popup เพื่อประกาศข่าว เมนูใหม่ หรือแคมเปญของร้านได้โดยไม่ต้องผูกกับโปรโมชั่น</p>
+        </div>
+        <button className="popup-ads-add" onClick={() => setEditor({ ...blankAd })}><Icon name="plus" size={16} /> เพิ่มโฆษณา</button>
+      </div>
+
+      <div className="popup-ads-stats">
+        <PromoStatCard icon="speakerphone" label="ทั้งหมด" value={ads.length} tone="navy" />
+        <PromoStatCard icon="circle-check" label="กำลังแสดง" value={statusCounts.live} tone="primary" />
+        <PromoStatCard icon="clock" label="ตั้งเวลาไว้" value={statusCounts.upcoming} tone="warning" />
+        <PromoStatCard icon="eye-off" label="ปิด/หมดเวลา" value={statusCounts.disabled + statusCounts.expired} tone="neutral" />
+      </div>
+
+      <div className="popup-ads-note">
+        <Icon name="info-circle" size={17} style={{ flexShrink: 0, marginTop: 1 }} />
+        <span>ระบบจะแสดง Popup เพียง 1 รายการต่อการเปิดใช้งาน หากมีหลายรายการที่กำลังแสดงพร้อมกัน ระบบจะเลือกการ์ดบนสุดก่อน สามารถใช้ปุ่มลูกศรจัดลำดับได้</span>
+      </div>
+
+      {ads.length === 0 ? (
+        <div style={{ padding: "64px 20px", textAlign: "center", borderRadius: 20, background: "var(--surface)", boxShadow: "0 8px 24px rgba(0,0,0,.055)" }}>
+          <div style={{ display: "grid", placeItems: "center", width: 66, height: 66, margin: "0 auto 15px", borderRadius: 19, color: POS.primary, background: POS.primarySoft }}><Icon name="speakerphone" size={30} /></div>
+          <div style={{ color: POS.navy, fontSize: 16, fontWeight: 700 }}>ยังไม่มีโฆษณา Popup</div>
+          <div style={{ margin: "5px 0 19px", color: "#8A8580", fontSize: 13 }}>เพิ่มรูป ข้อความ ปุ่ม และกำหนดเวลาแสดงได้ทันที</div>
+          <button className="popup-ads-add" onClick={() => setEditor({ ...blankAd })}><Icon name="plus" size={16} /> สร้างโฆษณาแรก</button>
+        </div>
+      ) : (
+        <div className="popup-ads-grid">
+          {ads.map((ad, index) => {
+            const status = promoStatus(ad);
+            return (
+              <article key={ad.id} className="popup-ad-card" style={{ opacity: status === "disabled" || status === "expired" ? .7 : 1 }}>
+                <div className="popup-ad-image">
+                  {ad.imageUrl ? <img src={ad.imageUrl} alt="" /> : <Icon name="speakerphone" size={44} />}
+                  <span style={{ position: "absolute", top: 10, left: 10 }}><PromoStatusBadge status={status} /></span>
+                </div>
+                <div className="popup-ad-body">
+                  <div style={{ color: POS.navy, fontSize: 16, fontWeight: 750, lineHeight: 1.35 }}>{ad.title || "โฆษณาไม่มีชื่อ"}</div>
+                  {ad.description && <div style={{ marginTop: 5, color: "#77716C", fontSize: 12.5, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{ad.description}</div>}
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, color: "#8A8580", fontSize: 11.5 }}>
+                    <Icon name="calendar-event" size={13} />
+                    <span>{ad.startAt || ad.endAt
+                      ? `${ad.startAt ? formatPromoDateTime(ad.startAt) : "เริ่มทันที"} – ${ad.endAt ? formatPromoDateTime(ad.endAt) : "ไม่สิ้นสุด"}`
+                      : "แสดงทันที · ไม่กำหนดวันสิ้นสุด"}</span>
+                  </div>
+                  {ad.ctaUrl && <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 7, color: POS.primary, fontSize: 11.5, overflow: "hidden" }}><Icon name="link" size={13} /><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ad.ctaLabel || "ดูเพิ่มเติม"} · {ad.ctaUrl}</span></div>}
+                </div>
+                <div className="popup-ad-actions">
+                  <button className="primary" onClick={() => setEditor({ ...ad })}><Icon name="edit" size={14} /> แก้ไข</button>
+                  <button onClick={() => toggleAd(ad.id)} aria-label={ad.active === false ? "เปิดใช้งาน" : "ปิดใช้งาน"}><Icon name={ad.active === false ? "eye" : "eye-off"} size={14} /></button>
+                  <button disabled={index === 0} onClick={() => moveAd(ad.id, -1)} aria-label="เลื่อนขึ้น" style={{ opacity: index === 0 ? .4 : 1 }}><Icon name="arrow-up" size={14} /></button>
+                  <button disabled={index === ads.length - 1} onClick={() => moveAd(ad.id, 1)} aria-label="เลื่อนลง" style={{ opacity: index === ads.length - 1 ? .4 : 1 }}><Icon name="arrow-down" size={14} /></button>
+                  <button onClick={() => duplicateAd(ad)} aria-label="ทำสำเนา"><Icon name="copy" size={14} /></button>
+                  <button onClick={() => setConfirmDelete(ad)} aria-label="ลบ" style={{ color: "var(--danger)" }}><Icon name="trash" size={14} /></button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      {editor && (
+        <PopupAdEditor
+          initial={editor}
+          onClose={() => setEditor(null)}
+          onSave={saveAd}
+        />
+      )}
+
+      {confirmDelete && (
+        <InvConfirmDialog
+          title="ลบโฆษณานี้?"
+          message={`โฆษณา “${confirmDelete.title || "รายการนี้"}” จะถูกลบและไม่แสดงให้ลูกค้าเห็นอีก`}
+          confirmLabel="ลบโฆษณา"
+          onConfirm={() => deleteAd(confirmDelete.id)}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function PopupAdEditor({ initial, onClose, onSave }) {
+  const [form, setForm] = useState(initial);
+  useEscape(onClose);
+  const status = promoStatus(form);
+  return (
+    <div className="popup-ad-overlay" onClick={onClose}>
+      <div className="popup-ad-editor" role="dialog" aria-modal="true" aria-label={initial.id ? "แก้ไขโฆษณา Popup" : "เพิ่มโฆษณา Popup"} onClick={(event) => event.stopPropagation()}>
+        <div className="popup-ad-editor-head">
+          <div>
+            <div style={{ color: POS.navy, fontSize: 18, fontWeight: 750 }}>{initial.id ? "แก้ไขโฆษณา Popup" : "เพิ่มโฆษณา Popup"}</div>
+            <div style={{ marginTop: 2, color: "#8A8580", fontSize: 11.5 }}>ข้อมูลนี้แยกจาก Promotion โดยสมบูรณ์</div>
+          </div>
+          <button className="inv-icon-btn" onClick={onClose} aria-label="ปิด"><Icon name="x" size={18} /></button>
+        </div>
+        <div className="popup-ad-editor-body">
+          <div className="popup-ad-form-group">
+            <label className="popup-ad-label">ชื่อโฆษณา <span style={{ color: "var(--danger)" }}>*</span></label>
+            <TextField className="popup-ad-field" value={form.title || ""} onChange={(value) => setForm({ ...form, title: value })} placeholder="เช่น พบกับเมนูใหม่ประจำเดือน" maxLength={80} />
+          </div>
+          <div className="popup-ad-form-group">
+            <label className="popup-ad-label">คำอธิบาย</label>
+            <textarea className="popup-ad-field" value={form.description || ""} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="รายละเอียดสั้น ๆ ที่ต้องการสื่อสารกับลูกค้า" maxLength={240} />
+            <div style={{ marginTop: 4, textAlign: "right", color: "#9C9690", fontSize: 10.5 }}>{String(form.description || "").length}/240</div>
+          </div>
+          <div className="popup-ad-form-group">
+            <label className="popup-ad-label">URL รูปภาพ <span style={{ color: "#9C9690", fontWeight: 500 }}>(แนะนำ 4:5 หรือ 1:1)</span></label>
+            <TextField className="popup-ad-field" value={form.imageUrl || ""} onChange={(value) => setForm({ ...form, imageUrl: value })} placeholder="https://..." inputMode="url" />
+          </div>
+
+          <div style={{ padding: 15, marginBottom: 18, borderRadius: 15, border: `1px solid ${POS.border}`, background: "var(--cream-2)" }}>
+            <div style={{ marginBottom: 12, color: POS.navy, fontSize: 13, fontWeight: 750 }}><Icon name="click" size={15} style={{ marginRight: 6, verticalAlign: -2 }} />ปุ่มและลิงก์ <span style={{ color: "#9C9690", fontWeight: 500 }}>(ไม่บังคับ)</span></div>
+            <div className="popup-ad-form-group">
+              <label className="popup-ad-label">ข้อความบนปุ่ม</label>
+              <TextField className="popup-ad-field" value={form.ctaLabel || ""} onChange={(value) => setForm({ ...form, ctaLabel: value })} placeholder="ดูเพิ่มเติม" maxLength={40} />
+            </div>
+            <div className="popup-ad-form-group" style={{ marginBottom: 12 }}>
+              <label className="popup-ad-label">ลิงก์ปลายทาง</label>
+              <TextField className="popup-ad-field" value={form.ctaUrl || ""} onChange={(value) => setForm({ ...form, ctaUrl: value })} placeholder="https://..." inputMode="url" />
+            </div>
+            <label style={{ display: "flex", alignItems: "center", gap: 9, color: "var(--espresso-4)", fontSize: 12.5, fontWeight: 600 }}>
+              <OptgToggle checked={form.openInNewTab !== false} onChange={(value) => setForm({ ...form, openInNewTab: value })} color={POS.primary} /> เปิดลิงก์ในแท็บใหม่
+            </label>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 12 }}>
+            <div className="popup-ad-form-group">
+              <label className="popup-ad-label">เริ่มแสดง</label>
+              <input className="popup-ad-field" type="datetime-local" value={dtLocalValue(form.startAt)} onChange={(event) => setForm({ ...form, startAt: event.target.value ? new Date(event.target.value).getTime() : null })} />
+            </div>
+            <div className="popup-ad-form-group">
+              <label className="popup-ad-label">สิ้นสุดการแสดง</label>
+              <input className="popup-ad-field" type="datetime-local" value={dtLocalValue(form.endAt)} onChange={(event) => setForm({ ...form, endAt: event.target.value ? new Date(event.target.value).getTime() : null })} />
+            </div>
+          </div>
+          <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, marginBottom: 20, padding: "13px 14px", borderRadius: 13, border: `1px solid ${POS.border}` }}>
+            <span>
+              <span style={{ display: "block", color: POS.navy, fontSize: 13.5, fontWeight: 750 }}>เปิดใช้งานโฆษณานี้</span>
+              <span style={{ display: "block", marginTop: 2, color: "#8A8580", fontSize: 11.5 }}>ต้องเปิดใช้งานและอยู่ในช่วงเวลาจึงจะแสดง</span>
+            </span>
+            <OptgToggle checked={form.active !== false} onChange={(value) => setForm({ ...form, active: value })} color={POS.primary} />
+          </label>
+
+          <div style={{ marginBottom: 8, color: POS.navy, fontSize: 13, fontWeight: 750 }}>ตัวอย่าง Popup</div>
+          <div className="popup-ad-preview">
+            <div style={{ display: "grid", placeItems: "center", minHeight: 170, color: POS.primary, background: POS.primarySoft }}>
+              {form.imageUrl ? <img src={form.imageUrl} alt="ตัวอย่างโฆษณา" style={{ display: "block", width: "100%", maxHeight: 260, objectFit: "cover" }} /> : <Icon name="speakerphone" size={44} />}
+            </div>
+            <div style={{ padding: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start" }}>
+                <div style={{ color: POS.navy, fontSize: 17, fontWeight: 750, lineHeight: 1.3 }}>{form.title || "ชื่อโฆษณา"}</div>
+                <PromoStatusBadge status={status} />
+              </div>
+              {form.description && <div style={{ marginTop: 6, color: "#6B7280", fontSize: 12.5, lineHeight: 1.5 }}>{form.description}</div>}
+              {form.ctaUrl && <div style={{ display: "grid", placeItems: "center", minHeight: 42, marginTop: 13, borderRadius: 11, color: "#fff", background: POS.primary, fontSize: 12.5, fontWeight: 700 }}>{form.ctaLabel || "ดูเพิ่มเติม"}</div>}
+            </div>
+          </div>
+        </div>
+        <div className="popup-ad-editor-foot">
+          <button className="inv-btn-ghost" onClick={onClose}>ยกเลิก</button>
+          <button className="popup-ads-add" onClick={() => onSave(form)}><Icon name="device-floppy" size={15} /> บันทึกโฆษณา</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PromotionsPanel({ data, orders, updateData, showToast }) {
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -5173,6 +5989,11 @@ function PromotionsPanel({ data, orders, updateData, showToast }) {
   }, [data.menus]);
 
   const promotions = data.promotions || [];
+  function overlappingPromo(promo) {
+    if (!promo.active) return null;
+    const start=Number(promo.startAt)||0,end=Number(promo.endAt)||Number.POSITIVE_INFINITY;
+    return promotions.find((other)=>other.id!==promo.id&&other.active!==false&&Math.max(start,Number(other.startAt)||0)<Math.min(end,Number(other.endAt)||Number.POSITIVE_INFINITY)&&(other.menuIds||[]).some((id)=>(promo.menuIds||[]).includes(id)));
+  }
 
   function newPromo() {
     setInspector({ mode: "add", tab: "overview", promo: { id: null, name: "", type: "single", menuIds: [], discountType: "percent", discountValue: 10, minQty: 2, chooseCount: 2, active: true, startAt: null, endAt: null, showAsPopup: false, popupImageUrl: "" } });
@@ -5182,6 +6003,13 @@ function PromotionsPanel({ data, orders, updateData, showToast }) {
     if (promo.menuIds.length === 0) { showToast("กรุณาเลือกเมนูอย่างน้อย 1 รายการ"); return; }
     if (promo.type === "bundle" && promo.menuIds.length < 2) { showToast("โปรจับคู่คอมโบต้องเลือกอย่างน้อย 2 เมนู"); return; }
     if (promo.type === "choice" && promo.menuIds.length < promo.chooseCount) { showToast("จำนวนเมนูในกลุ่มต้องมากกว่าหรือเท่ากับจำนวนที่ให้เลือก"); return; }
+    const discount = Number(promo.discountValue);
+    if (!Number.isFinite(discount) || discount < 0 || (promo.discountType === "percent" && discount > 100)) { showToast(promo.discountType === "percent" ? "ส่วนลดต้องอยู่ระหว่าง 0–100%" : "ราคาขายโปรโมชั่นต้องไม่ติดลบ"); return; }
+    if (promo.startAt && promo.endAt && Number(promo.endAt) <= Number(promo.startAt)) { showToast("เวลาสิ้นสุดต้องอยู่หลังเวลาเริ่มโปรโมชั่น"); return; }
+    const unavailable = promo.menuIds.filter((id)=>data.menus.find((menu)=>menu.id===id)?.available === false);
+    if (promo.active && unavailable.length) { showToast(`เปิดโปรโมชั่นไม่ได้: มีเมนูปิดขาย ${unavailable.length} รายการ`); return; }
+    const conflict=overlappingPromo(promo);
+    if(conflict){showToast(`ช่วงเวลาโปรโมชั่นซ้อนกับ “${conflict.name||"โปรโมชั่นอื่น"}” ในเมนูเดียวกัน`);return;}
     updateData((next) => {
       if (!next.promotions) next.promotions = [];
       const savedPromo = promo.id ? promo : { ...promo, id: genId("promo") };
@@ -5202,6 +6030,7 @@ function PromotionsPanel({ data, orders, updateData, showToast }) {
   }
 
   function toggleActive(promo) {
+    if(promo.active===false){const conflict=overlappingPromo({...promo,active:true});if(conflict){showToast(`เปิดไม่ได้: ช่วงเวลาซ้อนกับ “${conflict.name||"โปรโมชั่นอื่น"}”`);return;}}
     updateData((next) => {
       const p = next.promotions.find((x) => x.id === promo.id);
       if (p) p.active = !p.active;
@@ -5305,7 +6134,7 @@ function PromotionsPanel({ data, orders, updateData, showToast }) {
         .promo-search input:focus { border-color: ${POS.primary}; box-shadow: 0 0 0 3px ${POS.primarySoft}; }
         .promo-select { height: 44px; border: 1px solid ${POS.border}; border-radius: 12px; background: var(--surface); padding: 0 32px 0 14px; font-size: 13.5px; font-weight: 600; color: var(--espresso-4); cursor: pointer; outline: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; }
         .promo-select:focus { border-color: ${POS.primary}; box-shadow: 0 0 0 3px ${POS.primarySoft}; }
-        .promo-btn-primary { display: inline-flex; align-items: center; gap: 7px; height: 44px; padding: 0 18px; border: none; border-radius: 12px; background: ${POS.primary}; color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 6px 18px rgba(216,92,8,.28); transition: background 160ms; flex-shrink: 0; }
+        .promo-btn-primary { display: inline-flex; align-items: center; gap: 7px; height: 44px; padding: 0 18px; border: none; border-radius: 12px; background: ${POS.primary}; color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 6px 18px rgba(0,119,168,.24); transition: background 160ms; flex-shrink: 0; }
         .promo-btn-primary:hover { background: ${POS.primaryDark}; }
         .promo-cat-nav { margin-bottom: 18px; overflow-x: auto; }
         .promo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 18px; }
@@ -5503,18 +6332,27 @@ function PromoInspector({ mode, initial, initialTab, menus, menusById, orders, o
     setForm((f) => ({ ...f, type, menuIds: type === "single" || type === "qty" ? f.menuIds.slice(0, 1) : f.menuIds }));
   }
 
-  const canSave = form.menuIds.length > 0;
+  const validationErrors = [
+    form.menuIds.length === 0 ? "เลือกเมนูอย่างน้อย 1 รายการ" : "",
+    form.type === "bundle" && form.menuIds.length < 2 ? "คอมโบต้องมีอย่างน้อย 2 เมนู" : "",
+    form.type === "choice" && form.menuIds.length < Number(form.chooseCount) ? "จำนวนเมนูน้อยกว่าจำนวนที่ให้เลือก" : "",
+    !Number.isFinite(Number(form.discountValue)) || Number(form.discountValue) < 0 ? "ส่วนลด/ราคาต้องไม่ติดลบ" : "",
+    form.discountType === "percent" && Number(form.discountValue) > 100 ? "ส่วนลดต้องไม่เกิน 100%" : "",
+    form.startAt && form.endAt && Number(form.endAt) <= Number(form.startAt) ? "เวลาสิ้นสุดต้องอยู่หลังเวลาเริ่ม" : "",
+    form.active && form.menuIds.some((id)=>menusById[id]?.available === false) ? "มีเมนูปิดขายอยู่ในโปรโมชั่น" : "",
+  ].filter(Boolean);
+  const canSave = validationErrors.length === 0;
   const { originalTotal, promoTotal } = computePromoPricing(form, menusById);
   const qtyMenu = form.type === "qty" ? menusById[form.menuIds[0]] : null;
   const qtySetPrice = qtyMenu ? qtyPromoSetPrice(form, qtyMenu) : 0;
 
   const TABS = [
-    ["overview", "Overview", "info-circle"],
-    ["settings", "Popup & Settings", "browser"],
-    ["menus", "Menus", "cup"],
-    ["pricing", "Pricing", "chart-line"],
-    ["schedule", "Schedule", "calendar-event"],
-    ["analytics", "Analytics", "chart-bar"],
+    ["overview", "ภาพรวม", "info-circle"],
+    ["settings", "ป๊อปอัปและการแสดงผล", "browser"],
+    ["menus", "เมนูที่ร่วมรายการ", "cup"],
+    ["pricing", "ราคา", "chart-line"],
+    ["schedule", "กำหนดเวลา", "calendar-event"],
+    ["analytics", "สถิติ", "chart-bar"],
   ];
 
   return (
@@ -5550,6 +6388,7 @@ function PromoInspector({ mode, initial, initialTab, menus, menusById, orders, o
         <div className="promo-insp-footer">
           {mode === "edit" && <button className="promo-btn-danger-ghost" onClick={onDelete}><Icon name="trash" size={14} /> ลบโปรโมชั่น</button>}
           <div style={{ flex: 1 }} />
+          {validationErrors.length > 0 && <span title={validationErrors.join(" · ")} style={{ color:"var(--danger)", fontSize:11.5, maxWidth:190 }}>{validationErrors[0]}{validationErrors.length>1?` (+${validationErrors.length-1})`:""}</span>}
           <button className="inv-btn-ghost" onClick={onClose}>ยกเลิก</button>
           <button className="promo-btn-primary" disabled={!canSave} style={{ opacity: canSave ? 1 : .55, cursor: canSave ? "pointer" : "not-allowed" }} onClick={() => onSave(form)}>
             {mode === "add" ? "บันทึกโปรโมชั่น" : "บันทึกการแก้ไข"}
@@ -5609,6 +6448,7 @@ function PromoMenusTab({ form, menus, toggleMenu }) {
               style={{ width: 16, height: 16, flexShrink: 0 }}
             />
             <span style={{ flex: 1 }}>{m.name}</span>
+            {!m.available && <span style={{ color:"var(--danger)", background:"var(--danger-light)", borderRadius:999, padding:"2px 7px", fontSize:10, fontWeight:700 }}>ปิดขาย</span>}
             <span style={{ color: "#9C9690", fontSize: 11.5, flexShrink: 0 }}>฿{money(m.priceStore)}</span>
           </label>
         ))}
@@ -5882,10 +6722,9 @@ function compositionLabel(ing, ingredientsById) {
   }).join(" + ");
 }
 
-// พาเลตสีเฉพาะหน้าวัตถุดิบ & สต็อก (Inventory) — ระบบสีความหมาย (semantic) ใช้น้ำเงินเป็นสีหลัก
-// แยกจากธีม sage/espresso ของแท็บอื่น เพื่อให้หน้านี้ดูเป็น enterprise inventory ที่อ่านง่ายในการใช้งานทุกวัน
+// Inventory ใช้ CI ร้านเป็นสี interactive หลัก และคงสี semantic สำหรับสถานะเท่านั้น
 const INV = {
-  primary: "#2563EB", primaryDark: "var(--primary-text)", primarySoft: "rgba(37,99,235,.12)",
+  primary: "#0077A8", primaryDark: "var(--primary-text)", primarySoft: "rgba(0,163,224,.12)",
   success: "#16A34A", successSoft: "var(--success-light)",
   warning: "#D97706", warningSoft: "var(--warning-light)",
   danger: "#DC2626", dangerSoft: "var(--danger-light)",
@@ -6098,24 +6937,17 @@ function IngredientsPanel({ uid, data, updateData, showToast, onSaveAccounting, 
       previousStockQty, previousCostPerUnit, purchaseUnitCost, resultingCostPerUnit,
       costingMethod: resultingCostPerUnit == null ? "quantity_only" : "moving_weighted_average",
     };
-    updateData((next) => {
-      const ing = next.ingredients.find((i) => i.id === id);
-      if (!ing) return;
-      ing.stockQty = round4(ing.stockQty + addQty);
-      if (resultingCostPerUnit != null) ing.costPerUnit = resultingCostPerUnit;
-      next.purchases.push(purchaseRecord);
-    });
+    const ingredientIndex=data.ingredients.findIndex((item)=>item.id===id);
+    const patch={
+      [`shops/${uid}/ingredients/${ingredientIndex}/stockQty`]:increment(addQty),
+      [`shops/${uid}/purchases/${purchaseId}`]:purchaseRecord,
+    };
+    if(resultingCostPerUnit!=null)patch[`shops/${uid}/ingredients/${ingredientIndex}/costPerUnit`]=resultingCostPerUnit;
+    if(totalPaid>0)patch[`accounting/${uid}/transactions/purchase_${purchaseId}`]=accountingTransactionFromPurchase(purchaseRecord,ingredient);
+    const auditRef=push(ref(db,`auditLogs/${uid}`));patch[`auditLogs/${uid}/${auditRef.key}`]={action:"restock",actorUid:uid,createdAt:new Date().toISOString(),details:{ingredientId:id,qty:addQty,totalPaid,supplierName:purchaseForm.supplierName||""}};
+    await update(ref(db),patch);
     setRestocking(null);
-    if (totalPaid > 0) {
-      try {
-        await onSaveAccounting({ id: `purchase_${purchaseId}`, ...accountingTransactionFromPurchase(purchaseRecord, ingredient) });
-        showToast("เติมสต็อกและบันทึกรายจ่ายแล้ว");
-      } catch (error) {
-        showToast("เติมสต็อกแล้ว แต่บันทึกรายจ่ายไม่สำเร็จ: " + error.message);
-      }
-    } else {
-      showToast("เติมสต็อกแล้ว (ไม่ได้ลงรายจ่ายเพราะไม่ระบุราคา)");
-    }
+    showToast(totalPaid>0?"เติมสต็อกและบันทึกรายจ่ายแล้ว":"เติมสต็อกแล้ว (ไม่ได้ลงรายจ่ายเพราะไม่ระบุราคา)");
   }
 
   async function doBulkReceive(receipt) {
@@ -6147,33 +6979,19 @@ function IngredientsPanel({ uid, data, updateData, showToast, onSaveAccounting, 
       };
     });
 
-    updateData((next) => {
-      for (const record of records) {
-        const ingredient = next.ingredients.find((item) => item.id === record.ingredientId);
-        ingredient.stockQty = round4((Number(ingredient.stockQty) || 0) + record.qtyAdded);
-        if (record.resultingCostPerUnit != null) ingredient.costPerUnit = record.resultingCostPerUnit;
-        next.purchases.push(record);
-      }
-    });
-
-    const accountingResults = await Promise.allSettled(records.filter((record) => record.totalCost > 0).map((record) => {
-      const ingredient = data.ingredients.find((item) => item.id === record.ingredientId);
-      return onSaveAccounting({ id: `purchase_${record.id}`, ...accountingTransactionFromPurchase(record, ingredient) });
-    }));
-    const failed = accountingResults.filter((result) => result.status === "rejected");
+    const patch={};
+    for(const record of records){const index=data.ingredients.findIndex((item)=>item.id===record.ingredientId);patch[`shops/${uid}/ingredients/${index}/stockQty`]=increment(record.qtyAdded);if(record.resultingCostPerUnit!=null)patch[`shops/${uid}/ingredients/${index}/costPerUnit`]=record.resultingCostPerUnit;patch[`shops/${uid}/purchases/${record.id}`]=record;if(record.totalCost>0){const ingredient=data.ingredients[index];patch[`accounting/${uid}/transactions/purchase_${record.id}`]=accountingTransactionFromPurchase(record,ingredient);}}
+    const auditRef=push(ref(db,`auditLogs/${uid}`));patch[`auditLogs/${uid}/${auditRef.key}`]={action:"bulk_restock",actorUid:uid,createdAt:new Date().toISOString(),details:{batchId,items:records.length,total:records.reduce((sum,record)=>sum+record.totalCost,0)}};
+    await update(ref(db),patch);
     setBulkReceiving(false);
-    if (failed.length) showToast(`รับสต็อก ${records.length} รายการแล้ว แต่ลงรายจ่ายไม่สำเร็จ ${failed.length} รายการ`);
-    else showToast(`รับสต็อกและสร้างรายจ่ายแล้ว ${records.length} รายการ`);
+    showToast(`รับสต็อกและสร้างรายจ่ายแล้ว ${records.length} รายการ`);
   }
 
-  function doAdjustStock(id, countedQty) {
-    updateData((next) => {
-      const ing = next.ingredients.find((i) => i.id === id);
-      if (!ing) return;
-      ing.stockQty = round4(countedQty);
-    });
-    setAdjusting(null);
-    showToast("ปรับปรุงสต็อกให้ตรงกับที่นับได้แล้ว");
+  async function doAdjustStock(id, countedQty, reason) {
+    const index=data.ingredients.findIndex((item)=>item.id===id);if(index<0)return;
+    const auditRef=push(ref(db,`auditLogs/${uid}`));
+    await update(ref(db),{[`shops/${uid}/ingredients/${index}/stockQty`]:round4(countedQty),[`auditLogs/${uid}/${auditRef.key}`]:{action:"stock_adjustment",actorUid:uid,createdAt:new Date().toISOString(),details:{ingredientId:id,from:data.ingredients[index].stockQty,to:round4(countedQty),reason:String(reason||"").trim()}}});
+    setAdjusting(null);showToast("ปรับปรุงสต็อกให้ตรงกับที่นับได้แล้ว");
   }
 
   function addIngredient(v) {
@@ -6246,6 +7064,9 @@ function IngredientsPanel({ uid, data, updateData, showToast, onSaveAccounting, 
   const outCount = tracked.filter((i) => i.stockQty <= 0).length;
   const invValue = tracked.reduce((s, i) => s + i.stockQty * i.costPerUnit, 0);
   const catCount = CATEGORIES.filter((c) => data.ingredients.some((i) => i.category === c.id)).length;
+  const purchaseHistory = [...data.purchases].sort((a,b)=>new Date(b.timestamp||0)-new Date(a.timestamp||0)).slice(0,20);
+
+  function exportReorderCsv(){const items=tracked.filter((ingredient)=>ingredient.stockQty<=ingredient.lowStockThreshold).sort((a,b)=>a.stockQty-b.stockQty);if(!items.length){showToast("ยังไม่มีวัตถุดิบที่ต้องสั่งซื้อ");return;}const rows=[["วัตถุดิบ","คงเหลือ","หน่วย","จุดแจ้งเตือน","จำนวนแนะนำ"],...items.map((ingredient)=>[ingredient.name,ingredient.stockQty,UNITS[ingredient.unit],ingredient.lowStockThreshold,Math.max(0,round4(ingredient.lowStockThreshold*2-ingredient.stockQty))])];const csv="\uFEFF"+rows.map((row)=>row.map((value)=>`"${String(value??"").replace(/"/g,'""')}"`).join(",")).join("\r\n");const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));const link=document.createElement("a");link.href=url;link.download=`reorder-${todayStr()}.csv`;link.click();URL.revokeObjectURL(url);}
 
   const renderedCats = CATEGORIES
     .filter((c) => catFilter === "all" || catFilter === c.id)
@@ -6274,12 +7095,12 @@ function IngredientsPanel({ uid, data, updateData, showToast, onSaveAccounting, 
         .inv-clear { position: absolute; right: 8px; width: 26px; height: 26px; border: none; background: var(--cream-2); border-radius: 8px; color: ${INV.gray}; cursor: pointer; display: flex; align-items: center; justify-content: center; }
         .inv-select { height: 44px; border: 1px solid ${INV.border}; border-radius: 12px; background: var(--surface); padding: 0 32px 0 14px; font-size: 13.5px; font-weight: 600; color: ${INV.ink}; cursor: pointer; outline: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; }
         .inv-select:focus { border-color: ${INV.primary}; box-shadow: 0 0 0 3px ${INV.primarySoft}; }
-        .inv-btn-primary { display: inline-flex; align-items: center; gap: 7px; height: 44px; padding: 0 18px; border: none; border-radius: 12px; background: ${INV.primary}; color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 6px 18px rgba(37,99,235,.28); transition: background 160ms; }
+        .inv-btn-primary { display: inline-flex; align-items: center; gap: 7px; height: 44px; padding: 0 18px; border: none; border-radius: 12px; background: ${INV.primary}; color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 6px 18px rgba(0,119,168,.24); transition: background 160ms; }
         .inv-btn-primary:hover { background: ${INV.primaryDark}; }
         .inv-btn-ghost { height: 40px; padding: 0 16px; border: 1px solid ${INV.border}; border-radius: 10px; background: var(--surface); color: ${INV.ink}; font-size: 13.5px; font-weight: 600; cursor: pointer; }
         .inv-btn-danger { height: 40px; padding: 0 16px; border: none; border-radius: 10px; background: ${INV.danger}; color: #fff; font-size: 13.5px; font-weight: 700; cursor: pointer; }
         .inv-add-stock { display: inline-flex; align-items: center; gap: 5px; height: 34px; padding: 0 12px; border: 1px solid ${INV.primary}; border-radius: 9px; background: ${INV.primarySoft}; color: ${INV.primaryDark}; font-size: 12.5px; font-weight: 700; cursor: pointer; white-space: nowrap; }
-        .inv-add-stock:hover { background: rgba(37,99,235,.14); }
+        .inv-add-stock:hover { background: rgba(0,163,224,.14); }
         .inv-icon-btn { width: 36px; height: 36px; border: 1px solid ${INV.border}; border-radius: 9px; background: var(--surface); color: ${INV.gray}; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
         .inv-icon-btn:hover { background: var(--cream-2); color: ${INV.ink}; }
         .inv-cat { background: var(--surface); border: 1px solid ${INV.border}; border-radius: 16px; margin-bottom: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.04); }
@@ -6353,6 +7174,7 @@ function IngredientsPanel({ uid, data, updateData, showToast, onSaveAccounting, 
           <option value="value">เรียง: มูลค่ามาก→น้อย</option>
         </select>
         <div className="inv-toolbar-spacer" />
+        <button className="inv-btn-ghost" style={{ height:44, display:"inline-flex", alignItems:"center", gap:7 }} onClick={exportReorderCsv}><Icon name="download" size={15}/> รายการสั่งซื้อ</button>
         <button className="inv-btn-ghost" style={{ height: 44, display: "inline-flex", alignItems: "center", gap: 7 }} onClick={() => setBulkReceiving(true)}><Icon name="receipt" size={16} /> รับของจากใบเสร็จ</button>
         <button className="inv-btn-primary" onClick={() => setDrawer({ mode: "add", initial: blankIng })}><Icon name="plus" size={16} /> เพิ่มวัตถุดิบ</button>
       </div>
@@ -6425,6 +7247,11 @@ function IngredientsPanel({ uid, data, updateData, showToast, onSaveAccounting, 
           )}
         </div>
       ))}
+
+      {purchaseHistory.length>0&&<div style={{ background:"var(--surface)", border:`1px solid ${INV.border}`, borderRadius:16, padding:20, marginTop:18, boxShadow:"0 8px 24px rgba(0,0,0,.04)" }}>
+        <DashSectionHeader icon="history" text="ประวัติรับสต็อกล่าสุด" hint="แสดง 20 รายการล่าสุด พร้อมต้นทุนเฉลี่ยหลังรับเข้า" />
+        <div className="inv-table-scroll"><table className="inv-table"><thead><tr><th>วันที่</th><th>วัตถุดิบ</th><th>รับเข้า</th><th>ยอดซื้อ</th><th>ผู้ขาย</th><th>ต้นทุนใหม่/หน่วย</th></tr></thead><tbody>{purchaseHistory.map((purchase)=><tr key={purchase.id}><td data-label="วันที่">{new Date(purchase.timestamp).toLocaleDateString("th-TH")}</td><td data-label="วัตถุดิบ">{ingredientsById[purchase.ingredientId]?.name||"รายการที่ลบแล้ว"}</td><td data-label="รับเข้า">{fmtQty(purchase.qtyAdded)} {UNITS[ingredientsById[purchase.ingredientId]?.unit]||""}</td><td data-label="ยอดซื้อ">฿{money(purchase.totalCost||0)}</td><td data-label="ผู้ขาย">{purchase.supplierName||"—"}</td><td data-label="ต้นทุนใหม่/หน่วย">{purchase.resultingCostPerUnit==null?"ไม่เปลี่ยน":`฿${money(purchase.resultingCostPerUnit)}`}</td></tr>)}</tbody></table></div>
+      </div>}
 
       <div style={{ marginTop: 8 }}>
         <DefaultPackagingSection data={data} updateData={updateData} />
@@ -6812,6 +7639,9 @@ function ReceiptReceivingModal({ uid, ingredients, onClose, onConfirm }) {
 
 function RestockModal({ ingredient, onClose, onConfirm }) {
   const [qty, setQty] = useState("");
+  const [usePack, setUsePack] = useState(false);
+  const [packCount, setPackCount] = useState("");
+  const [unitsPerPack, setUnitsPerPack] = useState("");
   const [total, setTotal] = useState("");
   const [purchaseDate, setPurchaseDate] = useState(todayStr());
   const [supplierName, setSupplierName] = useState("");
@@ -6821,7 +7651,7 @@ function RestockModal({ ingredient, onClose, onConfirm }) {
   useEscape(onClose);
   useEffect(() => { qtyRef.current?.focus(); }, []);
   if (!ingredient) return null;
-  const qtyNum = Number(qty) || 0;
+  const qtyNum = usePack ? round4((Number(packCount)||0)*(Number(unitsPerPack)||0)) : Number(qty) || 0;
   const totalNum = Number(total) || 0;
   const valid = qtyNum > 0;
   const purchaseUnitCost = valid && totalNum > 0 ? round4(totalNum / qtyNum) : null;
@@ -6836,9 +7666,9 @@ function RestockModal({ ingredient, onClose, onConfirm }) {
   return (
     <InvModalShell icon="package-import" iconTone="primary" title="เติมสต็อก" subtitle={ingredient.name} onClose={onClose}>
       <form onSubmit={submit}>
+        <label style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12, color:INV.ink, fontSize:12.5, fontWeight:600 }}><input type="checkbox" checked={usePack} onChange={(event)=>setUsePack(event.target.checked)}/> รับเข้าเป็นแพ็ก / ถุง / กล่อง</label>
         <div style={{ marginBottom: 14 }}>
-          <label style={invLabelStyle} htmlFor="rs-qty">ปริมาณที่ซื้อ ({UNITS[ingredient.unit]})</label>
-          <input id="rs-qty" ref={qtyRef} {...invFocusProps} style={invFieldStyle} type="number" min="0" value={qty} placeholder="0" onChange={(e) => setQty(e.target.value)} />
+          {!usePack?<><label style={invLabelStyle} htmlFor="rs-qty">ปริมาณที่ซื้อ ({UNITS[ingredient.unit]})</label><input id="rs-qty" ref={qtyRef} {...invFocusProps} style={invFieldStyle} type="number" min="0" value={qty} placeholder="0" onChange={(e) => setQty(e.target.value)} /></>:<><div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}><div><label style={invLabelStyle}>จำนวนแพ็ก</label><input ref={qtyRef} {...invFocusProps} style={invFieldStyle} type="number" min="0" value={packCount} placeholder="0" onChange={(event)=>setPackCount(event.target.value)}/></div><div><label style={invLabelStyle}>{UNITS[ingredient.unit]}ต่อแพ็ก</label><input {...invFocusProps} style={invFieldStyle} type="number" min="0" value={unitsPerPack} placeholder="เช่น 1000" onChange={(event)=>setUnitsPerPack(event.target.value)}/></div></div><div style={{ marginTop:6, color:qtyNum>0?INV.primaryDark:INV.gray, fontSize:11.5 }}>ระบบจะรับเข้า {fmtQty(qtyNum)} {UNITS[ingredient.unit]}</div></>}
         </div>
         <div style={{ marginBottom: 14 }}>
           <label style={invLabelStyle} htmlFor="rs-total">ราคาที่จ่ายทั้งหมด (บาท)</label>
@@ -6883,12 +7713,13 @@ function RestockModal({ ingredient, onClose, onConfirm }) {
 
 function StockAdjustModal({ ingredient, onClose, onConfirm }) {
   const [counted, setCounted] = useState(ingredient ? String(ingredient.stockQty) : "0");
+  const [reason, setReason] = useState("");
   const inRef = useRef(null);
   useEscape(onClose);
   useEffect(() => { inRef.current?.select(); }, []);
   if (!ingredient) return null;
   const delta = round4((Number(counted) || 0) - ingredient.stockQty);
-  function submit(e) { e.preventDefault(); onConfirm(ingredient.id, Number(counted) || 0); }
+  function submit(e) { e.preventDefault(); if(reason.trim())onConfirm(ingredient.id, Number(counted) || 0, reason.trim()); }
   return (
     <InvModalShell icon="clipboard-check" iconTone="neutral" title="ปรับปรุงสต็อก (นับจริง)" subtitle={ingredient.name} onClose={onClose}>
       <form onSubmit={submit}>
@@ -6906,9 +7737,10 @@ function StockAdjustModal({ ingredient, onClose, onConfirm }) {
         <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 18, color: delta === 0 ? INV.gray : delta > 0 ? INV.success : INV.danger }}>
           {delta === 0 ? "ไม่มีการเปลี่ยนแปลง" : `${delta > 0 ? "+" : ""}${fmtQty(delta)} ${UNITS[ingredient.unit]} จากค่าปัจจุบัน`}
         </div>
+        <div style={{ marginBottom:14 }}><label style={invLabelStyle}>เหตุผลการปรับ *</label><TextField {...invFocusProps} style={invFieldStyle} value={reason} onChange={setReason} placeholder="เช่น นับจริงปลายวัน / ของเสีย" /></div>
         <div style={{ display: "flex", gap: 10 }}>
           <button type="button" className="inv-btn-ghost" style={{ height: 44 }} onClick={onClose}>ยกเลิก</button>
-          <button type="submit" className="inv-btn-primary" style={{ flex: 1, justifyContent: "center" }}>ยืนยันปรับสต็อก</button>
+          <button type="submit" disabled={!reason.trim()} className="inv-btn-primary" style={{ flex: 1, justifyContent: "center", opacity:reason.trim()?1:.55 }}>ยืนยันปรับสต็อก</button>
         </div>
       </form>
     </InvModalShell>
@@ -6956,7 +7788,7 @@ function RepDeltaTag({ delta }) {
 
 function RepKpiCard({ icon, label, value, sub, delta, tone, big }) {
   const tones = {
-    primary: { fg: DASH.primaryDark, iconBg: "var(--surface)", iconFg: DASH.primary, bg: DASH.primarySoft, border: "rgba(37,99,235,.18)" },
+    primary: { fg: DASH.primaryDark, iconBg: "var(--surface)", iconFg: DASH.primary, bg: DASH.primarySoft, border: "rgba(0,163,224,.18)" },
     success: { fg: DASH.success, iconBg: DASH.successSoft, iconFg: DASH.success, bg: "var(--surface)", border: DASH.border },
     danger: { fg: DASH.danger, iconBg: DASH.dangerSoft, iconFg: DASH.danger, bg: "var(--surface)", border: DASH.border },
     neutral: { fg: DASH.neutral, iconBg: DASH.neutralSoft, iconFg: DASH.neutral, bg: "var(--surface)", border: DASH.border },
@@ -7208,7 +8040,7 @@ function AccountingPanel({ transactions, assets, recurringExpenses, accounts, re
   return (
     <div className="acc-page">
       <style>{`
-        .acc-page { --acc-blue:#2563EB; --acc-green:#15803D; --acc-red:#B91C1C; --acc-ink:#172033; --acc-muted:#6B7280; }
+        .acc-page { --acc-blue:#0077A8; --acc-green:#15803D; --acc-red:#B91C1C; --acc-ink:#003B5C; --acc-muted:#4F7487; }
         .acc-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; }
         .acc-actions { display:flex; gap:8px; flex-wrap:wrap; }
         .acc-subnav { position:sticky; top:10px; z-index:20; display:flex; gap:4px; margin-bottom:16px; padding:5px; overflow-x:auto; border:1px solid ${POS.border}; border-radius:13px; background:rgba(255,255,255,.94); backdrop-filter:blur(12px); box-shadow:0 5px 18px rgba(17,24,39,.06); }
@@ -7619,6 +8451,7 @@ function AccountingTransactionModal({ transaction, vatRegistered, onClose, onSav
       {form.type==="expense"&&form.paymentAccount==="owner_advance"&&<div style={{gridColumn:"1/-1",padding:"9px 11px",borderRadius:10,background:"var(--warning-light)",color:"var(--warning-text)",fontSize:11.5,lineHeight:1.45}}>รายการนี้เป็นค่าใช้จ่ายของร้าน แต่ยังไม่ลดเงินสดหรือเงินธนาคาร ระบบจะเพิ่มยอดที่ร้านค้างคืนเจ้าของแทน</div>}
       <div style={{ gridColumn:"1/-1" }}><label className="acc-field-label">คู่ค้า / ผู้รับเงิน</label><TextField className="acc-field" value={form.vendorName || ""} onChange={(value) => patch("vendorName", value)} placeholder="ไม่บังคับ" /></div>
       {vatRegistered&&<><div><label className="acc-field-label">VAT ที่รวมในยอด</label><input className="acc-field" type="number" min="0" step="0.01" value={form.vatAmount||""} onChange={(event)=>patch("vatAmount",event.target.value)} placeholder="0.00"/></div><div><label className="acc-field-label">เลขใบกำกับภาษี</label><TextField className="acc-field" value={form.taxInvoiceNumber||""} onChange={(value)=>patch("taxInvoiceNumber",value)} placeholder="ถ้ามี"/></div></>}
+      <div style={{ gridColumn:"1/-1" }}><label className="acc-field-label">ลิงก์ใบเสร็จ / เอกสารแนบ</label><TextField className="acc-field" value={form.receiptUrl||""} onChange={(value)=>patch("receiptUrl",value)} placeholder="https://..." /></div>
       <div style={{ gridColumn:"1/-1" }}><label className="acc-field-label">หมายเหตุ</label><textarea className="acc-field" value={form.note || ""} onChange={(event) => patch("note", event.target.value)} placeholder="รายละเอียดเพิ่มเติม (ถ้ามี)" /></div>
     </div>
     {error && <p style={{ margin:"10px 0 0", color:"var(--danger)", fontSize:12 }}>{error}</p>}
@@ -7649,7 +8482,7 @@ function RepHourlyChart({ sales }) {
           <div key={h.hour} title={`${h.hour}:00 · ฿${money(h.revenue)}`} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minWidth: 0 }}>
             <div style={{
               width: "100%", height: Math.max(3, (h.revenue / max) * 68), borderRadius: 4,
-              background: h.hour === peak.hour ? DASH.primary : "#C7D6FB", transition: "height 300ms ease",
+              background: h.hour === peak.hour ? DASH.primary : "#BFEAF8", transition: "height 300ms ease",
             }} />
             <span style={{ fontSize: 9, color: DASH.gray }}>{h.hour}</span>
           </div>
@@ -7665,7 +8498,7 @@ function RepTrendChart({ days, byDay }) {
     <div style={{ display: "flex", alignItems: "flex-end", gap: Math.max(2, Math.min(10, 300 / days.length)), height: 110, padding: "0 2px" }}>
       {days.map((d) => (
         <div key={d} title={`${d} · ฿${money(byDay[d].revenue)}`} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, minWidth: 0 }}>
-          <div style={{ width: "100%", maxWidth: 30, height: Math.max(3, (byDay[d].revenue / max) * 62), borderRadius: 5, background: "#C7D6FB", transition: "height 300ms ease" }} />
+          <div style={{ width: "100%", maxWidth: 30, height: Math.max(3, (byDay[d].revenue / max) * 62), borderRadius: 5, background: "#BFEAF8", transition: "height 300ms ease" }} />
           {days.length <= 14 && <span style={{ fontSize: 9.5, color: DASH.gray, whiteSpace: "nowrap" }}>{d.slice(5)}</span>}
         </div>
       ))}
@@ -7673,8 +8506,10 @@ function RepTrendChart({ days, byDay }) {
   );
 }
 
-function ReportsPanel({ data, orders, shopName, showToast }) {
+function ReportsPanel({ data, orders, accountingTransactions, shopName, showToast }) {
   const [range, setRange] = useState("today");
+  const [customStart, setCustomStart] = useState(todayStr());
+  const [customEnd, setCustomEnd] = useState(todayStr());
   const [search, setSearch] = useState("");
   const [channelFilter, setChannelFilter] = useState("all");
   const [historyLimit, setHistoryLimit] = useState(50);
@@ -7698,11 +8533,12 @@ function ReportsPanel({ data, orders, shopName, showToast }) {
       if (range === "today") return todayStr(d) === todayStr(now);
       if (range === "week") { const diff = (now - d) / 86400000; return diff >= 0 && diff <= 7; }
       if (range === "month") return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+      if (range === "custom") { const key=todayStr(d);return (!customStart||key>=customStart)&&(!customEnd||key<=customEnd); }
       return true;
     });
-  }, [data.sales, range, now]);
+  }, [data.sales, range, now, customStart, customEnd]);
 
-  const prevSales = useMemo(() => prevPeriodSales(data.sales, range, now), [data.sales, range, now]);
+  const prevSales = useMemo(() => range==="custom"?null:prevPeriodSales(data.sales, range, now), [data.sales, range, now]);
 
   const revenue = filtered.reduce((a, s) => a + s.netRevenue, 0);
   const cost = filtered.reduce((a, s) => a + s.totalCost, 0);
@@ -7711,6 +8547,7 @@ function ReportsPanel({ data, orders, shopName, showToast }) {
   const gpTotal = filtered.reduce((a, s) => a + s.gpAmount, 0);
   const discountTotal = filtered.reduce((a, s) => a + (s.promoDiscount || 0), 0);
   const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+  const refundTotal=(accountingTransactions||[]).filter((transaction)=>{if(transaction.category!=="sales_refund"||transaction.status==="pending")return false;const key=String(transaction.transactionDate||"");if(range==="today")return key===todayStr(now);if(range==="week"){const diff=(now-new Date(`${key}T12:00:00`))/86400000;return diff>=0&&diff<=7;}if(range==="month")return key.startsWith(todayStr(now).slice(0,7));if(range==="custom")return(!customStart||key>=customStart)&&(!customEnd||key<=customEnd);return true;}).reduce((sum,transaction)=>sum+(Number(transaction.amount)||0),0);
 
   const prevStats = useMemo(() => {
     if (!prevSales) return null;
@@ -7721,10 +8558,16 @@ function ReportsPanel({ data, orders, shopName, showToast }) {
 
   const byChannel = { store: { revenue: 0, profit: 0, cups: 0 }, delivery: { revenue: 0, profit: 0, cups: 0 }, online: { revenue: 0, profit: 0, cups: 0 } };
   const byPlatform = {};
+  const byPayment = {};
   for (const s of filtered) {
-    byChannel[s.channel].revenue += s.netRevenue;
-    byChannel[s.channel].profit += s.profit;
-    byChannel[s.channel].cups += s.qty;
+    const channel = byChannel[s.channel] ? s.channel : "store";
+    byChannel[channel].revenue += s.netRevenue;
+    byChannel[channel].profit += s.profit;
+    byChannel[channel].cups += s.qty;
+    const payment = s.paymentMethod || "unspecified";
+    if (!byPayment[payment]) byPayment[payment] = { revenue:0, count:0 };
+    byPayment[payment].revenue += s.netRevenue;
+    byPayment[payment].count += s.qty;
     if (s.channel === "delivery" && s.platformName) {
       if (!byPlatform[s.platformName]) byPlatform[s.platformName] = { revenue: 0, profit: 0, cups: 0 };
       byPlatform[s.platformName].revenue += s.netRevenue;
@@ -7753,11 +8596,13 @@ function ReportsPanel({ data, orders, shopName, showToast }) {
   const days = Object.keys(byDay).sort();
 
   const historyRows = useMemo(() => {
-    let out = filtered.slice().reverse();
+    let out = filtered.slice().sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp));
     if (channelFilter !== "all") out = out.filter((s) => s.channel === channelFilter);
     if (search.trim()) { const q = search.trim().toLowerCase(); out = out.filter((s) => s.menuName.toLowerCase().includes(q)); }
     return out;
   }, [filtered, channelFilter, search]);
+
+  function exportSalesCsv(){const header=["เวลา","เมนู","ช่องทาง","แพลตฟอร์ม","ชำระผ่าน","จำนวน","รายได้สุทธิ","ต้นทุน","กำไร","ออเดอร์"];const rows=historyRows.map((sale)=>[sale.timestamp,sale.menuName,sale.channel,sale.platformName||"",sale.paymentMethod||"",sale.qty,sale.netRevenue,sale.totalCost,sale.profit,sale.orderId||""]);const csv="\uFEFF"+[header,...rows].map((row)=>row.map((value)=>`"${String(value??"").replace(/"/g,'""')}"`).join(",")).join("\r\n");const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));const link=document.createElement("a");link.href=url;link.download=`sales-${range}-${todayStr()}.csv`;link.click();URL.revokeObjectURL(url);}
 
   const orderHistoryRows = useMemo(() => {
     const q = orderSearch.trim().toLowerCase();
@@ -7772,6 +8617,7 @@ function ReportsPanel({ data, orders, shopName, showToast }) {
         if (range === "today") return todayStr(d) === todayStr(now);
         if (range === "week") { const diff = (now - d) / 86400000; return diff >= 0 && diff <= 7; }
         if (range === "month") return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+        if (range === "custom") { const key=todayStr(d); return (!customStart||key>=customStart)&&(!customEnd||key<=customEnd); }
         return true;
       })
       .filter((order) => {
@@ -7790,7 +8636,9 @@ function ReportsPanel({ data, orders, shopName, showToast }) {
         const bTime = b.status === "done" ? (b.completedAt || b.createdAt) : (b.cancelledAt || b.createdAt);
         return new Date(bTime) - new Date(aTime);
       });
-  }, [orders, orderStatusFilter, orderSearch, range, now]);
+  }, [orders, orderStatusFilter, orderSearch, range, now, customStart, customEnd]);
+
+  function exportOrdersCsv(){const header=["เวลาสิ้นสุด","เลขออเดอร์","ชื่อ","เบอร์โทร","รายการ","วิธีชำระ","ยอดรวม","สถานะ","เหตุผลยกเลิก"];const rows=orderHistoryRows.map((order)=>[order.status==="done"?(order.completedAt||order.createdAt):(order.cancelledAt||order.createdAt),order.id,order.customerName||"",order.customerPhone||"",(order.items||[]).map((item)=>`${item.name} x${item.qty}`).join(" | "),order.paymentMethod||"",order.total||0,order.status,order.cancelReason||""]);const csv="\uFEFF"+[header,...rows].map((row)=>row.map((value)=>`"${String(value??"").replace(/"/g,'""')}"`).join(",")).join("\r\n");const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));const link=document.createElement("a");link.href=url;link.download=`orders-${range}-${todayStr()}.csv`;link.click();URL.revokeObjectURL(url);}
 
   function printHistoryOrder(order) {
     try {
@@ -7800,7 +8648,7 @@ function ReportsPanel({ data, orders, shopName, showToast }) {
     }
   }
 
-  const PERIODS = [["today", "วันนี้"], ["week", "7 วันล่าสุด"], ["month", "เดือนนี้"], ["all", "ทั้งหมด"]];
+  const PERIODS = [["today", "วันนี้"], ["week", "7 วันล่าสุด"], ["month", "เดือนนี้"], ["custom", "กำหนดเอง"], ["all", "ทั้งหมด"]];
 
   return (
     <div className="rep-wrap">
@@ -7846,10 +8694,12 @@ function ReportsPanel({ data, orders, shopName, showToast }) {
             <button key={k} className={"rep-period-tab" + (range === k ? " active" : "")} onClick={() => setRange(k)}>{label}</button>
           ))}
         </div>
+        {range==="custom"&&<><input className="rep-select" type="date" value={customStart} max={customEnd||undefined} onChange={(event)=>setCustomStart(event.target.value)}/><span style={{color:DASH.gray,fontSize:12}}>ถึง</span><input className="rep-select" type="date" value={customEnd} min={customStart||undefined} onChange={(event)=>setCustomEnd(event.target.value)}/></>}
+        <button className="cbtn" onClick={exportSalesCsv}><Icon name="download" size={14}/> <span style={{marginLeft:4}}>Export CSV</span></button>
       </div>
 
       <div className="rep-kpi-grid">
-        <RepKpiCard icon="cash" label="รายได้สุทธิ" value={"฿" + money(revenue)} sub={`หักแพลตฟอร์ม/โปร ฿${money(gpTotal + discountTotal)}`} delta={prevStats ? pctDelta(revenue, prevStats.revenue) : null} tone="primary" big />
+        <RepKpiCard icon="cash" label="รายได้สุทธิ" value={"฿" + money(revenue)} sub={`หักแพลตฟอร์ม/โปร ฿${money(gpTotal + discountTotal)} · คืนเงิน ฿${money(refundTotal)}`} delta={prevStats ? pctDelta(revenue, prevStats.revenue) : null} tone="primary" big />
         <RepKpiCard icon="receipt-2" label="ต้นทุนรวม" value={"฿" + money(cost)} delta={prevStats ? pctDelta(cost, prevStats.cost) : null} tone="neutral" />
         <RepKpiCard icon="trending-up" label="กำไรสุทธิ" value={"฿" + money(profit)} sub={`margin ${margin.toFixed(1)}%`} delta={prevStats ? pctDelta(profit, prevStats.profit) : null} tone={profit >= 0 ? "success" : "danger"} />
         <RepKpiCard icon="package" label="จำนวนสินค้าที่ขาย" value={cups} delta={prevStats ? pctDelta(cups, prevStats.cups) : null} tone="neutral" />
@@ -7858,6 +8708,13 @@ function ReportsPanel({ data, orders, shopName, showToast }) {
       <div className="rep-channel-grid">
         {["store", "delivery", "online"].map((ch) => <RepChannelCard key={ch} channel={ch} v={byChannel[ch]} totalRevenue={revenue} />)}
       </div>
+
+      {Object.keys(byPayment).length > 0 && <div className="rep-card">
+        <DashSectionHeader icon="wallet" text="แยกตามวิธีชำระเงิน" hint="ใช้เทียบยอดเงินสด ธนาคาร และบัตรก่อนปิดกะ" />
+        <div className="table-scroll"><table className="rep-table"><thead><tr><th>วิธีชำระ</th><th>จำนวนสินค้า</th><th>ยอดรับสุทธิ</th><th>สัดส่วน</th></tr></thead><tbody>
+          {Object.entries(byPayment).sort((a,b)=>b[1].revenue-a[1].revenue).map(([method,value])=><tr key={method}><td>{({cash:"เงินสด",promptpay:"PromptPay / โอน",bank:"โอนธนาคาร",credit_card:"บัตรเครดิต",unspecified:"ไม่ระบุ"})[method]||method}</td><td>{value.count}</td><td>฿{money(value.revenue)}</td><td>{revenue>0?`${(value.revenue/revenue*100).toFixed(1)}%`:"0%"}</td></tr>)}
+        </tbody></table></div>
+      </div>}
 
       <div className="rep-two-col">
         <div className="rep-card">
@@ -7968,6 +8825,7 @@ function ReportsPanel({ data, orders, shopName, showToast }) {
               aria-label="ค้นหาประวัติออเดอร์"
             />
           </div>
+          <button type="button" className="cbtn" onClick={exportOrdersCsv}><Icon name="download" size={14}/> Export ออเดอร์ CSV</button>
         </div>
 
         {orderHistoryRows.length === 0 ? <EmptyNote text="ไม่พบออเดอร์ที่ตรงกับสถานะและช่วงเวลาที่เลือก" /> : (
@@ -8111,10 +8969,10 @@ function OrderHistoryModal({ order, onClose, onPrint }) {
   );
 }
 
-// โทนสีเฉพาะหน้าตัวเลือกเสริม — ระบบสีความหมาย (semantic) แยกจากหน้าอื่น ให้ใช้น้ำเงินเป็นสีหลัก
+// ตัวเลือกเสริมใช้ CI ร้านเป็นสี interactive หลัก
 // เขียว/แดง/ส้มมีความหมายตายตัว (สำเร็จ/อันตราย/เตือน) ไม่ใช้สีพร่ำเพรื่อ
 const OPTG = {
-  primary: "#2563EB", primaryDark: "var(--primary-text)", primarySoft: "rgba(37,99,235,.12)",
+  primary: "#0077A8", primaryDark: "var(--primary-text)", primarySoft: "rgba(0,163,224,.12)",
   danger: "#DC2626", dangerSoft: "var(--danger-light)",
   gold: "#D97706", goldSoft: "var(--warning-light)",
   border: "var(--line)", gray: "var(--espresso-3)", ink: "var(--espresso-4)", warm: "var(--cream)",
@@ -8182,78 +9040,110 @@ function OptgKebab({ items }) {
 }
 
 function OptionGroupsPanel({ data, updateData, showToast }) {
+  const [draftGroups, setDraftGroups] = useState(() => JSON.parse(JSON.stringify(data.optionGroups)));
   const [collapsed, setCollapsed] = useState({});
   const [helpOpen, setHelpOpen] = useState(false);
   const [activeGroupId, setActiveGroupId] = useState(data.optionGroups[0]?.id || null);
+  const [deleteFor, setDeleteFor] = useState(null);
   const groupRefs = useRef({});
+  const inputRefs = useRef({});
+  const [focusTarget, setFocusTarget] = useState("");
+
+  useEffect(() => {
+    if (!focusTarget) return undefined;
+    const frame = requestAnimationFrame(() => {
+      inputRefs.current[focusTarget]?.focus();
+      setFocusTarget("");
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusTarget, draftGroups]);
+
+  function mutateGroups(mutator) {
+    setDraftGroups((current) => {
+      const next = JSON.parse(JSON.stringify(current));
+      mutator(next);
+      return next;
+    });
+  }
 
   function addGroup() {
     const id = genId("opt");
-    updateData((next) => {
-      next.optionGroups.push({ id, name: "ตัวเลือกใหม่", required: false, choices: [] });
-    });
+    mutateGroups((groups) => groups.unshift({ id, name: "", required: false, choices: [] }));
     setActiveGroupId(id);
+    setCollapsed((current) => ({ ...current, [id]: false }));
+    setFocusTarget(`group:${id}`);
   }
   function removeGroup(groupId) {
-    updateData((next) => {
-      next.optionGroups = next.optionGroups.filter((g) => g.id !== groupId);
-      for (const m of next.menus) m.optionGroupIds = (m.optionGroupIds || []).filter((id) => id !== groupId);
-    });
+    mutateGroups((groups) => groups.splice(groups.findIndex((group)=>group.id===groupId),1));
   }
   function patchGroup(groupId, patch) {
-    updateData((next) => {
-      const g = next.optionGroups.find((x) => x.id === groupId);
+    mutateGroups((groups) => {
+      const g = groups.find((x) => x.id === groupId);
       if (g) Object.assign(g, patch);
     });
   }
   function addChoice(groupId) {
-    updateData((next) => {
-      const g = next.optionGroups.find((x) => x.id === groupId);
-      if (g) g.choices.push({ id: genId("choice"), label: "ตัวเลือกใหม่", note: "", priceDelta: 0, ingredientId: null, qtyPercent: 100, isDefault: false, extraAdjustments: [] });
+    const id = genId("choice");
+    mutateGroups((groups) => {
+      const g = groups.find((x) => x.id === groupId);
+      if (g) g.choices.unshift({ id, label: "", note: "", priceDelta: 0, ingredientId: null, qtyPercent: 100, isDefault: false, enabled: true, extraAdjustments: [] });
     });
+    setCollapsed((current) => ({ ...current, [groupId]: false }));
+    setActiveGroupId(groupId);
+    setFocusTarget(`choice:${id}`);
   }
   function addExtraAdjustment(groupId, choiceId) {
-    updateData((next) => {
-      const g = next.optionGroups.find((x) => x.id === groupId);
+    mutateGroups((groups) => {
+      const g = groups.find((x) => x.id === groupId);
       const c = g?.choices.find((x) => x.id === choiceId);
       if (c) {
         if (!c.extraAdjustments) c.extraAdjustments = [];
-        c.extraAdjustments.push({ ingredientId: null, qtyPercent: 100 });
+        c.extraAdjustments.unshift({ ingredientId: null, qtyPercent: 100 });
       }
     });
   }
   function patchExtraAdjustment(groupId, choiceId, idx, patch) {
-    updateData((next) => {
-      const g = next.optionGroups.find((x) => x.id === groupId);
+    mutateGroups((groups) => {
+      const g = groups.find((x) => x.id === groupId);
       const c = g?.choices.find((x) => x.id === choiceId);
       if (c && c.extraAdjustments[idx]) Object.assign(c.extraAdjustments[idx], patch);
     });
   }
   function removeExtraAdjustment(groupId, choiceId, idx) {
-    updateData((next) => {
-      const g = next.optionGroups.find((x) => x.id === groupId);
+    mutateGroups((groups) => {
+      const g = groups.find((x) => x.id === groupId);
       const c = g?.choices.find((x) => x.id === choiceId);
       if (c) c.extraAdjustments.splice(idx, 1);
     });
   }
   function patchChoice(groupId, choiceId, patch) {
-    updateData((next) => {
-      const g = next.optionGroups.find((x) => x.id === groupId);
+    mutateGroups((groups) => {
+      const g = groups.find((x) => x.id === groupId);
       const c = g?.choices.find((x) => x.id === choiceId);
       if (c) Object.assign(c, patch);
     });
   }
   function removeChoice(groupId, choiceId) {
-    updateData((next) => {
-      const g = next.optionGroups.find((x) => x.id === groupId);
+    mutateGroups((groups) => {
+      const g = groups.find((x) => x.id === groupId);
       if (g) g.choices = g.choices.filter((c) => c.id !== choiceId);
     });
   }
   function setDefaultChoice(groupId, choiceId) {
-    updateData((next) => {
-      const g = next.optionGroups.find((x) => x.id === groupId);
+    mutateGroups((groups) => {
+      const g = groups.find((x) => x.id === groupId);
       if (!g) return;
+      const selected = g.choices.find((choice) => choice.id === choiceId);
+      if (!selected || selected.enabled === false) return;
       for (const c of g.choices) c.isDefault = c.id === choiceId ? !c.isDefault : false;
+    });
+  }
+  function setChoiceEnabled(groupId, choiceId, enabled) {
+    mutateGroups((groups) => {
+      const choice = groups.find((group) => group.id === groupId)?.choices.find((item) => item.id === choiceId);
+      if (!choice) return;
+      choice.enabled = enabled;
+      if (!enabled) choice.isDefault = false;
     });
   }
 
@@ -8266,11 +9156,23 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
     groupRefs.current[groupId]?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  const totalGroups = data.optionGroups.length;
-  const totalOptions = data.optionGroups.reduce((s, g) => s + g.choices.length, 0);
-  const requiredGroups = data.optionGroups.filter((g) => g.required).length;
-  const defaultOptions = data.optionGroups.reduce((s, g) => s + g.choices.filter((c) => c.isDefault).length, 0);
-  const activeGroup = data.optionGroups.find((g) => g.id === activeGroupId) || data.optionGroups[0];
+  function moveGroup(groupId, delta) { mutateGroups((groups)=>{const index=groups.findIndex((group)=>group.id===groupId);const target=index+delta;if(index<0||target<0||target>=groups.length)return;[groups[index],groups[target]]=[groups[target],groups[index]];}); }
+  function moveChoice(groupId, choiceId, delta) { mutateGroups((groups)=>{const choices=groups.find((group)=>group.id===groupId)?.choices;if(!choices)return;const index=choices.findIndex((choice)=>choice.id===choiceId);const target=index+delta;if(index<0||target<0||target>=choices.length)return;[choices[index],choices[target]]=[choices[target],choices[index]];}); }
+  const dirty = JSON.stringify(draftGroups) !== JSON.stringify(data.optionGroups);
+  const validationErrors = draftGroups.flatMap((group)=>[
+    !String(group.name||"").trim() ? "ทุกกลุ่มต้องมีชื่อ" : "",
+    group.required && !group.choices.some((choice)=>choice.enabled!==false) ? `กลุ่ม “${group.name||"ไม่มีชื่อ"}” บังคับเลือกแต่ไม่มีตัวเลือกที่เปิดใช้` : "",
+    group.choices.some((choice)=>!String(choice.label||"").trim()) ? `กลุ่ม “${group.name||"ไม่มีชื่อ"}” มีตัวเลือกไม่มีชื่อ` : "",
+    group.choices.some((choice)=>!Number.isFinite(Number(choice.priceDelta)) || Number(choice.priceDelta)<0) ? `ราคาเพิ่มในกลุ่ม “${group.name||"ไม่มีชื่อ"}” ต้องไม่ติดลบ` : "",
+    group.choices.some((choice)=>choice.qtyPercent!=null && (!Number.isFinite(Number(choice.qtyPercent)) || Number(choice.qtyPercent)<0 || Number(choice.qtyPercent)>500)) ? `% วัตถุดิบในกลุ่ม “${group.name||"ไม่มีชื่อ"}” ต้องอยู่ระหว่าง 0–500` : "",
+  ]).filter(Boolean);
+  function saveGroups() { if(validationErrors.length)return;const validIds=new Set(draftGroups.map((group)=>group.id));updateData((next)=>{next.optionGroups=JSON.parse(JSON.stringify(draftGroups));for(const menu of next.menus)menu.optionGroupIds=(menu.optionGroupIds||[]).filter((id)=>validIds.has(id));});showToast("บันทึกตัวเลือกเสริมและอัปเดตเมนูที่ผูกแล้ว"); }
+  function discardGroups(){setDraftGroups(JSON.parse(JSON.stringify(data.optionGroups)));setDeleteFor(null);}
+  const totalGroups = draftGroups.length;
+  const totalOptions = draftGroups.reduce((s, g) => s + g.choices.length, 0);
+  const requiredGroups = draftGroups.filter((g) => g.required).length;
+  const defaultOptions = draftGroups.reduce((s, g) => s + g.choices.filter((c) => c.isDefault).length, 0);
+  const activeGroup = draftGroups.find((g) => g.id === activeGroupId) || draftGroups[0];
 
   return (
     <div>
@@ -8279,23 +9181,36 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
         @media (max-width: 980px) { .optg-shell { grid-template-columns: 1fr; } }
         .optg-card { background: var(--surface); border: 1px solid ${OPTG.border}; border-radius: 16px; margin-bottom: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.05); }
         .optg-card-head { display: flex; align-items: center; gap: 10px; padding: 16px 18px; }
-        .optg-name-input { border: none; background: transparent; font-size: 17px; font-weight: 700; color: ${OPTG.ink}; padding: 4px 6px; border-radius: 8px; flex: 1; min-width: 0; }
+        .optg-name-input { width:100%; border: none; background: transparent; font-size: 17px; font-weight: 700; color: ${OPTG.ink}; padding: 6px 8px; border-radius: 8px; flex: 1; min-width: 120px; }
         .optg-name-input:focus { outline: 2px solid ${OPTG.primary}; background: var(--surface); }
         .optg-collapse-btn { width: 30px; height: 30px; border-radius: 9px; border: 1px solid ${OPTG.border}; background: var(--surface); color: ${OPTG.gray}; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
         .optg-badge { font-size: 11px; font-weight: 700; color: ${OPTG.primaryDark}; background: ${OPTG.primarySoft}; border-radius: 999px; padding: 3px 9px; white-space: nowrap; }
+        .optg-head-meta { display:flex; align-items:center; gap:10px; flex-shrink:0; }
+        .optg-head-menu { flex-shrink:0; }
+        @media (max-width: 760px) {
+          .optg-card-head { display:grid; grid-template-columns:30px minmax(0,1fr) 30px; align-items:center; gap:8px; padding:12px; }
+          .optg-collapse-btn { grid-column:1; grid-row:1; }
+          .optg-name-input { grid-column:2; grid-row:1; min-width:0; height:38px; border:1px solid ${OPTG.border}; background:var(--cream-2); font-size:16px; }
+          .optg-head-menu { grid-column:3; grid-row:1; }
+          .optg-head-meta { grid-column:1 / -1; grid-row:2; flex-wrap:wrap; gap:6px 9px; padding:2px 2px 0; }
+          .optg-head-meta .optg-badge { font-size:10.5px; }
+        }
         .optg-body { padding: 0 18px 18px; }
-        .optg-row-head { display: grid; grid-template-columns: 1.1fr 1.3fr .7fr 1.3fr 70px 78px; gap: 10px; padding: 0 10px; margin-bottom: 6px; }
+        @media (max-width: 760px) { .optg-body { padding:0 12px 12px; } }
+        .optg-row-head { display: grid; grid-template-columns: 1.1fr 1.2fr .65fr 1.2fr 70px 82px 78px; gap: 10px; padding: 0 10px; margin-bottom: 6px; }
         .optg-row-head span { font-size: 11px; font-weight: 700; color: ${OPTG.gray}; text-transform: uppercase; letter-spacing: .03em; }
         @media (max-width: 760px) { .optg-row-head { display: none; } }
-        .optg-choice-row { display: grid; grid-template-columns: 1.1fr 1.3fr .7fr 1.3fr 70px 78px; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 12px; transition: background 150ms ease; }
+        .optg-choice-row { display: grid; grid-template-columns: 1.1fr 1.2fr .65fr 1.2fr 70px 82px 78px; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 12px; transition: background 150ms ease, opacity 150ms ease; }
         .optg-choice-row:hover { background: ${OPTG.warm}; }
+        .optg-choice-row.disabled { opacity: .58; background: var(--cream-2); }
+        .optg-choice-state { display:flex; align-items:center; justify-content:center; min-width:0; }
         @media (max-width: 760px) { .optg-choice-row { grid-template-columns: 1fr; gap: 6px; padding: 10px; border: 1px solid ${OPTG.border}; margin-bottom: 8px; } }
         .optg-input { width: 100%; border: 1px solid transparent; background: var(--cream-2); border-radius: 9px; padding: 7px 10px; font-size: 13px; color: ${OPTG.ink}; transition: background 150ms ease, border-color 150ms ease; }
         .optg-input:focus { outline: none; background: var(--surface); border-color: ${OPTG.primary}; }
         .optg-fav-btn { width: 30px; height: 30px; border-radius: 9px; border: 1px solid ${OPTG.border}; background: var(--surface); color: #C9C2B4; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 150ms ease; }
         .optg-fav-btn.active { background: ${OPTG.goldSoft}; border-color: #F2CB8A; color: ${OPTG.gold}; }
         .optg-add-choice { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; border: 1.5px dashed #C7CEDD; background: ${OPTG.primarySoft}; color: ${OPTG.primaryDark}; border-radius: 12px; padding: 10px; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 150ms ease; margin-top: 6px; }
-        .optg-add-choice:hover { border-color: ${OPTG.primary}; background: rgba(37,99,235,.14); }
+        .optg-add-choice:hover { border-color: ${OPTG.primary}; background: rgba(0,163,224,.14); }
         .optg-extra-toggle { border: none; background: none; color: ${OPTG.gray}; font-size: 11.5px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 4px; padding: 4px 6px; }
         .optg-extra-toggle:hover { color: ${OPTG.primaryDark}; }
         .optg-sidebar { position: sticky; top: 10px; display: flex; flex-direction: column; gap: 16px; }
@@ -8327,42 +9242,52 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
         <Icon name={helpOpen ? "chevron-up" : "chevron-down"} size={13} />
       </button>
       {helpOpen && (
-        <div style={{ background: OPTG.primarySoft, border: `1px solid rgba(37,99,235,.18)`, borderRadius: 14, padding: "14px 16px", fontSize: 12.5, color: OPTG.ink, lineHeight: 1.7, marginBottom: 16 }}>
+        <div style={{ background: OPTG.primarySoft, border: `1px solid rgba(0,163,224,.18)`, borderRadius: 14, padding: "14px 16px", fontSize: 12.5, color: OPTG.ink, lineHeight: 1.7, marginBottom: 16 }}>
           ตั้งค่าที่นี่ครั้งเดียว แล้วไปติ๊กเลือกว่าเมนูไหนใช้กลุ่มตัวเลือกไหนได้ในแท็บ "เมนู & สูตร" ตอนแก้ไขเมนู<br />
+          <strong>แก้ชื่อกลุ่มหรือชื่อตัวเลือกย่อยตรงนี้ได้เลย</strong> เมนูทุกเมนูที่ผูกกลุ่มนี้ไว้จะเห็นชื่อใหม่ทันที โดยไม่ต้องเข้าไปผูกใหม่ทีละเมนู<br />
           ถ้าตัวเลือกไหนแทนวัตถุดิบ (เช่น เลือกเมล็ด/นมคนละแบบ) ให้เลือก "วัตถุดิบเชื่อมโยง" ระบบจะตัดสต็อกตามที่ลูกค้าเลือกจริงแทนสูตรตั้งต้น (วัตถุดิบต้นทางและตัวเลือกต้องตั้ง "กลุ่มทางเลือก" ให้ตรงกันในแท็บวัตถุดิบก่อน)<br />
           เลือกวัตถุดิบเดิมของสูตรแล้วปรับ "% ที่ใช้" ได้ด้วย เช่น กลุ่ม "ความหวาน" เลือกไซรัปแล้วตั้งหวานปกติ 100%, หวานน้อย 50%, ไม่หวาน 0%<br />
           ถ้าตัวเลือกเดียวต้องปรับหลายวัตถุดิบพร้อมกัน ให้กด "ปรับวัตถุดิบอื่นพร้อมกัน" เพิ่มได้ไม่จำกัด ไม่ต้องตั้งกลุ่มทางเลือก<br />
+          ปิดสวิตช์ “เปิดใช้” เพื่อซ่อนตัวเลือกชั่วคราว ข้อมูลเดิมและประวัติออเดอร์จะไม่ถูกลบ และเปิดกลับมาใช้ใหม่ได้ทุกเมื่อ<br />
           กดไอคอนดาว ★ เพื่อตั้งตัวเลือกเริ่มต้น ลูกค้าจะไม่ต้องกดเลือกเองถ้าไม่ต้องการเปลี่ยน
         </div>
       )}
 
       <div className="optg-shell">
         <div style={{ minWidth: 0 }}>
-          {data.optionGroups.length === 0 && <EmptyNote text={'ยังไม่มีกลุ่มตัวเลือก กด "เพิ่มกลุ่มตัวเลือก" เพื่อเริ่ม'} />}
+          {draftGroups.length === 0 && <EmptyNote text={'ยังไม่มีกลุ่มตัวเลือก กด "เพิ่มกลุ่มตัวเลือก" เพื่อเริ่ม'} />}
 
-          {data.optionGroups.map((g) => {
+          {draftGroups.map((g, groupIndex) => {
             const isCollapsed = !!collapsed[g.id];
+            const linkedMenuCount = data.menus.filter((menu) => (menu.optionGroupIds || []).includes(g.id)).length;
             return (
               <div key={g.id} className="optg-card" ref={(el) => { groupRefs.current[g.id] = el; }} onClick={() => setActiveGroupId(g.id)}>
                 <div className="optg-card-head">
                   <button className="optg-collapse-btn" onClick={(e) => { e.stopPropagation(); toggleCollapse(g.id); }} title={isCollapsed ? "ขยาย" : "ย่อ"}>
                     <Icon name={isCollapsed ? "chevron-down" : "chevron-up"} size={15} />
                   </button>
-                  <input className="optg-name-input" value={g.name} onChange={(e) => patchGroup(g.id, { name: e.target.value })} />
-                  <span className="optg-badge">{g.choices.length} ตัวเลือก</span>
-                  <OptgToggle checked={g.required} onChange={(v) => patchGroup(g.id, { required: v })} label="บังคับเลือก" />
-                  <OptgKebab items={[{ icon: "trash", label: "ลบกลุ่มนี้", danger: true, onClick: () => removeGroup(g.id) }]} />
+                  <input ref={(element) => { inputRefs.current[`group:${g.id}`] = element; }} className="optg-name-input" value={g.name} onChange={(e) => patchGroup(g.id, { name: e.target.value })} placeholder="เช่น ระดับความหวาน" aria-label="ชื่อกลุ่มตัวเลือกเสริม" title="แก้แล้วมีผลกับทุกเมนูที่ผูกกลุ่มนี้" />
+                  <div className="optg-head-meta">
+                    <span className="optg-badge">เปิด {g.choices.filter((choice) => choice.enabled !== false).length}/{g.choices.length} ตัวเลือก</span>
+                    <span className="optg-badge" title="เมนูที่ผูกกับกลุ่มนี้">ผูก {linkedMenuCount} เมนู</span>
+                    <OptgToggle checked={g.required} onChange={(v) => patchGroup(g.id, { required: v })} label="บังคับเลือก" />
+                  </div>
+                  <div className="optg-head-menu"><OptgKebab items={[
+                    ...(groupIndex>0?[{icon:"chevron-up",label:"เลื่อนกลุ่มขึ้น",onClick:()=>moveGroup(g.id,-1)}]:[]),
+                    ...(groupIndex<draftGroups.length-1?[{icon:"chevron-down",label:"เลื่อนกลุ่มลง",onClick:()=>moveGroup(g.id,1)}]:[]),
+                    { icon: "trash", label: "ลบกลุ่มนี้", danger: true, onClick: () => setDeleteFor({kind:"group",groupId:g.id,label:g.name,linkedMenuCount}) }
+                  ]} /></div>
                 </div>
 
                 {!isCollapsed && (
                   <div className="optg-body">
                     <div className="optg-row-head">
-                      <span>ชื่อตัวเลือก</span><span>คำอธิบาย</span><span>ราคาเพิ่ม</span><span>วัตถุดิบเชื่อมโยง</span><span>ค่าเริ่มต้น</span><span></span>
+                      <span>ชื่อตัวเลือก</span><span>คำอธิบาย</span><span>ราคาเพิ่ม</span><span>วัตถุดิบเชื่อมโยง</span><span>ค่าเริ่มต้น</span><span>เปิดใช้</span><span></span>
                     </div>
-                    {g.choices.map((c) => (
+                    {g.choices.map((c, choiceIndex) => (
                       <div key={c.id}>
-                        <div className="optg-choice-row">
-                          <input className="optg-input" value={c.label} onChange={(e) => patchChoice(g.id, c.id, { label: e.target.value })} placeholder="ชื่อตัวเลือก" />
+                        <div className={`optg-choice-row${c.enabled === false ? " disabled" : ""}`}>
+                          <input ref={(element) => { inputRefs.current[`choice:${c.id}`] = element; }} className="optg-input" value={c.label} onChange={(e) => patchChoice(g.id, c.id, { label: e.target.value })} placeholder="เช่น หวานน้อย" aria-label={`ชื่อตัวเลือกในกลุ่ม ${g.name || "ที่สร้างใหม่"}`} title="แก้แล้วมีผลกับทุกเมนูที่ผูกกลุ่มนี้" />
                           <input className="optg-input" value={c.note} onChange={(e) => patchChoice(g.id, c.id, { note: e.target.value })} placeholder="คำอธิบาย (ถ้ามี)" />
                           <input className="optg-input" type="number" value={c.priceDelta} onChange={(e) => patchChoice(g.id, c.id, { priceDelta: Number(e.target.value) })} title="ราคาเพิ่ม (บาท)" />
                           <div style={{ display: "flex", gap: 6, alignItems: "center", minWidth: 0 }}>
@@ -8390,10 +9315,16 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
                           </div>
                           <button
                             className={"optg-fav-btn" + (c.isDefault ? " active" : "")}
+                            disabled={c.enabled === false}
                             onClick={() => setDefaultChoice(g.id, c.id)}
                             title={c.isDefault ? "เป็นค่าเริ่มต้นอยู่ (กดอีกครั้งเพื่อยกเลิก)" : "ตั้งเป็นค่าเริ่มต้น"}
                           ><Icon name="star" size={14} /></button>
-                          <OptgKebab items={[{ icon: "trash", label: "ลบตัวเลือกนี้", danger: true, onClick: () => removeChoice(g.id, c.id) }]} />
+                          <div className="optg-choice-state"><OptgToggle checked={c.enabled !== false} onChange={(enabled) => setChoiceEnabled(g.id, c.id, enabled)} label={c.enabled === false ? "ปิด" : "เปิด"} color={POS.primary} /></div>
+                          <OptgKebab items={[
+                            ...(choiceIndex>0?[{icon:"chevron-up",label:"เลื่อนขึ้น",onClick:()=>moveChoice(g.id,c.id,-1)}]:[]),
+                            ...(choiceIndex<g.choices.length-1?[{icon:"chevron-down",label:"เลื่อนลง",onClick:()=>moveChoice(g.id,c.id,1)}]:[]),
+                            { icon: "trash", label: "ลบตัวเลือกนี้", danger: true, onClick: () => setDeleteFor({kind:"choice",groupId:g.id,choiceId:c.id,label:c.label}) }
+                          ]} />
                         </div>
 
                         {(c.extraAdjustments || []).length > 0 && (
@@ -8453,11 +9384,11 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
             <div className="optg-side-card">
               <div style={{ fontSize: 13, fontWeight: 700, color: OPTG.ink, marginBottom: 3 }}>ตัวอย่างที่ลูกค้าเห็น</div>
               <div style={{ fontSize: 11.5, color: OPTG.gray, marginBottom: 12 }}>{activeGroup.name}{activeGroup.required ? " (บังคับเลือก)" : ""}</div>
-              {activeGroup.choices.length === 0 ? (
-                <EmptyNote text="กลุ่มนี้ยังไม่มีตัวเลือกย่อย" />
+              {activeGroup.choices.filter((choice) => choice.enabled !== false).length === 0 ? (
+                <EmptyNote text="กลุ่มนี้ยังไม่มีตัวเลือกที่เปิดใช้" />
               ) : (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-                  {activeGroup.choices.map((c) => (
+                  {activeGroup.choices.filter((choice) => choice.enabled !== false).map((c) => (
                     <span key={c.id} className={"optg-preview-choice" + (c.isDefault ? " default" : "")}>
                       {c.label || "…"}{c.priceDelta ? ` +฿${c.priceDelta}` : ""}
                     </span>
@@ -8467,11 +9398,11 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
             </div>
           )}
 
-          {data.optionGroups.length > 1 && (
+          {draftGroups.length > 1 && (
             <div className="optg-side-card">
               <div style={{ fontSize: 13, fontWeight: 700, color: OPTG.ink, marginBottom: 8 }}>ไปยังกลุ่ม</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                {data.optionGroups.map((g) => (
+                {draftGroups.map((g) => (
                   <button key={g.id} className={"optg-nav-item" + (g.id === activeGroupId ? " active" : "")} onClick={() => jumpTo(g.id)}>
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.name || "(ไม่มีชื่อ)"}</span>
                     <span style={{ color: OPTG.gray, fontWeight: 500, flexShrink: 0 }}>{g.choices.length}</span>
@@ -8482,6 +9413,14 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
           )}
         </div>
       </div>
+      <div style={{ position:"sticky", bottom:0, marginTop:16, background:"var(--surface)", border:"1px solid var(--line)", borderRadius:14, padding:"12px 18px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, flexWrap:"wrap", boxShadow:"0 -4px 20px rgba(0,0,0,.06)", zIndex:10 }}><div style={{ color:validationErrors.length?"var(--danger)":dirty?OPTG.primaryDark:OPTG.gray, fontSize:12.5 }}>{validationErrors[0] || (dirty?"มีการเปลี่ยนแปลงที่ยังไม่ได้บันทึก":"ไม่มีการเปลี่ยนแปลง")}</div><div style={{ display:"flex", gap:8 }}><button className="cbtn" disabled={!dirty} onClick={discardGroups}>ยกเลิกการเปลี่ยนแปลง</button><button className="cbtn cbtn-accent" disabled={!dirty||validationErrors.length>0} onClick={saveGroups}>บันทึกตัวเลือกเสริม</button></div></div>
+      {deleteFor&&<InvConfirmDialog
+        title={deleteFor.kind==="group"?"ลบกลุ่มตัวเลือกนี้?":"ลบตัวเลือกนี้?"}
+        message={deleteFor.kind==="group"?`“${deleteFor.label||"ไม่มีชื่อ"}” ผูกอยู่กับ ${deleteFor.linkedMenuCount||0} เมนู เมื่อบันทึก ระบบจะถอดกลุ่มนี้จากทุกเมนูด้วย`:`“${deleteFor.label||"ไม่มีชื่อ"}” จะหายจากทุกเมนูที่ใช้กลุ่มนี้หลังจากกดบันทึก`}
+        confirmLabel="ยืนยันลบ"
+        onConfirm={()=>{if(deleteFor.kind==="group")removeGroup(deleteFor.groupId);else removeChoice(deleteFor.groupId,deleteFor.choiceId);setDeleteFor(null);}}
+        onCancel={()=>setDeleteFor(null)}
+      />}
     </div>
   );
 }
@@ -8518,9 +9457,13 @@ function SettingsField({ label, error, suffix, children }) {
   );
 }
 
-function CoffeePassPanel({ data, orders, updateData, showToast }) {
+function CoffeePassPanel({ data, orders, customers, updateData, showToast, onCancelPass }) {
   const saved = data.settings.coffeePass || { name: "Coffee Pass", enabled: false, uses: 5, price: 250, validityDays: 30, menuIds: [] };
-  const drinkMenus = useMemo(() => data.menus.filter((menu) => productTypeOf(menu) === "drink"), [data.menus]);
+  // Keep newly-created drinks visible at the top. Previously they were appended to the
+  // end of a scrollable list, so an added menu looked as though it never reached Coffee Pass.
+  const drinkMenus = useMemo(() => data.menus
+    .filter((menu) => productTypeOf(menu) === "drink")
+    .sort((a, b) => String(b.createdAt || b.updatedAt || "").localeCompare(String(a.createdAt || a.updatedAt || "")) || String(a.name || "").localeCompare(String(b.name || ""), "th")), [data.menus]);
   const [name, setName] = useState(saved.name || "Coffee Pass");
   const [enabled, setEnabled] = useState(saved.enabled === true);
   const [uses, setUses] = useState(String(saved.uses || 5));
@@ -8528,20 +9471,44 @@ function CoffeePassPanel({ data, orders, updateData, showToast }) {
   const [validityDays, setValidityDays] = useState(String(saved.validityDays || 30));
   const [allMenus, setAllMenus] = useState((saved.menuIds || []).length === 0);
   const [menuIds, setMenuIds] = useState(saved.menuIds || []);
+  const [menuQuery, setMenuQuery] = useState("");
+  const [cancelFor, setCancelFor] = useState(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelError, setCancelError] = useState("");
+  const [cancelling, setCancelling] = useState(false);
 
+  const drinkMenuIdSet = useMemo(() => new Set(drinkMenus.map((menu) => menu.id)), [drinkMenus]);
+  const selectedMenuIds = menuIds.filter((menuId) => drinkMenuIdSet.has(menuId));
   const usesNum = Number(uses);
   const priceNum = Number(price);
   const validityNum = Number(validityDays);
-  const valid = name.trim() && Number.isInteger(usesNum) && usesNum >= 1 && usesNum <= 100 && Number.isFinite(priceNum) && priceNum >= 0 && Number.isInteger(validityNum) && validityNum >= 1 && validityNum <= 365 && (allMenus || menuIds.length > 0);
-  const normalizedMenuIds = allMenus ? [] : menuIds;
+  const valid = name.trim() && Number.isInteger(usesNum) && usesNum >= 1 && usesNum <= 100 && Number.isFinite(priceNum) && priceNum >= 0 && Number.isInteger(validityNum) && validityNum >= 1 && validityNum <= 365 && (allMenus || selectedMenuIds.length > 0);
+  const normalizedMenuIds = allMenus ? [] : selectedMenuIds;
   const dirty = name.trim() !== (saved.name || "Coffee Pass") || enabled !== (saved.enabled === true) || uses !== String(saved.uses || 5) || price !== String(saved.price ?? 250) || validityDays !== String(saved.validityDays || 30) || JSON.stringify(normalizedMenuIds) !== JSON.stringify(saved.menuIds || []);
 
   const passOrders = (orders || []).filter((order) => order.coffeePassPurchase);
   const activatedPasses = passOrders.filter((order) => order.coffeePassActivated && order.status !== "cancelled");
   const redemptionCount = (orders || []).filter((order) => order.passRedemption && order.status !== "cancelled").length;
+  const activePassHolders = (customers || []).flatMap((customer)=>Object.entries(customer.passes || {}).map(([id, pass])=>({ id, customer, ...(pass || {}) }))).filter((pass)=>Number(pass.remainingUses)>0 && Number(pass.expiresAt)>=Date.now() && pass.status!=="cancelled").sort((a,b)=>Number(a.expiresAt)-Number(b.expiresAt));
+  const expiringPasses = activePassHolders.filter((pass)=>Number(pass.expiresAt)-Date.now() <= 7*86400000);
+  const visibleDrinkMenus = drinkMenus.filter((menu)=>!menuQuery.trim() || `${menu.name} ${menu.category || ""}`.toLowerCase().includes(menuQuery.trim().toLowerCase()));
 
   function toggleMenu(menuId) {
+    if (allMenus) {
+      setAllMenus(false);
+      setMenuIds(drinkMenus.filter((menu) => menu.id !== menuId).map((menu) => menu.id));
+      return;
+    }
     setMenuIds((ids) => ids.includes(menuId) ? ids.filter((id) => id !== menuId) : [...ids, menuId]);
+  }
+
+  function toggleAllMenus() {
+    if (allMenus) {
+      setAllMenus(false);
+      setMenuIds(drinkMenus.map((menu) => menu.id));
+      return;
+    }
+    setAllMenus(true);
   }
 
   function savePackage() {
@@ -8552,6 +9519,22 @@ function CoffeePassPanel({ data, orders, updateData, showToast }) {
       };
     });
     showToast(enabled ? "บันทึกและเปิดขายแพ็กเกจแล้ว" : "บันทึกแพ็กเกจแล้ว");
+  }
+
+  async function confirmCancelPass() {
+    setCancelError("");
+    if (!cancelReason.trim()) { setCancelError("กรุณาระบุเหตุผลในการยกเลิก Pass"); return; }
+    setCancelling(true);
+    try {
+      await onCancelPass(cancelFor.customer.phone, cancelFor.id, cancelReason);
+      showToast(`ยกเลิก Coffee Pass ของ ${cancelFor.customer.name || cancelFor.customer.phone} แล้ว`);
+      setCancelFor(null);
+      setCancelReason("");
+    } catch (error) {
+      setCancelError(error.message || "ยกเลิก Coffee Pass ไม่สำเร็จ");
+    } finally {
+      setCancelling(false);
+    }
   }
 
   return (
@@ -8602,17 +9585,17 @@ function CoffeePassPanel({ data, orders, updateData, showToast }) {
 
           <div style={{ marginTop:20, paddingTop:17, borderTop:"1px solid var(--line)" }}>
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10 }}>
-              <div><h2>เมนูที่ร่วมแพ็กเกจ</h2><div style={{ marginTop:3, color:"var(--espresso-2)", fontSize:11.5 }}>{allMenus ? `เครื่องดื่มทั้งหมด ${drinkMenus.length} เมนู` : `เลือกแล้ว ${menuIds.length} เมนู`}</div></div>
-              <button type="button" className={allMenus ? "cbtn cbtn-accent" : "cbtn"} onClick={() => setAllMenus((value) => !value)}>{allMenus ? "✓ ทุกเมนู" : "เลือกทุกเมนู"}</button>
+              <div><h2>เมนูที่ร่วมแพ็กเกจ</h2><div style={{ marginTop:3, color:"var(--espresso-2)", fontSize:11.5 }}>{allMenus ? `เครื่องดื่มทั้งหมด ${drinkMenus.length} เมนู · เมนูใหม่จะร่วมรายการอัตโนมัติ` : `เลือกแล้ว ${selectedMenuIds.length} จาก ${drinkMenus.length} เมนู`}</div></div>
+              <button type="button" className={allMenus ? "cbtn cbtn-accent" : "cbtn"} onClick={toggleAllMenus}>{allMenus ? "✓ ทุกเมนู" : "เลือกทุกเมนู"}</button>
             </div>
-            {!allMenus && (
-              <div className="pkg-menu-grid">
-                {drinkMenus.map((menu) => {
-                  const selected = menuIds.includes(menu.id);
-                  return <button type="button" key={menu.id} className={`pkg-menu${selected ? " active" : ""}`} onClick={() => toggleMenu(menu.id)}><Icon name={selected ? "square-check" : "square"} size={15} /><span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>{menu.name}</span><small>฿{money(menu.priceStore)}</small></button>;
-                })}
-              </div>
-            )}
+            <div style={{ position:"relative", marginTop:10 }}><Icon name="search" size={14} style={{ position:"absolute", left:12, top:13, color:"var(--espresso-2)" }}/><input className="cfield" style={{ height:40, paddingLeft:35 }} value={menuQuery} onChange={(event)=>setMenuQuery(event.target.value)} placeholder="ค้นหาเมนูหรือหมวด..." /></div>
+            <div className="pkg-menu-grid">
+              {visibleDrinkMenus.map((menu) => {
+                const selected = allMenus || selectedMenuIds.includes(menu.id);
+                return <button type="button" key={menu.id} className={`pkg-menu${selected ? " active" : ""}`} onClick={() => toggleMenu(menu.id)}><Icon name={selected ? "square-check" : "square"} size={15} /><span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>{menu.name}</span>{!menu.available&&<small style={{ color:"var(--danger)", fontWeight:700 }}>ปิดขาย</small>}<small>฿{money(menu.priceStore)}</small></button>;
+              })}
+              {drinkMenus.length === 0 && <div style={{ gridColumn:"1 / -1", padding:"18px 10px", textAlign:"center", color:"var(--espresso-2)", fontSize:12 }}>ยังไม่มีเมนูเครื่องดื่ม</div>}
+            </div>
           </div>
 
           <div style={{ marginTop:18, padding:"10px 12px", borderRadius:11, background:"var(--cream-2)", color:"var(--espresso-3)", fontSize:11.5, lineHeight:1.6 }}>
@@ -8636,8 +9619,13 @@ function CoffeePassPanel({ data, orders, updateData, showToast }) {
             <h2>วิธีทำงาน</h2>
             <ol style={{ margin:"10px 0 0", paddingLeft:20, color:"var(--espresso-3)", fontSize:12, lineHeight:1.9 }}><li>ลูกค้าซื้อ Pass ตั้ง Passcode และชำระครั้งเดียว</li><li>สิทธิ์เข้าบัญชีตามเบอร์โทรหลังยืนยันเงิน</li><li>ลูกค้าเลือก Pass และเมนูที่ร่วมรายการ</li><li>กรอก Passcode แล้วระบบหักครั้งละ 1 สิทธิ์</li></ol>
           </div>
+          <div className="pkg-card">
+            <div style={{ display:"flex", justifyContent:"space-between", gap:8, alignItems:"baseline" }}><h2>ผู้ถือ Pass ที่ใช้งานอยู่</h2><span style={{ color:expiringPasses.length?"var(--warning-text)":"var(--espresso-2)", fontSize:11.5, fontWeight:700 }}>ใกล้หมดอายุ {expiringPasses.length}</span></div>
+            {activePassHolders.length===0?<div style={{ marginTop:10 }}><EmptyNote text="ยังไม่มี Pass ที่ใช้งานอยู่"/></div>:<div style={{ marginTop:10, maxHeight:300, overflowY:"auto" }}>{activePassHolders.slice(0,50).map((pass)=><div key={`${pass.customer.phone}_${pass.id}`} style={{ display:"grid", gridTemplateColumns:"minmax(0,1fr) auto auto", alignItems:"center", gap:10, padding:"8px 0", borderBottom:"1px solid var(--line-soft)", fontSize:12 }}><div style={{minWidth:0}}><b style={{display:"block",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{pass.customer.name||pass.customer.phone}</b><div style={{ color:"var(--espresso-2)", marginTop:2 }}>{pass.customer.phone}</div></div><div style={{ textAlign:"right" }}><b>{pass.remainingUses}/{pass.totalUses} สิทธิ์</b><div style={{ color:Number(pass.expiresAt)-Date.now()<=7*86400000?"var(--warning-text)":"var(--espresso-2)", marginTop:2 }}>หมด {new Date(Number(pass.expiresAt)).toLocaleDateString("th-TH")}</div></div><button type="button" className="cbtn cbtn-danger" style={{padding:"6px 8px",fontSize:10.5}} onClick={()=>{setCancelFor(pass);setCancelReason("");setCancelError("");}}><Icon name="ban" size={13}/> ยกเลิก</button></div>)}</div>}
+          </div>
         </div>
       </div>
+      {cancelFor && <div style={{position:"fixed",inset:0,zIndex:90,display:"flex",alignItems:"center",justifyContent:"center",padding:16,background:"rgba(17,24,39,.38)"}} onClick={()=>!cancelling&&setCancelFor(null)}><div style={{width:"min(390px,100%)",padding:20,borderRadius:16,background:"var(--surface)",boxShadow:"0 22px 60px rgba(17,24,39,.22)"}} role="alertdialog" aria-modal="true" aria-label="ยืนยันยกเลิก Coffee Pass" onClick={(event)=>event.stopPropagation()}><h3 style={{margin:"0 0 5px",color:POS.navy}}>ยกเลิก Coffee Pass?</h3><p style={{margin:"0 0 12px",color:POS.gray,fontSize:12,lineHeight:1.55}}>ลูกค้า <b>{cancelFor.customer.name||cancelFor.customer.phone}</b> เหลือ {Number(cancelFor.remainingUses)||0} สิทธิ์ เมื่อยกเลิกแล้วจะใช้สิทธิ์ไม่ได้ทันที และระบบจะไม่คืนเงินหรือสร้างรายการบัญชีคืนอัตโนมัติ</p><label style={{display:"block",marginBottom:5,color:POS.navy,fontSize:11.5,fontWeight:700}}>เหตุผล *</label><input className="cfield" style={{height:42}} value={cancelReason} onChange={(event)=>setCancelReason(event.target.value)} placeholder="เช่น คืนเงินให้ลูกค้าแล้ว" />{cancelError&&<div style={{marginTop:6,color:"var(--danger)",fontSize:11}}>{cancelError}</div>}<div style={{display:"flex",gap:8,marginTop:14}}><button type="button" className="cbtn" style={{flex:1}} disabled={cancelling} onClick={()=>setCancelFor(null)}>ไม่ยกเลิก</button><button type="button" className="cbtn cbtn-danger" style={{flex:1}} disabled={cancelling} onClick={confirmCancelPass}>{cancelling?"กำลังยกเลิก...":"ยืนยันยกเลิก"}</button></div></div></div>}
     </div>
   );
 }
@@ -8687,10 +9675,14 @@ function bannerNameFromUrl(url) {
   }
 }
 
-function BannerCard({ url, index, editing, onEdit, onChange, onDelete, dragProps }) {
+function normalizeBannerEnabledStates(value, length) {
+  return Array.from({ length }, (_, index) => value?.[index] !== false);
+}
+
+function BannerCard({ url, index, enabled, editing, onEdit, onChange, onDelete, onToggleEnabled, dragProps }) {
   return (
     <div
-      className="set-banner-card"
+      className={`set-banner-card${enabled ? "" : " is-disabled"}`}
       draggable
       {...dragProps}
     >
@@ -8700,7 +9692,9 @@ function BannerCard({ url, index, editing, onEdit, onChange, onDelete, dragProps
         <div style={{ fontSize: 13, fontWeight: 600, color: "var(--espresso-4)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {bannerNameFromUrl(url)}
         </div>
-        <div style={{ fontSize: 11.5, color: "var(--espresso-2)", marginTop: 1 }}>แนะนำขนาด 1200 × 300 px</div>
+        <div style={{ fontSize: 11.5, color: enabled ? "var(--success-dark)" : "var(--espresso-2)", marginTop: 1, fontWeight: 600 }}>
+          {enabled ? "แสดงในหน้าลูกค้า" : "ซ่อนจากหน้าลูกค้า"}
+        </div>
         {editing && (
           <input
             className="cfield" autoFocus value={url} onChange={(e) => onChange(e.target.value)}
@@ -8709,6 +9703,16 @@ function BannerCard({ url, index, editing, onEdit, onChange, onDelete, dragProps
         )}
       </div>
       <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+        <button
+          type="button"
+          className={`set-icon-btn${enabled ? " is-banner-enabled" : ""}`}
+          onClick={onToggleEnabled}
+          title={enabled ? "ซ่อนแบนเนอร์จากหน้าลูกค้า" : "แสดงแบนเนอร์ในหน้าลูกค้า"}
+          aria-label={enabled ? "ซ่อนแบนเนอร์จากหน้าลูกค้า" : "แสดงแบนเนอร์ในหน้าลูกค้า"}
+          aria-pressed={enabled}
+        >
+          <Icon name={enabled ? "eye" : "eye-off"} size={15} />
+        </button>
         <button type="button" className="set-icon-btn" onClick={onEdit} title="เปลี่ยนรูป" aria-label="เปลี่ยนรูป">
           <Icon name="replace" size={15} />
         </button>
@@ -8780,15 +9784,21 @@ function OrderLinkCard({ uid }) {
   );
 }
 
-function SettingsPanel({ data, updateData, showToast, uid }) {
+function SettingsPanel({ data, updateData, showToast, uid, auditLogs, onDirtyChange }) {
   const s = data.settings;
   const [shopName, setShopName] = useState(s.shopName);
   const [overhead, setOverhead] = useState(String(s.overheadPerCup));
   const [platforms, setPlatforms] = useState(s.platforms);
   const [promptpayId, setPromptpayId] = useState(s.promptpayId || "");
   const [seasonalEffect, setSeasonalEffect] = useState(s.seasonalEffect || "auto");
+  const savedCustomerTheme = normalizeCustomerThemeSettings(s.customerTheme);
+  const [customerThemeMode, setCustomerThemeMode] = useState(savedCustomerTheme.mode);
+  const [customerDarkStart, setCustomerDarkStart] = useState(savedCustomerTheme.darkStart);
+  const [customerLightStart, setCustomerLightStart] = useState(savedCustomerTheme.lightStart);
   const originalBannerUrls = s.bannerImageUrls && s.bannerImageUrls.length ? s.bannerImageUrls : (s.bannerImageUrl ? [s.bannerImageUrl] : []);
+  const originalBannerEnabledStates = normalizeBannerEnabledStates(s.bannerEnabledStates, originalBannerUrls.length);
   const [bannerImageUrls, setBannerImageUrls] = useState(originalBannerUrls);
+  const [bannerEnabledStates, setBannerEnabledStates] = useState(originalBannerEnabledStates);
   const [editingBannerIdx, setEditingBannerIdx] = useState(null);
   const [dragBannerIdx, setDragBannerIdx] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -8806,7 +9816,11 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
   }
   function addBannerUrl() {
     setBannerImageUrls((u) => [...u, ""]);
+    setBannerEnabledStates((states) => [...states, true]);
     setEditingBannerIdx(bannerImageUrls.length);
+  }
+  function toggleBannerEnabled(idx) {
+    setBannerEnabledStates((states) => states.map((enabled, i) => (i === idx ? !enabled : enabled)));
   }
   function requestRemoveBanner(idx) {
     const url = bannerImageUrls[idx];
@@ -8814,11 +9828,18 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
       setConfirmDeleteBanner(idx);
     } else {
       setBannerImageUrls((u) => u.filter((_, i) => i !== idx));
+      setBannerEnabledStates((states) => states.filter((_, i) => i !== idx));
     }
   }
   function reorderBanner(from, to) {
     setBannerImageUrls((u) => {
       const next = u.slice();
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+    setBannerEnabledStates((states) => {
+      const next = states.slice();
       const [moved] = next.splice(from, 1);
       next.splice(to, 0, moved);
       return next;
@@ -8841,29 +9862,51 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
     }
   }
 
-  function toggleAcceptingOrders() {
+  async function toggleAcceptingOrders() {
     if (s.acceptingOrders) {
       setConfirmCloseOrders(true);
       return;
     }
-    updateData((next) => { next.settings.acceptingOrders = true; });
-    showToast("เปิดรับออเดอร์ลูกค้าแล้ว");
+    try {
+      await updateData((next) => { next.settings.acceptingOrders = true; });
+      showToast("เปิดรับออเดอร์ลูกค้าแล้ว");
+    } catch (_) { /* toast กลางระบบแสดงรายละเอียดแล้ว */ }
   }
-  function confirmCloseOrdersNow() {
-    updateData((next) => { next.settings.acceptingOrders = false; });
-    showToast("ปิดรับออเดอร์ลูกค้าแล้ว");
-    setConfirmCloseOrders(false);
+  async function confirmCloseOrdersNow() {
+    try {
+      await updateData((next) => { next.settings.acceptingOrders = false; });
+      showToast("ปิดรับออเดอร์ลูกค้าแล้ว");
+      setConfirmCloseOrders(false);
+    } catch (_) { /* toast กลางระบบแสดงรายละเอียดแล้ว */ }
   }
 
-  function toggleSlipTestMode(next) {
-    updateData((d) => { d.settings.slipTestMode = next; });
-    showToast(next ? "เปิดโหมดทดสอบสลิปแล้ว" : "ปิดโหมดทดสอบสลิปแล้ว");
+  async function toggleSlipTestMode(next) {
+    try {
+      await updateData((d) => { d.settings.slipTestMode = next; });
+      showToast(next ? "เปิดโหมดทดสอบสลิปแล้ว" : "ปิดโหมดทดสอบสลิปแล้ว");
+    } catch (_) { /* toast กลางระบบแสดงรายละเอียดแล้ว */ }
   }
 
   // validation
   const shopNameError = shopName.trim() ? "" : "กรุณาใส่ชื่อร้าน";
   const overheadNum = Number(overhead);
   const overheadError = overhead.trim() === "" || Number.isNaN(overheadNum) || overheadNum < 0 ? "กรอกตัวเลขที่มากกว่าหรือเท่ากับ 0" : "";
+  const customerThemeError = customerThemeMode === "schedule" && customerDarkStart === customerLightStart
+    ? "เวลาเริ่มโหมดมืดและโหมดสว่างต้องไม่ตรงกัน"
+    : "";
+  const promptpayDigits = promptpayId.replace(/\D/g, "");
+  const promptpayError = promptpayId.trim() && ![10,13].includes(promptpayDigits.length)
+    ? "กรุณากรอกเบอร์โทร 10 หลัก หรือเลขบัตรประชาชน 13 หลัก"
+    : "";
+  function bannerErrorFor(value) {
+    if (!value.trim()) return "กรุณาใส่ URL รูป หรือกดลบรายการนี้";
+    try {
+      const parsed = new URL(value.trim());
+      return ["http:","https:"].includes(parsed.protocol) ? "" : "URL ต้องขึ้นต้นด้วย http:// หรือ https://";
+    } catch (_) {
+      return "รูปแบบ URL ไม่ถูกต้อง";
+    }
+  }
   const platformNameCounts = useMemo(() => {
     const counts = {};
     for (const p of platforms) {
@@ -8880,7 +9923,7 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
     if (p.gpPercent === "" || Number.isNaN(gp) || gp < 0 || gp > 100) return "GP ต้องอยู่ระหว่าง 0-100";
     return "";
   }
-  const hasErrors = !!shopNameError || !!overheadError || platforms.some((p) => !!platformErrorFor(p));
+  const hasErrors = !!shopNameError || !!overheadError || !!customerThemeError || !!promptpayError || platforms.some((p) => !!platformErrorFor(p)) || bannerImageUrls.some((url)=>!!bannerErrorFor(url));
 
   const dirty =
     shopName !== s.shopName ||
@@ -8888,7 +9931,16 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
     JSON.stringify(platforms) !== JSON.stringify(s.platforms) ||
     promptpayId !== (s.promptpayId || "") ||
     seasonalEffect !== (s.seasonalEffect || "auto") ||
-    JSON.stringify(bannerImageUrls) !== JSON.stringify(originalBannerUrls);
+    customerThemeMode !== savedCustomerTheme.mode ||
+    customerDarkStart !== savedCustomerTheme.darkStart ||
+    customerLightStart !== savedCustomerTheme.lightStart ||
+    JSON.stringify(bannerImageUrls) !== JSON.stringify(originalBannerUrls) ||
+    JSON.stringify(bannerEnabledStates) !== JSON.stringify(originalBannerEnabledStates);
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    return () => onDirtyChange?.(false);
+  }, [dirty, onDirtyChange]);
 
   useEffect(() => {
     function handler(e) {
@@ -8906,28 +9958,34 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
     setPlatforms(s.platforms);
     setPromptpayId(s.promptpayId || "");
     setSeasonalEffect(s.seasonalEffect || "auto");
+    setCustomerThemeMode(savedCustomerTheme.mode);
+    setCustomerDarkStart(savedCustomerTheme.darkStart);
+    setCustomerLightStart(savedCustomerTheme.lightStart);
     setBannerImageUrls(originalBannerUrls);
+    setBannerEnabledStates(originalBannerEnabledStates);
     setEditingBannerIdx(null);
   }
 
-  // updateData ในระบบนี้เป็น local state update ที่ sync ทันที + debounce เขียน Firebase เบื้องหลัง 400ms (fire-and-forget,
-  // error ของการเขียนจริงมี toast กลางระบบดักอยู่แล้วที่ ShopApp) หน้านี้จึงโชว์ loading สั้นๆ กันกดซ้ำ/ให้เห็น feedback
-  // ไม่ได้รอผลเขียนจริงจบเป็น promise เพราะ save() เดิมของทั้งระบบไม่เคยมี promise ให้ await อยู่แล้ว
-  function save() {
+  async function save() {
     if (hasErrors || saving) return;
     setSaving(true);
-    updateData((next) => {
-      next.settings.shopName = shopName.trim();
-      next.settings.overheadPerCup = Number(overhead);
-      next.settings.platforms = platforms;
-      next.settings.promptpayId = promptpayId.trim();
-      next.settings.seasonalEffect = seasonalEffect;
-      next.settings.bannerImageUrls = bannerImageUrls.map((u) => u.trim()).filter(Boolean);
-    });
-    setTimeout(() => {
-      setSaving(false);
+    try {
+      await updateData((next) => {
+        next.settings.shopName = shopName.trim();
+        next.settings.overheadPerCup = Number(overhead);
+        next.settings.platforms = platforms.map((platform)=>({...platform,name:platform.name.trim(),gpPercent:Number(platform.gpPercent)}));
+        next.settings.promptpayId = promptpayDigits;
+        next.settings.seasonalEffect = seasonalEffect;
+        next.settings.customerTheme = { mode:customerThemeMode, darkStart:customerDarkStart, lightStart:customerLightStart };
+        next.settings.bannerImageUrls = bannerImageUrls.map((url) => url.trim());
+        next.settings.bannerEnabledStates = bannerImageUrls.map((_, index) => bannerEnabledStates[index] !== false);
+      });
+      savedPlatformIdsRef.current = new Set(platforms.map((platform)=>platform.id));
+      savedBannerUrlsRef.current = new Set(bannerImageUrls.map((url)=>url.trim()));
       showToast("บันทึกการตั้งค่าแล้ว");
-    }, 400);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -8956,11 +10014,15 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
         }
         .set-banner-card { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 8px; background: var(--surface); cursor: grab; }
         .set-banner-card:active { cursor: grabbing; }
+        .set-banner-card.is-disabled { background: var(--cream-2); }
+        .set-banner-card.is-disabled .set-banner-thumb { opacity: .45; filter: grayscale(.65); }
+        .set-icon-btn.is-banner-enabled { color: var(--success-dark); border-color: var(--success); background: var(--success-light); }
         .set-drag-handle { color: var(--espresso-2); flex-shrink: 0; cursor: grab; touch-action: none; }
         .set-banner-thumb { width: 76px; height: 40px; border-radius: 8px; overflow: hidden; flex-shrink: 0; background: var(--cream-2); }
         .set-banner-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
         .set-banner-thumb-empty { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--espresso-2); }
         .set-season-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+        .set-theme-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
         .set-season-option { min-height: 76px; padding: 11px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--espresso-4); text-align: left; cursor: pointer; transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease; }
         .set-season-option:hover { border-color: var(--sage); background: var(--cream-2); }
         .set-season-option.active { border-color: var(--sage); background: var(--sage-light); box-shadow: inset 0 0 0 1px var(--sage); }
@@ -8968,6 +10030,8 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
         .set-season-icon { display: block; font-size: 21px; line-height: 1; margin-bottom: 7px; }
         .set-season-name { display: block; font-size: 12.5px; font-weight: 700; }
         .set-season-note { display: block; margin-top: 2px; font-size: 10.5px; line-height: 1.35; color: var(--espresso-2); }
+        .set-theme-times { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:12px; padding:12px; border:1px solid var(--line); border-radius:12px; background:var(--cream-2); }
+        @media (max-width: 560px) { .set-theme-grid { grid-template-columns: 1fr; } .set-theme-times { grid-template-columns:1fr; } }
         .set-alert { display: flex; gap: 8px; align-items: flex-start; background: var(--gold-light); border: 1px solid var(--gold); color: var(--gold-dark); border-radius: 10px; padding: 10px 12px; font-size: 12px; line-height: 1.5; margin-top: 10px; }
         .set-savebar { position: sticky; bottom: 0; margin-top: 24px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 18px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; box-shadow: 0 -4px 20px rgba(0,0,0,.06); z-index: 10; }
         .set-empty { text-align: center; padding: 24px 10px; color: var(--espresso-2); font-size: 12.5px; }
@@ -9052,8 +10116,8 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
           </SettingsCard>
 
           <SettingsCard icon="qrcode" title="การชำระเงินและ PromptPay">
-            <SettingsField label="เบอร์พร้อมเพย์ / เลขบัตรประชาชน">
-              <TextField className="cfield" style={{ height: 42 }} value={promptpayId} onChange={setPromptpayId} placeholder="0812345678" />
+            <SettingsField label="เบอร์พร้อมเพย์ / เลขบัตรประชาชน" error={promptpayError}>
+              <TextField className="cfield" style={{ height: 42, borderColor:promptpayError?"var(--danger)":undefined }} value={promptpayId} onChange={setPromptpayId} placeholder="0812345678" />
             </SettingsField>
             <p style={{ fontSize: 12, color: "var(--espresso-2)", margin: "-6px 0 16px" }}>ใช้สำหรับสร้าง QR รับเงินในหน้าสั่งซื้อของลูกค้า ต้องบันทึกก่อนจึงจะใช้งานได้</p>
 
@@ -9082,10 +10146,51 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
               <li>แต่ละแพลตฟอร์มเดลิเวอรี่หัก GP ตาม % ที่ตั้งไว้ในการ์ด "แพลตฟอร์มเดลิเวอรีและ GP" ด้านบน</li>
             </ul>
           </SettingsAccordion>
+
+          <SettingsCard icon="history" title="ประวัติการเปลี่ยนแปลงล่าสุด" subtitle="ช่วยตรวจว่าใครทำอะไรและเมื่อใด รายการสำคัญจะถูกบันทึกอัตโนมัติ">
+            {(auditLogs||[]).length===0?<div className="set-empty">ยังไม่มีประวัติการเปลี่ยนแปลง</div>:<div style={{ display:"flex", flexDirection:"column", gap:0 }}>{auditLogs.slice(0,10).map((entry)=>{const labels={restock:"เติมสต็อก",bulk_restock:"รับสต็อกหลายรายการ",stock_adjustment:"ปรับสต็อกนับจริง",loyalty_adjustment:"ปรับเมล็ดสะสม",coffee_pass_cancelled:"ยกเลิก Coffee Pass",accounting_create:"เพิ่มรายการบัญชี",accounting_update:"แก้รายการบัญชี",accounting_delete:"ลบรายการบัญชี",admin_checkout:"ขายหน้าร้าน",online_checkout:"ยืนยันออเดอร์ออนไลน์",order_cancelled:"ยกเลิกออเดอร์"};return <div key={entry.id} style={{ display:"flex", justifyContent:"space-between", gap:12, padding:"9px 0", borderBottom:"1px solid var(--line)", fontSize:12 }}><div><b style={{ color:"var(--espresso-4)" }}>{labels[entry.action]||entry.action}</b>{entry.details?.reason&&<div style={{ color:"var(--espresso-2)", marginTop:2 }}>เหตุผล: {entry.details.reason}</div>}</div><time style={{ color:"var(--espresso-2)", whiteSpace:"nowrap" }}>{entry.createdAt?new Date(entry.createdAt).toLocaleString("th-TH",{dateStyle:"short",timeStyle:"short"}):"—"}</time></div>;})}</div>}
+          </SettingsCard>
         </div>
 
         <div className="set-col">
           <OrderLinkCard uid={uid} />
+
+          <SettingsCard icon="moon-stars" title="ธีมหน้าลูกค้า" subtitle="บังคับโหมดสว่าง/มืดได้ทันที หรือให้สลับอัตโนมัติตามเวลาไทย">
+            <div className="set-theme-grid" role="radiogroup" aria-label="เลือกธีมหน้าลูกค้า">
+              {[
+                { value:"light", icon:"☀", name:"Light", note:"เปิดโหมดสว่างตลอด" },
+                { value:"dark", icon:"☾", name:"Dark", note:"เปิดโหมดมืดตลอด" },
+                { value:"schedule", icon:"◷", name:"Schedule", note:"สลับตามเวลาที่กำหนด" },
+              ].map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={customerThemeMode === option.value}
+                  className={`set-season-option${customerThemeMode === option.value ? " active" : ""}`}
+                  onClick={() => setCustomerThemeMode(option.value)}
+                >
+                  <span className="set-season-icon" aria-hidden="true">{option.icon}</span>
+                  <span className="set-season-name">{option.name}</span>
+                  <span className="set-season-note">{option.note}</span>
+                </button>
+              ))}
+            </div>
+            {customerThemeMode === "schedule" && (
+              <div className="set-theme-times">
+                <SettingsField label="เริ่มโหมดมืด">
+                  <input className="cfield" style={{ height:42 }} type="time" value={customerDarkStart} onChange={(event) => setCustomerDarkStart(event.target.value)} />
+                </SettingsField>
+                <SettingsField label="กลับเป็นโหมดสว่าง" error={customerThemeError}>
+                  <input className="cfield" style={{ height:42 }} type="time" value={customerLightStart} onChange={(event) => setCustomerLightStart(event.target.value)} />
+                </SettingsField>
+              </div>
+            )}
+            <div style={{ marginTop:10, padding:"9px 11px", borderRadius:10, background:"var(--info-light)", color:"var(--primary-text)", fontSize:11.5, lineHeight:1.5 }}>
+              ตัวอย่างตอนนี้: <strong>{customerThemeForSettings({ mode:customerThemeMode, darkStart:customerDarkStart, lightStart:customerLightStart }) === "dark" ? "Dark Mode" : "Light Mode"}</strong>
+              {customerThemeMode === "schedule" ? " · ตารางเวลาใช้เขตเวลา Asia/Bangkok" : " · ระบบจะใช้โหมดนี้ตลอดจนกว่าจะเปลี่ยนใหม่"}
+            </div>
+          </SettingsCard>
 
           <SettingsCard icon="sparkles" title="เอฟเฟกต์เทศกาลหน้าลูกค้า" subtitle="ตกแต่งทุกขั้นตอนของหน้าสั่งซื้อโดยไม่บังปุ่มหรือรบกวนการใช้งาน">
             <div className="set-season-grid" role="radiogroup" aria-label="เลือกเอฟเฟกต์เทศกาล">
@@ -9114,7 +10219,7 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
             </p>
           </SettingsCard>
 
-          <SettingsCard icon="photo" title="แบนเนอร์หน้าลูกค้า" subtitle="ใส่ได้หลายรูป ระบบจะเลื่อนสไลด์วนอัตโนมัติที่หน้าลูกค้า ไม่ใส่รูปเลยถ้าไม่ต้องการแสดงแบนเนอร์">
+          <SettingsCard icon="photo" title="แบนเนอร์หน้าลูกค้า" subtitle="ใส่ได้หลายรูปและกดไอคอนรูปตาเพื่อซ่อนบางแบนเนอร์ชั่วคราว โดยไม่ต้องลบรูปออก">
             {bannerImageUrls.length === 0 ? (
               <div className="set-empty">
                 <Icon name="photo-off" size={26} style={{ display: "block", margin: "0 auto 8px", color: "var(--espresso-2)" }} />
@@ -9122,23 +10227,27 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
               </div>
             ) : (
               bannerImageUrls.map((url, idx) => (
-                <BannerCard
-                  key={idx}
-                  url={url}
-                  index={idx}
-                  editing={editingBannerIdx === idx}
-                  onEdit={() => setEditingBannerIdx(editingBannerIdx === idx ? null : idx)}
-                  onChange={(v) => updateBannerUrl(idx, v)}
-                  onDelete={() => requestRemoveBanner(idx)}
-                  dragProps={{
-                    onDragStart: () => setDragBannerIdx(idx),
-                    onDragOver: (e) => e.preventDefault(),
-                    onDrop: () => {
-                      if (dragBannerIdx !== null && dragBannerIdx !== idx) reorderBanner(dragBannerIdx, idx);
-                      setDragBannerIdx(null);
-                    },
-                  }}
-                />
+                <Fragment key={idx}>
+                  <BannerCard
+                    url={url}
+                    index={idx}
+                    enabled={bannerEnabledStates[idx] !== false}
+                    editing={editingBannerIdx === idx}
+                    onEdit={() => setEditingBannerIdx(editingBannerIdx === idx ? null : idx)}
+                    onChange={(v) => updateBannerUrl(idx, v)}
+                    onToggleEnabled={() => toggleBannerEnabled(idx)}
+                    onDelete={() => requestRemoveBanner(idx)}
+                    dragProps={{
+                      onDragStart: () => setDragBannerIdx(idx),
+                      onDragOver: (e) => e.preventDefault(),
+                      onDrop: () => {
+                        if (dragBannerIdx !== null && dragBannerIdx !== idx) reorderBanner(dragBannerIdx, idx);
+                        setDragBannerIdx(null);
+                      },
+                    }}
+                  />
+                  {bannerErrorFor(url) && <div style={{ color:"var(--danger)", fontSize:11.5, margin:"-4px 0 8px 32px" }}>{bannerErrorFor(url)}</div>}
+                </Fragment>
               ))
             )}
             <button className="cbtn" style={{ marginTop: 6 }} onClick={addBannerUrl}>
@@ -9194,7 +10303,11 @@ function SettingsPanel({ data, updateData, showToast, uid }) {
           title="ลบแบนเนอร์นี้?"
           message="แบนเนอร์นี้จะหายไปจากสไลด์โฆษณาหน้าลูกค้าทันทีหลังบันทึก"
           confirmLabel="ลบแบนเนอร์"
-          onConfirm={() => { setBannerImageUrls((u) => u.filter((_, i) => i !== confirmDeleteBanner)); setConfirmDeleteBanner(null); }}
+          onConfirm={() => {
+            setBannerImageUrls((u) => u.filter((_, i) => i !== confirmDeleteBanner));
+            setBannerEnabledStates((states) => states.filter((_, i) => i !== confirmDeleteBanner));
+            setConfirmDeleteBanner(null);
+          }}
           onCancel={() => setConfirmDeleteBanner(null)}
         />
       )}
@@ -9289,28 +10402,15 @@ export default function App() {
     if (saved === "dark" || saved === "light") return saved;
     return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   });
-  const [customerTheme, setCustomerTheme] = useState(() => customerThemeForTime());
-
   const orderShopUid = window.location.pathname.match(/^\/order\/([^/]+)/)?.[1] || null;
 
   useEffect(() => {
-    const activeTheme = orderShopUid ? customerTheme : theme;
-    document.documentElement.dataset.theme = activeTheme;
-    document.documentElement.style.colorScheme = activeTheme;
+    if (orderShopUid) return undefined;
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
     localStorage.setItem("coffee-shop-theme", theme);
-  }, [theme, customerTheme, orderShopUid]);
-
-  useEffect(() => {
-    if (!orderShopUid) return undefined;
-    let timer;
-    const syncAndSchedule = () => {
-      const now = new Date();
-      setCustomerTheme(customerThemeForTime(now));
-      timer = window.setTimeout(syncAndSchedule, Math.max(1000, nextCustomerThemeChange(now) - now.getTime() + 100));
-    };
-    syncAndSchedule();
-    return () => window.clearTimeout(timer);
-  }, [orderShopUid]);
+    return undefined;
+  }, [theme, orderShopUid]);
 
   function toggleTheme() {
     setTheme((current) => current === "dark" ? "light" : "dark");

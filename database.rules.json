@@ -13,6 +13,9 @@
         "promotions": {
           ".read": "auth != null"
         },
+        "popupAds": {
+          ".read": "auth != null"
+        },
         "settings": {
           "shopName": { ".read": "auth != null" },
           "promptpayId": { ".read": "auth != null" },
@@ -20,9 +23,12 @@
           "slipTestMode": { ".read": "auth != null" },
           "bannerImageUrl": { ".read": "auth != null" },
           "bannerImageUrls": { ".read": "auth != null" },
+          "bannerEnabledStates": { ".read": "auth != null" },
           "categoryOrder": { ".read": "auth != null" },
           "loyaltyBeanGoal": { ".read": "auth != null" },
+          "loyaltyRewardValue": { ".read": "auth != null" },
           "seasonalEffect": { ".read": "auth != null" },
+          "customerTheme": { ".read": "auth != null" },
           "coffeePass": { ".read": "auth != null" }
         }
       }
@@ -46,8 +52,14 @@
         ".read": "auth != null && auth.uid === $uid",
         ".write": "auth != null && auth.uid === $uid",
         "$phone": {
-          ".read": "auth != null"
+          ".read": "auth != null && auth.uid === $uid"
         }
+      }
+    },
+    "auditLogs": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
       }
     },
     "sales": {
@@ -61,6 +73,92 @@
         ".read": "auth != null && auth.uid === $uid",
         ".write": "auth != null && auth.uid === $uid"
       }
+    },
+    "debtMembers": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": false
+      }
+    },
+    "debts": {
+      "$debtId": {
+        ".read": "auth != null && (data.child('creditorUid').val() === auth.uid || data.child('debtorUid').val() === auth.uid)",
+        ".write": false
+      }
+    },
+    "debtPayments": {
+      "$debtId": {
+        ".read": "auth != null && (root.child('debts').child($debtId).child('creditorUid').val() === auth.uid || root.child('debts').child($debtId).child('debtorUid').val() === auth.uid)",
+        ".write": false
+      }
+    },
+    "debtChangeRequests": {
+      "$debtId": {
+        ".read": "auth != null && (root.child('debts').child($debtId).child('creditorUid').val() === auth.uid || root.child('debts').child($debtId).child('debtorUid').val() === auth.uid)",
+        ".write": false
+      }
+    },
+    "debtConsentRequests": {
+      "$debtId": {
+        ".read": "auth != null && (root.child('debts').child($debtId).child('creditorUid').val() === auth.uid || root.child('debts').child($debtId).child('debtorUid').val() === auth.uid)",
+        ".write": false
+      }
+    },
+    "debtAgreementVersions": {
+      "$debtId": {
+        ".read": "auth != null && (root.child('debts').child($debtId).child('creditorUid').val() === auth.uid || root.child('debts').child($debtId).child('debtorUid').val() === auth.uid)",
+        ".write": false
+      }
+    },
+    "debtClosures": {
+      "$debtId": {
+        ".read": "auth != null && (root.child('debts').child($debtId).child('creditorUid').val() === auth.uid || root.child('debts').child($debtId).child('debtorUid').val() === auth.uid)",
+        ".write": false
+      }
+    },
+    "debtDisputes": {
+      "$debtId": {
+        ".read": "auth != null && (root.child('debts').child($debtId).child('creditorUid').val() === auth.uid || root.child('debts').child($debtId).child('debtorUid').val() === auth.uid)",
+        ".write": false
+      }
+    },
+    "debtAuditLogs": {
+      "$debtId": {
+        ".read": "auth != null && (root.child('debts').child($debtId).child('creditorUid').val() === auth.uid || root.child('debts').child($debtId).child('debtorUid').val() === auth.uid)",
+        ".write": false
+      }
+    },
+    "debtNotifications": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": false
+      }
+    },
+    "debtArchives": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": false
+      }
+    },
+    "debtRateLimits": {
+      ".read": false,
+      ".write": false
+    },
+    "debtInviteCodes": {
+      ".read": false,
+      ".write": false
+    },
+    "debtInviteClaims": {
+      ".read": false,
+      ".write": false
+    },
+    "debtInviteAcceptances": {
+      ".read": false,
+      ".write": false
+    },
+    "debtInitializations": {
+      ".read": false,
+      ".write": false
     }
   }
 }

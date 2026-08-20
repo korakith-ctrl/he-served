@@ -3,19 +3,37 @@
   z-index: 1200;
   inset: 0;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 16px;
   min-height: 100dvh;
   overflow-y: auto;
   padding: max(20px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom));
-  background: rgba(0, 0, 0, .1);
+  background: rgba(0, 22, 34, .46);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.promotion-takeover__card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: min(70.4vw, 368px);
+  max-width: 100%;
+}
+
+.promotion-takeover__card.is-ad {
+  overflow: hidden;
+  width: min(88vw, 420px);
+  border: 1px solid rgba(255, 255, 255, .75);
+  border-radius: 24px;
+  background: #fff;
+  box-shadow: 0 24px 80px rgba(0, 22, 34, .3);
 }
 
 .promotion-takeover__visual {
   display: grid;
-  width: min(70.4vw, 368px);
+  width: 100%;
   max-height: min(59.2dvh, 608px);
   padding: 0;
   place-items: center;
@@ -35,7 +53,7 @@
 
 .promotion-takeover__placeholder {
   display: grid;
-  width: min(70.4vw, 368px);
+  width: 100%;
   height: min(52dvh, 512px);
   place-items: center;
   font-size: 84px;
@@ -43,38 +61,101 @@
   background: radial-gradient(circle at 50% 35%, #00a3e0, #003b5c 72%);
 }
 
-.promotion-takeover__close {
-  position: relative;
-  z-index: 2;
+.promotion-takeover__card.is-ad .promotion-takeover__visual {
+  max-height: min(46dvh, 420px);
+  background: #eaf8fc;
+}
+
+.promotion-takeover__card.is-ad .promotion-takeover__image {
+  width: 100%;
+  max-height: min(46dvh, 420px);
+  object-fit: cover;
+}
+
+.promotion-takeover__card.is-ad .promotion-takeover__placeholder {
+  height: 220px;
+  font-size: 68px;
+}
+
+.promotion-takeover__content {
+  padding: 20px 22px 22px;
+  color: #003b5c;
+}
+
+.promotion-takeover__content h2 {
+  margin: 0;
+  font-size: clamp(20px, 5.2vw, 26px);
+  line-height: 1.22;
+  letter-spacing: -.02em;
+}
+
+.promotion-takeover__content p {
+  margin: 8px 0 0;
+  color: #5f7480;
+  font-size: 14px;
+  line-height: 1.55;
+  white-space: pre-line;
+}
+
+.promotion-takeover__cta {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  gap: 7px;
+  width: 100%;
+  min-height: 46px;
+  margin-top: 18px;
+  border: 0;
+  border-radius: 14px;
+  color: #fff;
+  background: #0086b3;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.promotion-takeover__cta:active { transform: translateY(1px); }
+
+.promotion-takeover__close {
+  position: absolute;
+  z-index: 2;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
   padding: 0;
   border: 0;
+  border-radius: 50%;
   color: #fff;
-  background: transparent;
-  font-size: 15px;
-  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .55));
+  background: rgba(0, 22, 34, .62);
+  font-size: 18px;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, .18);
   cursor: pointer;
 }
 
 .promotion-takeover__close:focus-visible,
-.promotion-takeover__visual:focus-visible {
-  outline: none;
+.promotion-takeover__visual:focus-visible,
+.promotion-takeover__cta:focus-visible {
+  outline: 3px solid rgba(0, 163, 224, .55);
+  outline-offset: 2px;
 }
 
 @media (max-height: 620px) {
-  .promotion-takeover { gap: 10px; padding-top: 12px; padding-bottom: 12px; }
+  .promotion-takeover { padding-top: 12px; padding-bottom: 12px; }
   .promotion-takeover__visual,
   .promotion-takeover__image { max-height: 60.8dvh; }
-  .promotion-takeover__close { width: 20px; height: 20px; }
+  .promotion-takeover__card.is-ad .promotion-takeover__visual,
+  .promotion-takeover__card.is-ad .promotion-takeover__image { max-height: 34dvh; }
+  .promotion-takeover__content { padding: 15px 18px 18px; }
 }
 
 @media (prefers-reduced-motion: no-preference) {
   .promotion-takeover { animation: promotion-takeover-in 260ms ease-out both; }
-  .promotion-takeover__visual { animation: promotion-takeover-image-in 420ms cubic-bezier(.22, 1, .36, 1) both; }
+  .promotion-takeover__card { animation: promotion-takeover-image-in 420ms cubic-bezier(.22, 1, .36, 1) both; }
 }
 
 @keyframes promotion-takeover-in {

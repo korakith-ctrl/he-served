@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from "react";
 import { initializeApp, getApps, getApp } from "firebase/app";
 import {
   getAuth, signInAnonymously, onAuthStateChanged, PhoneAuthProvider, RecaptchaVerifier,
-  linkWithCredential, reauthenticateWithCredential, signInWithCredential,
+  signInWithCredential,
 } from "firebase/auth";
 import { getDatabase, ref, onValue, get, push, set } from "firebase/database";
 import { getFunctions, httpsCallable } from "firebase/functions";
@@ -24,19 +24,43 @@ const db = getDatabase(customerApp);
 const functions = getFunctions(customerApp, "asia-southeast1");
 
 const STATUS_TEXT = {
-  pending: "รอร้านยืนยันการรับเงิน...",
-  paid: "ร้านได้รับเงินแล้ว กำลังเตรียมคิว...",
-  preparing: "กำลังเตรียมออเดอร์ของคุณ...",
-  ready: "พร้อมรับแล้ว! มารับที่หน้าร้านได้เลย",
-  done: "รับออเดอร์เรียบร้อยแล้ว ขอบคุณที่ใช้บริการ",
+  pending: "รอยืนยัน",
+  paid: "ยืนยันคำสั่งซื้อ",
+  preparing: "ยืนยันคำสั่งซื้อ",
+  ready: "กำลังเตรียม",
+  done: "สำเร็จ",
   cancelled: "ออเดอร์นี้ถูกยกเลิก",
 };
+
+const STATUS_DESCRIPTION = {
+  pending: "ร้านกำลังตรวจสอบคำสั่งซื้อและการชำระเงินของคุณ",
+  paid: "ร้านยืนยันคำสั่งซื้อของคุณแล้ว",
+  preparing: "ร้านยืนยันคำสั่งซื้อของคุณแล้ว",
+  ready: "บาริสต้ากำลังเตรียมออเดอร์ของคุณ",
+  done: "ออเดอร์นี้เสร็จสมบูรณ์แล้ว ขอบคุณที่ใช้บริการ",
+  cancelled: "กรุณาติดต่อร้านหากต้องการสอบถามรายละเอียด",
+};
+
+const ORDER_PROGRESS_STEPS = [
+  { label: "รอยืนยัน", icon: "clock" },
+  { label: "ยืนยันคำสั่งซื้อ", icon: "checks" },
+  { label: "กำลังเตรียม", icon: "chef-hat" },
+  { label: "สำเร็จ", icon: "circle-check" },
+];
+
+function orderProgressIndex(status) {
+  if (status === "done") return 3;
+  if (status === "ready") return 2;
+  if (status === "paid" || status === "preparing") return 1;
+  return 0;
+}
 
 // วิธีชำระที่จ่ายหน้าร้านโดยตรง ไม่ต้องสแกน/แนบสลิป — ทำงานเหมือนกันหมด ต่างกันแค่ข้อความที่โชว์ลูกค้า
 const PAY_AT_STORE_TEXT = {
   cash: { title: "ชำระเงินสดที่ร้าน", instruction: "กรุณาชำระเงินสดตอนมารับที่ร้าน" },
   thaihelpthai: { title: "ชำระผ่านโครงการไทยช่วยไทยที่ร้าน", instruction: "กรุณาแจ้งพนักงานว่าชำระผ่านโครงการไทยช่วยไทยตอนมารับที่ร้าน" },
   "coffee-pass": { title: "ใช้สิทธิ์ Coffee Pass แล้ว", instruction: "ไม่ต้องชำระเพิ่ม ระบบหักสิทธิ์นี้เรียบร้อยแล้ว" },
+  reward: { title: "ใช้รางวัลสมาชิกแล้ว", instruction: "ยอดชำระเป็น 0 บาท ไม่ต้องสแกน QR หรือแนบสลิป" },
 };
 function isCashLikeMethod(method) {
   return Object.prototype.hasOwnProperty.call(PAY_AT_STORE_TEXT, method);
@@ -62,9 +86,11 @@ function newRedemptionAttemptId() {
 function rewardOtpErrorMessage(error) {
   const code = String(error?.code || "").replace("auth/", "");
   if (["invalid-phone-number", "missing-phone-number"].includes(code)) return "รูปแบบเบอร์โทรศัพท์ไม่ถูกต้อง";
-  if (["invalid-verification-code", "code-expired", "session-expired"].includes(code)) return "รหัส OTP ไม่ถูกต้องหรือหมดอายุ กรุณาลองใหม่";
+  if (code === "invalid-verification-code") return "รหัส OTP ไม่ตรงกับ SMS ล่าสุด กรุณาตรวจเลข 6 หลักอีกครั้ง";
+  if (["code-expired", "session-expired", "invalid-credential"].includes(code)) return "รอบยืนยัน OTP หมดอายุแล้ว กรุณากดส่งรหัสใหม่";
   if (["too-many-requests", "quota-exceeded"].includes(code)) return "ส่งรหัสหลายครั้งเกินไป กรุณารอสักครู่แล้วลองใหม่";
   if (["captcha-check-failed", "missing-app-credential"].includes(code)) return "ตรวจสอบความปลอดภัยไม่สำเร็จ กรุณารีเฟรชแล้วลองใหม่";
+  if (code === "network-request-failed") return "เครือข่ายขัดข้อง กรุณาตรวจอินเทอร์เน็ตแล้วลองใหม่";
   return "ยืนยันเบอร์โทรศัพท์ไม่สำเร็จ กรุณาลองใหม่";
 }
 
@@ -82,6 +108,43 @@ const COLORS = {
 };
 
 const SEASONAL_EFFECTS = new Set(["off", "auto", "christmas", "songkran"]);
+const CUSTOMER_THEME_MODES = new Set(["light", "dark", "schedule"]);
+const DEFAULT_CUSTOMER_THEME = { mode: "schedule", darkStart: "19:00", lightStart: "06:00" };
+
+function normalizeCustomerThemeSettings(raw) {
+  const timeValue = (value, fallback) => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value || "")) ? String(value) : fallback;
+  return {
+    mode: CUSTOMER_THEME_MODES.has(raw?.mode) ? raw.mode : DEFAULT_CUSTOMER_THEME.mode,
+    darkStart: timeValue(raw?.darkStart, DEFAULT_CUSTOMER_THEME.darkStart),
+    lightStart: timeValue(raw?.lightStart, DEFAULT_CUSTOMER_THEME.lightStart),
+  };
+}
+
+function bangkokTimeMinutes(date = new Date()) {
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+    }).formatToParts(date);
+    const hour = Number(parts.find((part) => part.type === "hour")?.value) || 0;
+    const minute = Number(parts.find((part) => part.type === "minute")?.value) || 0;
+    return hour * 60 + minute;
+  } catch {
+    return date.getHours() * 60 + date.getMinutes();
+  }
+}
+
+function activeCustomerTheme(raw, date = new Date()) {
+  const settings = normalizeCustomerThemeSettings(raw);
+  if (settings.mode === "light" || settings.mode === "dark") return settings.mode;
+  const [darkHour, darkMinute] = settings.darkStart.split(":").map(Number);
+  const [lightHour, lightMinute] = settings.lightStart.split(":").map(Number);
+  const darkStart = darkHour * 60 + darkMinute;
+  const lightStart = lightHour * 60 + lightMinute;
+  const current = bangkokTimeMinutes(date);
+  if (darkStart === lightStart) return "light";
+  if (darkStart < lightStart) return current >= darkStart && current < lightStart ? "dark" : "light";
+  return current >= darkStart || current < lightStart ? "dark" : "light";
+}
 
 function bangkokMonthDay(date = new Date()) {
   try {
@@ -106,24 +169,25 @@ function resolveSeasonalEffect(setting, date = new Date()) {
   return "off";
 }
 
-function RewardTermsSheet({ goal, onClose }) {
+function RewardTermsSheet({ goal, rewardValue, onClose }) {
   const { mounted, shown } = useSheetTransition(true);
   if (!mounted) return null;
   return (
     <div style={{ ...overlay, opacity: shown ? 1 : 0, transition: "opacity .25s ease" }} onClick={onClose}>
       <div style={{
-        ...GLASS_PANEL, borderRadius: "20px 20px 0 0", padding: 20, width: "100%", maxWidth: 420, maxHeight: "80vh", overflowY: "auto",
-        transform: shown ? "translateY(0)" : "translateY(100%)", transition: "transform .34s cubic-bezier(.22,1,.36,1)",
+        ...GLASS_PANEL, borderRadius: 20, padding: 20, width: "100%", maxWidth: 420, maxHeight: "85dvh", overflowY: "auto",
+        transform: shown ? "translateY(0)" : "translateY(calc(100% + 24px))", transition: "transform .34s cubic-bezier(.22,1,.36,1)",
       }} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="เงื่อนไขการสะสมเมล็ดและรางวัล">
         <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 18, margin: "0 0 12px", color: COLORS.espresso5 }}>เงื่อนไขการสะสมเมล็ด</h2>
         <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: COLORS.espresso3, lineHeight: 1.9 }}>
           <li>ได้รับ 1 เมล็ดต่อเครื่องดื่ม 1 แก้วที่สั่งซื้อ ไม่ว่าจะสั่งกี่แก้วในออเดอร์เดียวก็นับครบทุกแก้ว</li>
           <li>ขนมปัง อาหาร และสินค้าอื่นที่ไม่ใช่เครื่องดื่ม ไม่ร่วมสะสมเมล็ดและไม่สามารถใช้เป็นเมนูแลกรางวัลได้</li>
           <li>เมล็ดเข้าบัญชีเมื่อร้านส่งมอบเครื่องดื่มให้คุณเรียบร้อยแล้ว (ไม่ใช่ตอนชำระเงิน)</li>
-          <li>สะสมครบ {goal} เมล็ด แลกเครื่องดื่มฟรีได้ 1 แก้ว เลือกได้จากเมนูที่มีในตะกร้าตอนนั้น</li>
+          <li>สะสมครบ {goal} เมล็ด รับส่วนลดเครื่องดื่มสูงสุด {money(rewardValue)} บาท สำหรับ 1 แก้วที่เลือกจากตะกร้า</li>
+          <li>หากเครื่องดื่มราคาเกิน {money(rewardValue)} บาท ชำระเฉพาะส่วนต่าง หากราคาต่ำกว่า ส่วนต่างที่เหลือไม่สามารถทอนหรือเก็บไว้ใช้ครั้งถัดไป</li>
           <li>เมล็ดและรางวัลผูกกับเบอร์โทรศัพท์ที่ใช้สั่งซื้อ ไม่มีวันหมดอายุ</li>
         </ul>
-        <button type="button" style={{ ...btn, width: "100%", marginTop: 18, textAlign: "center" }} onClick={onClose}>ปิด</button>
+        <BackIconButton onClick={onClose} label="ปิด" style={{ marginTop: 18 }} />
       </div>
     </div>
   );
@@ -132,8 +196,8 @@ function RewardTermsSheet({ goal, onClose }) {
 const STATUS_ICON = {
   pending: { icon: "clock", color: COLORS.pending, bg: COLORS.pendingLight, anim: "statusPulse 1.6s ease-in-out infinite" },
   paid: { icon: "checks", color: COLORS.sageDark, bg: "rgba(0,163,224,0.16)", anim: "cartBump .5s ease" },
-  preparing: { icon: "chef-hat", color: COLORS.sage, bg: COLORS.sageLight, anim: "pulseCup 1.3s ease-in-out infinite" },
-  ready: { icon: "bell", color: COLORS.success, bg: COLORS.successLight, anim: "successPop .5s cubic-bezier(.34,1.56,.64,1)" },
+  preparing: { icon: "checks", color: COLORS.sageDark, bg: "rgba(0,163,224,0.16)", anim: "cartBump .5s ease" },
+  ready: { icon: "chef-hat", color: COLORS.sage, bg: COLORS.sageLight, anim: "pulseCup 1.3s ease-in-out infinite" },
   done: { icon: "circle-check", color: COLORS.successDark, bg: COLORS.successLight, anim: "successPop .5s cubic-bezier(.34,1.56,.64,1)" },
   cancelled: { icon: "x", color: COLORS.danger, bg: "rgba(178,58,46,0.14)", anim: "none" },
 };
@@ -148,6 +212,79 @@ function OrderStatusIcon({ status, size = 20 }) {
     }}>
       <i className={`ti ti-${cfg.icon}`} style={{ fontSize: size, color: cfg.color, animation: cfg.anim, display: "inline-block" }} aria-hidden="true"></i>
     </div>
+  );
+}
+
+function OrderStatusTimeline({ status }) {
+  if (status === "cancelled") {
+    return <div role="status" style={{ padding: "10px 12px", borderRadius: 11, background: "rgba(178,58,46,.10)", color: COLORS.danger, fontSize: 12.5, fontWeight: 700 }}>ออเดอร์นี้ถูกยกเลิก</div>;
+  }
+  const currentIndex = orderProgressIndex(status);
+  return (
+    <div role="list" aria-label="สถานะคำสั่งซื้อ" style={{ display: "flex", width: "100%", margin: "6px 0 14px" }}>
+      {ORDER_PROGRESS_STEPS.map((step, index) => {
+        const reached = index <= currentIndex;
+        const active = index === currentIndex;
+        return (
+          <div role="listitem" key={step.label} aria-current={active ? "step" : undefined} style={{ flex: 1, minWidth: 0, position: "relative", textAlign: "center" }}>
+            {index > 0 && <span aria-hidden="true" style={{ position: "absolute", zIndex: 0, top: 16, right: "50%", width: "100%", height: 3, background: index <= currentIndex ? COLORS.sage : COLORS.line }} />}
+            <span className={`customer-order-progress-node${reached ? " reached" : ""}${active ? " active" : ""}`} style={{ position: "relative", zIndex: 1, width: 34, height: 34, margin: "0 auto", borderRadius: "50%", display: "grid", placeItems: "center", border: `2px solid ${reached ? COLORS.sage : COLORS.line}`, background: reached ? (active ? COLORS.sage : COLORS.sageLight) : "#fff", color: active ? "#fff" : reached ? COLORS.sageDark : COLORS.espresso2, boxShadow: active ? "0 5px 14px rgba(0,163,224,.28)" : "none" }}>
+              <i className={`ti ti-${step.icon}`} style={{ fontSize: 16 }} aria-hidden="true" />
+            </span>
+            <span style={{ display: "block", marginTop: 6, padding: "0 2px", color: active ? COLORS.espresso5 : reached ? COLORS.espresso4 : COLORS.espresso2, fontSize: 9.5, lineHeight: 1.25, fontWeight: active ? 800 : 600 }}>{step.label}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+const PAYMENT_METHOD_META = {
+  promptpay: { label: "พร้อมเพย์", detail: "สแกน QR Code" },
+  cash: { label: "เงินสด", detail: "ชำระที่หน้าร้าน" },
+  thaihelpthai: { label: "ไทยช่วยไทย", detail: "ชำระผ่านโครงการ" },
+  "coffee-pass": { label: "Coffee Pass", detail: "ใช้สิทธิ์ที่มีอยู่" },
+  reward: { label: "รางวัลสมาชิก", detail: "ไม่ต้องชำระเงิน" },
+};
+
+function PaymentMethodIcon({ method, size = 20 }) {
+  const common = { width:size, height:size, viewBox:"0 0 24 24", fill:"none", stroke:"currentColor", strokeWidth:1.9, strokeLinecap:"round", strokeLinejoin:"round", "aria-hidden":"true" };
+  if (method === "promptpay") return <svg {...common}><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM19 14h2M19 17h2v4h-4M14 19v2"/></svg>;
+  if (method === "cash") return <svg {...common}><rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M6 8.5h.01M18 15.5h.01"/><circle cx="12" cy="12" r="3"/></svg>;
+  if (method === "thaihelpthai") return <svg {...common}><path d="M12 20s-7-4.2-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.8-7 10-7 10z"/><path d="M8.5 13.2l2.1 2 4.7-5"/></svg>;
+  if (method === "coffee-pass") return <svg {...common}><path d="M4 6.5A2.5 2.5 0 0 0 6.5 4h11A2.5 2.5 0 0 0 20 6.5v2a2.5 2.5 0 0 0 0 5v2A2.5 2.5 0 0 0 17.5 18h-11A2.5 2.5 0 0 0 4 15.5v-2a2.5 2.5 0 0 0 0-5z"/><path d="M9 8h6M9 12h6"/></svg>;
+  return <svg {...common}><path d="M3 7h16a2 2 0 0 1 2 2v9H5a2 2 0 0 1-2-2z"/><path d="M3 7l13-3v3M16 12h5"/></svg>;
+}
+
+function InlineCheckIcon({ size = 11 }) {
+  return <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 8.2l3.1 3L13 4.8"/></svg>;
+}
+
+function PaymentMethodButton({ method, selected, onClick, compact = false }) {
+  const meta = PAYMENT_METHOD_META[method] || { label: method, detail: "" };
+  return (
+    <button
+      type="button"
+      className={`customer-payment-method${selected ? " selected" : ""}${compact ? " compact" : ""}`}
+      aria-pressed={selected}
+      onClick={onClick}
+      style={{
+        position: "relative", display: "flex", alignItems: "center", gap: compact ? 7 : 10, minWidth: 0,
+        flex: compact ? "1 1 30%" : "1 1 42%", padding: compact ? "8px 7px" : "11px 10px", borderRadius: 11, textAlign: "left", cursor: "pointer",
+        border: selected ? `2px solid ${COLORS.sage}` : `1px solid ${COLORS.line}`,
+        background: selected ? COLORS.sageLight : "#fff", color: selected ? COLORS.sageDark : COLORS.espresso4,
+        boxShadow: selected ? "0 5px 14px rgba(0,163,224,.13)" : "none",
+      }}
+    >
+      <span style={{ width: compact ? 28 : 36, height: compact ? 28 : 36, flex: `0 0 ${compact ? 28 : 36}px`, display: "grid", placeItems: "center", borderRadius: 9, background: selected ? COLORS.sage : COLORS.cream2, color: selected ? "#fff" : COLORS.espresso5 }}>
+        <PaymentMethodIcon method={method} size={compact ? 16 : 20} />
+      </span>
+      <span style={{ minWidth: 0 }}>
+        <strong style={{ display: "block", fontSize: compact ? 10.5 : 12.5, lineHeight: 1.25, whiteSpace: "nowrap" }}>{meta.label}</strong>
+        {!compact && <small style={{ display: "block", marginTop: 2, color: COLORS.espresso2, fontSize: 9.5, whiteSpace: "nowrap" }}>{meta.detail}</small>}
+      </span>
+      {selected && <span style={{ position:"absolute", top:5, right:5, display:"grid", color:COLORS.sageDark }}><InlineCheckIcon /></span>}
+    </button>
   );
 }
 
@@ -217,8 +354,60 @@ function genLineId() {
   return "line_" + Math.random().toString(36).slice(2, 9);
 }
 
+const CUSTOMER_CART_TTL_MS = 6 * 60 * 60 * 1000;
+function customerCartStorageKey(shopUid) {
+  return `customerCart_${shopUid}`;
+}
+function loadSavedCustomerCart(shopUid) {
+  if (!shopUid) return [];
+  try {
+    const saved = JSON.parse(localStorage.getItem(customerCartStorageKey(shopUid)) || "null");
+    if (!saved || Date.now() - Number(saved.savedAt || 0) > CUSTOMER_CART_TTL_MS || !Array.isArray(saved.items)) {
+      localStorage.removeItem(customerCartStorageKey(shopUid));
+      return [];
+    }
+    return saved.items
+      .filter((line) => line && line.lineId && line.menuId && Number(line.qty) > 0)
+      .map((line) => ({ ...line, options: Array.isArray(line.options) ? line.options : [] }));
+  } catch {
+    return [];
+  }
+}
+function saveCustomerCart(shopUid, items) {
+  if (!shopUid) return;
+  try {
+    if (!items.length) localStorage.removeItem(customerCartStorageKey(shopUid));
+    else localStorage.setItem(customerCartStorageKey(shopUid), JSON.stringify({ savedAt: Date.now(), items }));
+  } catch {
+    // Storage can be unavailable in private/in-app browsers; ordering still works in memory.
+  }
+}
+
 const HOT_DEAL_CATEGORY = "HOT DEAL";
+const RECOMMENDED_CATEGORY = "เมนูแนะนำ";
 const COFFEE_PASS_CATEGORY = "COFFEE PASS";
+const CUSTOMER_MENU_TAG_PRESETS = {
+  new: { label: "เมนูใหม่", color: "#00A3E0", textColor: "#FFFFFF" },
+  seasonal: { label: "Seasonal", color: "#7C3AED", textColor: "#FFFFFF" },
+  bestseller: { label: "ขายดี", color: "#F59E0B", textColor: "#3B2600" },
+  limited: { label: "Limited", color: "#DC2626", textColor: "#FFFFFF" },
+  signature: { label: "Signature", color: "#005B85", textColor: "#FFFFFF" },
+};
+
+function safeMenuTagColor(value, fallback) {
+  return /^#[0-9a-f]{6}$/i.test(String(value || "")) ? String(value) : fallback;
+}
+
+function customerMenuTag(menu) {
+  const preset = CUSTOMER_MENU_TAG_PRESETS[menu?.tagPreset] || {};
+  const label = String(menu?.tagLabel ?? preset.label ?? "").trim().slice(0, 30);
+  if (!label) return null;
+  return {
+    label,
+    color: safeMenuTagColor(menu?.tagColor, preset.color || "#00A3E0"),
+    textColor: safeMenuTagColor(menu?.tagTextColor, preset.textColor || "#FFFFFF"),
+  };
+}
 
 function productTypeOf(item) {
   if (item?.productType === "pass") return "pass";
@@ -347,6 +536,43 @@ const btnAccent = {
   ...btn, background: COLORS.sageDark, color: "#fff", borderColor: COLORS.sageDark, width: "100%",
   backdropFilter: "none", WebkitBackdropFilter: "none",
 };
+function BackIconButton({ onClick, label = "ย้อนกลับ", style }) {
+  return (
+    <button
+      type="button"
+      className="customer-back-icon"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      style={{ ...btn, width: 40, height: 40, padding: 0, display: "inline-grid", placeItems: "center", flexShrink: 0, ...style }}
+    >
+      <i className="ti ti-arrow-left" style={{ fontSize: 20 }} aria-hidden="true" />
+    </button>
+  );
+}
+function InlineFieldError({ id, message }) {
+  if (!message) return null;
+  return <div id={id} role="alert" style={{ marginTop: 5, color: COLORS.danger, fontSize: 11, fontWeight: 700, lineHeight: 1.4 }}>{message}</div>;
+}
+function CheckoutSection({ title, summary, icon, open, onToggle, children }) {
+  return (
+    <section className={`customer-checkout-section${open ? " open" : ""}`}>
+      <button type="button" className="customer-checkout-section__header" aria-expanded={open} onClick={onToggle}>
+        <span className="customer-checkout-section__icon" aria-hidden="true"><i className={`ti ti-${icon}`} /></span>
+        <span style={{ minWidth: 0, flex: 1, textAlign: "left" }}>
+          <strong className="customer-checkout-section__title">{title}</strong>
+          {summary && <small className="customer-checkout-section__summary">{summary}</small>}
+        </span>
+        <i className="ti ti-chevron-down customer-checkout-section__chevron" style={{ fontSize: 17 }} aria-hidden="true" />
+      </button>
+      <div className="customer-checkout-section__body" aria-hidden={!open} inert={open ? undefined : ""}>
+        <div className="customer-checkout-section__body-inner">
+          <div className="customer-checkout-section__content">{children}</div>
+        </div>
+      </div>
+    </section>
+  );
+}
 const field = {
   width: "100%", border: "1px solid rgba(0,163,224,0.22)", background: "rgba(255,255,255,0.86)",
   borderRadius: 10, padding: "9px 10px", fontSize: 14, boxSizing: "border-box", marginTop: 4,
@@ -355,6 +581,7 @@ const overlay = {
   position: "fixed", inset: 0, background: "rgba(0,59,92,0.38)",
   backdropFilter: "blur(3px)", WebkitBackdropFilter: "blur(3px)",
   display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 50,
+  padding: "10px 10px max(env(safe-area-inset-bottom), 10px)",
 };
 const centerWrap = {
   minHeight: "100vh", fontFamily: "'Inter', sans-serif", color: COLORS.espresso4,
@@ -378,6 +605,40 @@ const GLOBAL_CSS = `
   .offer-arrow-btn { transition: transform .2s ease, background .2s ease; }
   .offer-arrow-btn:hover { transform: scale(1.08); background: #C5EDFA; }
   .offer-arrow-btn:active { transform: scale(0.94); }
+  .customer-add-button {
+    background: #00A3E0 !important; color: #FFFFFF !important; border-color: #00A3E0 !important;
+    box-shadow: 0 5px 13px rgba(0,163,224,.26); transition: background .18s ease, box-shadow .18s ease, transform .18s ease;
+  }
+  .customer-add-button:hover { background: #008FC5 !important; box-shadow: 0 7px 16px rgba(0,163,224,.34); }
+  .customer-add-button:disabled { background: #CDEAF5 !important; color: #718A99 !important; box-shadow: none; cursor: not-allowed; }
+  .customer-qty-button { min-width: 40px; width: 40px; height: 40px; padding: 0 !important; display: inline-grid !important; place-items: center; flex-shrink: 0; }
+  .customer-icon-touch { min-width: 40px; width: 40px; height: 40px; padding: 0 !important; display: inline-grid !important; place-items: center; }
+  .customer-configure-button { background: #D9F3FC !important; color: #0077A8 !important; border: 1px solid rgba(0,163,224,.35) !important; box-shadow: none !important; }
+  .customer-configure-button:hover { background: #C5EDFA !important; }
+  .customer-back-icon { color: #0077A8 !important; background: rgba(217,243,252,.76) !important; border-color: rgba(0,163,224,.22) !important; }
+  .customer-back-icon:hover { background: #C5EDFA !important; }
+  .corder .customer-field-invalid { border-color: #B23A2E !important; box-shadow: 0 0 0 3px rgba(178,58,46,.10) !important; }
+  .customer-checkout-section { margin-top: 10px; overflow: hidden; border: 1px solid rgba(0,163,224,.16); border-radius: 15px; background: rgba(255,255,255,.58); transition: background .25s ease, box-shadow .25s ease, border-color .25s ease; }
+  .customer-checkout-section.open { background: rgba(255,255,255,.78); box-shadow: 0 7px 20px rgba(0,91,133,.07); }
+  .customer-checkout-section__header { width: 100%; min-height: 56px; padding: 9px 11px; display: flex; align-items: center; gap: 10px; border: 0; background: transparent; color: #003B5C; }
+  .customer-checkout-section__icon { width: 36px; height: 36px; flex: 0 0 36px; display: grid; place-items: center; border-radius: 11px; color: #0077A8; background: #D9F3FC; font-size: 18px; }
+  .customer-checkout-section__title { display: block; font-size: 13.5px; line-height: 1.25; }
+  .customer-checkout-section__summary { display: block; margin-top: 2px; overflow: hidden; color: #718A99; font-size: 10.5px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+  .customer-checkout-section__chevron { flex-shrink: 0; transition: transform .3s cubic-bezier(.22,1,.36,1); }
+  .customer-checkout-section.open .customer-checkout-section__chevron { transform: rotate(180deg); }
+  .customer-checkout-section__body { display: grid; grid-template-rows: 0fr; opacity: 0; pointer-events: none; transition: grid-template-rows .34s cubic-bezier(.22,1,.36,1), opacity .2s ease; }
+  .customer-checkout-section.open .customer-checkout-section__body { grid-template-rows: 1fr; opacity: 1; pointer-events: auto; }
+  .customer-checkout-section__body-inner { min-height: 0; overflow: hidden; }
+  .customer-checkout-section__content { padding: 2px 12px 14px; }
+  .customer-checkout-actions { position: sticky; bottom: max(env(safe-area-inset-bottom), 10px); z-index: 12; margin: 16px -8px -8px; padding: 8px; border: 1px solid rgba(0,163,224,.18); border-radius: 15px; background: rgba(255,255,255,.94); box-shadow: 0 10px 28px rgba(0,91,133,.18); backdrop-filter: blur(18px) saturate(160%); -webkit-backdrop-filter: blur(18px) saturate(160%); }
+  .customer-cart-bar {
+    background: rgba(255,255,255,.96) !important; border-color: rgba(0,163,224,.24) !important;
+    color: #003B5C !important; box-shadow: 0 14px 38px rgba(0,91,133,.18), inset 0 1px 0 #FFFFFF !important;
+  }
+  .customer-cart-summary { color: #003B5C !important; }
+  .customer-cart-total-label { color: #718A99 !important; }
+  .customer-cart-checkout { background: #00A3E0 !important; color: #FFFFFF !important; }
+  .customer-cart-checkout:hover { background: #008FC5 !important; }
   .zone2-splash {
     position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; overflow: hidden;
     color: #F7FBFF; background: radial-gradient(circle at 50% 42%, rgba(17,148,207,.12), transparent 30%), linear-gradient(145deg, #05070A 0%, #0A1017 55%, #05070A 100%);
@@ -530,6 +791,21 @@ const GLOBAL_CSS = `
   html[data-theme="dark"] .corder .customer-option-choice { background: #172333 !important; color: #E7ECF3 !important; border-color: #344256 !important; }
   html[data-theme="dark"] .corder .customer-option-choice.selected { background: rgba(0,163,224,.24) !important; color: #E9F9FE !important; border-color: #00A3E0 !important; }
   html[data-theme="dark"] .corder .customer-option-choice [style*="color"] { color: #B8C4D2 !important; }
+  html[data-theme="dark"] .corder .customer-payment-method { background: #172333 !important; color: #E7ECF3 !important; border-color: #344256 !important; }
+  html[data-theme="dark"] .corder .customer-payment-method.selected { background: rgba(0,163,224,.22) !important; color: #E9F9FE !important; border-color: #00A3E0 !important; }
+  html[data-theme="dark"] .corder .customer-payment-method > span:first-child { background: #24354A !important; color: #E7F7FC !important; }
+  html[data-theme="dark"] .corder .customer-payment-method.selected > span:first-child { background: #00A3E0 !important; color: #FFFFFF !important; }
+  html[data-theme="dark"] .corder .customer-order-progress-node { background: #172333 !important; border-color: #344256 !important; color: #A9B5C5 !important; }
+  html[data-theme="dark"] .corder .customer-order-progress-node.reached { background: rgba(0,163,224,.22) !important; border-color: #00A3E0 !important; color: #E9F9FE !important; }
+  html[data-theme="dark"] .corder .customer-order-progress-node.active { background: #00A3E0 !important; color: #FFFFFF !important; }
+  html[data-theme="dark"] .corder .customer-cart-bar { background: rgba(241,250,253,.97) !important; border-color: rgba(0,163,224,.42) !important; color: #003B5C !important; }
+  html[data-theme="dark"] .corder .customer-cart-summary { color: #003B5C !important; }
+  html[data-theme="dark"] .corder .customer-cart-total-label { color: #55778A !important; }
+  html[data-theme="dark"] .corder .customer-checkout-section { background: rgba(15,24,36,.72) !important; border-color: rgba(148,163,184,.18) !important; }
+  html[data-theme="dark"] .corder .customer-checkout-section__header { color: #E7F7FC !important; }
+  html[data-theme="dark"] .corder .customer-checkout-section__icon { background: rgba(0,163,224,.20) !important; color: #74D1EE !important; }
+  html[data-theme="dark"] .corder .customer-checkout-section__summary { color: #B7D2DF !important; }
+  html[data-theme="dark"] .corder .customer-checkout-actions { background: rgba(15,24,36,.94) !important; border-color: rgba(0,163,224,.32) !important; }
   .closed-order-page {
     min-height: 100vh; min-height: 100dvh; position: relative; isolation: isolate; overflow: hidden;
     display: grid; place-items: center; padding: 28px 18px; color: #FFFFFF;
@@ -622,6 +898,7 @@ const GLOBAL_CSS = `
     .closed-order-title { margin-top: 11px; }
   }
   @media (prefers-reduced-motion: reduce) {
+    .customer-checkout-section, .customer-checkout-section__body, .customer-checkout-section__chevron { transition: none !important; }
     .banner-slide { transition-duration: 0ms; }
     .zone2-splash *, .zone2-splash *::before, .zone2-splash *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
     .coffee-pass-buy-border::before { animation: none; }
@@ -1048,19 +1325,22 @@ export default function CustomerOrder({ shopUid }) {
   const [menus, setMenus] = useState(null);
   const [optionGroups, setOptionGroups] = useState([]);
   const [promotions, setPromotions] = useState([]);
+  const [popupAds, setPopupAds] = useState([]);
   const [promptpayId, setPromptpayId] = useState("");
   const [acceptingOrders, setAcceptingOrders] = useState(true);
   const [slipTestMode, setSlipTestMode] = useState(false);
   const [bannerImageUrl, setBannerImageUrl] = useState("");
   const [bannerImageUrls, setBannerImageUrls] = useState([]);
+  const [bannerEnabledStates, setBannerEnabledStates] = useState(null);
   const [categoryOrder, setCategoryOrder] = useState([]);
   const [loyaltyBeanGoal, setLoyaltyBeanGoal] = useState(10);
+  const [loyaltyRewardValue, setLoyaltyRewardValue] = useState(60);
   const [seasonalEffect, setSeasonalEffect] = useState("auto");
-  const [coffeePass, setCoffeePass] = useState({ name: "Coffee Pass", enabled: false, uses: 5, price: 250, validityDays: 30, menuIds: [] });
+  const [customerThemeSettings, setCustomerThemeSettings] = useState(DEFAULT_CUSTOMER_THEME);
+  const [coffeePass, setCoffeePass] = useState({ name: "Coffee Pass", enabled: false, uses: 5, price: 250, validityDays: 30, menuIds: [], configured: false });
   const [beanRecord, setBeanRecord] = useState(null);
   const [loyaltyStatus, setLoyaltyStatus] = useState("idle"); // idle | loading | loaded | error
   const [loyaltyRetryTick, setLoyaltyRetryTick] = useState(0);
-  const beanUnsubRef = useRef(null);
   const [redeemLineId, setRedeemLineId] = useState(null);
   const [redeemMode, setRedeemMode] = useState(false);
   const [rewardOtpOpen, setRewardOtpOpen] = useState(false);
@@ -1073,7 +1353,7 @@ export default function CustomerOrder({ shopUid }) {
   const rewardVerificationIdRef = useRef("");
   const rewardRecaptchaRef = useRef(null);
   const [showRewardTerms, setShowRewardTerms] = useState(false);
-  const [cart, setCart] = useState([]);
+  const [cart, setCart] = useState(() => loadSavedCustomerCart(shopUid));
   const [flyItems, setFlyItems] = useState([]);
   const [cartBump, setCartBump] = useState(false);
   const menuThumbRefs = useRef({});
@@ -1081,6 +1361,7 @@ export default function CustomerOrder({ shopUid }) {
   const prevCartCountRef = useRef(0);
   const [pickingMenu, setPickingMenu] = useState(null);
   const [pickingPromo, setPickingPromo] = useState(null);
+  const [pickingRefKey, setPickingRefKey] = useState("");
   const [showCoffeePassDetails, setShowCoffeePassDetails] = useState(false);
   const [selectedPassId, setSelectedPassId] = useState("");
   const [passPurchaseCode, setPassPurchaseCode] = useState("");
@@ -1101,6 +1382,7 @@ export default function CustomerOrder({ shopUid }) {
   const [pickupDate, setPickupDate] = useState(addDays(1));
   const [step, setStep] = useState("menu");
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [order, setOrder] = useState(null);
   const [successCountdown, setSuccessCountdown] = useState(5);
@@ -1111,9 +1393,11 @@ export default function CustomerOrder({ shopUid }) {
   const [splashDone, setSplashDone] = useState(false);
   const [splashMinimumElapsed, setSplashMinimumElapsed] = useState(false);
   const [splashLeaving, setSplashLeaving] = useState(false);
-  const [takeoverPromo, setTakeoverPromo] = useState(null);
+  const [takeoverContent, setTakeoverContent] = useState(null);
+  const [popupScheduleTick, setPopupScheduleTick] = useState(0);
   const [hasActiveOrder, setHasActiveOrder] = useState(false);
   const [headerRipple, setHeaderRipple] = useState(false);
+  const [checkoutSection, setCheckoutSection] = useState("customer");
 
   const mainRef = useRef(null);
   const categoryNavRef = useRef(null);
@@ -1122,6 +1406,10 @@ export default function CustomerOrder({ shopUid }) {
   const offerCarouselRef = useRef(null);
   const offerInteractionAtRef = useRef(0);
   const [offerRippleId, setOfferRippleId] = useState(null);
+
+  useEffect(() => {
+    saveCustomerCart(shopUid, cart);
+  }, [shopUid, cart]);
 
   useEffect(() => {
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1136,6 +1424,25 @@ export default function CustomerOrder({ shopUid }) {
     const t = setTimeout(() => setSplashDone(true), LANDING_SCREEN_EXIT_MS);
     return () => clearTimeout(t);
   }, [splashMinimumElapsed, authUid, menus]);
+
+  useLayoutEffect(() => {
+    const applyTheme = () => {
+      const theme = activeCustomerTheme(customerThemeSettings);
+      document.documentElement.dataset.theme = theme;
+      document.documentElement.style.colorScheme = theme;
+    };
+    applyTheme();
+    if (customerThemeSettings.mode !== "schedule") return undefined;
+    let timer;
+    const scheduleNextMinute = () => {
+      timer = window.setTimeout(() => {
+        applyTheme();
+        scheduleNextMinute();
+      }, 60000 - (Date.now() % 60000) + 100);
+    };
+    scheduleNextMinute();
+    return () => window.clearTimeout(timer);
+  }, [customerThemeSettings]);
 
   // ฟัง auth state ตลอด ไม่ใช่ sign-in ครั้งเดียวตอนเปิดหน้า — เบราว์เซอร์บางตัว (เช่น in-app browser ของ LINE,
   // Safari private mode) ล้าง session ที่ persist ไว้กลางคันได้ ถ้า authUid ค้างค่าเก่าไว้ใน state เฉยๆ
@@ -1165,8 +1472,17 @@ export default function CustomerOrder({ shopUid }) {
     const unsub6 = onValue(ref(db, `shops/${shopUid}/settings/slipTestMode`), (snap) => setSlipTestMode(snap.val() === true));
     const unsub7 = onValue(ref(db, `shops/${shopUid}/settings/bannerImageUrl`), (snap) => setBannerImageUrl(snap.val() || ""));
     const unsub7b = onValue(ref(db, `shops/${shopUid}/settings/bannerImageUrls`), (snap) => setBannerImageUrls(snap.val() || []));
+    const unsub7c = onValue(
+      ref(db, `shops/${shopUid}/settings/bannerEnabledStates`),
+      (snap) => setBannerEnabledStates(snap.exists() ? (snap.val() || []) : []),
+      (err) => {
+        setBannerEnabledStates(null);
+        console.error("อ่านสถานะแบนเนอร์ไม่ได้ (เช็คว่า deploy database.rules.json ล่าสุดหรือยัง):", err.message);
+      },
+    );
     const unsub9 = onValue(ref(db, `shops/${shopUid}/settings/categoryOrder`), (snap) => setCategoryOrder(snap.val() || []));
     const unsub10 = onValue(ref(db, `shops/${shopUid}/settings/loyaltyBeanGoal`), (snap) => setLoyaltyBeanGoal(snap.val() || 10));
+    const unsub10b = onValue(ref(db, `shops/${shopUid}/settings/loyaltyRewardValue`), (snap) => setLoyaltyRewardValue(Math.min(10000, Math.max(1, Number(snap.val()) || 60))));
     const unsub11 = onValue(
       ref(db, `shops/${shopUid}/settings/seasonalEffect`),
       (snap) => {
@@ -1174,6 +1490,11 @@ export default function CustomerOrder({ shopUid }) {
         setSeasonalEffect(SEASONAL_EFFECTS.has(value) ? value : "auto");
       },
       (err) => console.error("อ่านเอฟเฟกต์เทศกาลไม่ได้ (เช็คว่า deploy database.rules.json ล่าสุดหรือยัง):", err.message)
+    );
+    const unsub13 = onValue(
+      ref(db, `shops/${shopUid}/settings/customerTheme`),
+      (snap) => setCustomerThemeSettings(normalizeCustomerThemeSettings(snap.val())),
+      (err) => console.error("อ่านการตั้งค่าธีมหน้าลูกค้าไม่ได้ (เช็คว่า deploy database.rules.json ล่าสุดหรือยัง):", err.message)
     );
     const unsub12 = onValue(
       ref(db, `shops/${shopUid}/settings/coffeePass`),
@@ -1186,12 +1507,14 @@ export default function CustomerOrder({ shopUid }) {
           price: Math.max(0, Number.isFinite(Number(value.price)) ? Number(value.price) : 250),
           validityDays: Math.min(365, Math.max(1, Number(value.validityDays) || 30)),
           menuIds: (Array.isArray(value.menuIds) ? value.menuIds : Object.values(value.menuIds || {})).filter(Boolean),
+          configured: snap.exists(),
         });
       },
       (err) => console.error("อ่านการตั้งค่า Coffee Pass ไม่ได้ (เช็คว่า deploy database.rules.json ล่าสุดหรือยัง):", err.message)
     );
     const unsub8 = onValue(ref(db, `shops/${shopUid}/promotions`), (snap) => {
-      const list = snap.val() || [];
+      const value = snap.val() || [];
+      const list = (Array.isArray(value) ? value : Object.values(value)).filter(Boolean);
       setPromotions(list.map((p) => ({
         ...p,
         type: p.type || (p.menuIds && p.menuIds.length > 1 ? "bundle" : "single"),
@@ -1199,31 +1522,62 @@ export default function CustomerOrder({ shopUid }) {
         chooseCount: p.chooseCount || 2,
       })));
     });
-    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); unsub7(); unsub7b(); unsub8(); unsub9(); unsub10(); unsub11(); unsub12(); };
+    const unsub14 = onValue(
+      ref(db, `shops/${shopUid}/popupAds`),
+      (snap) => {
+        const value = snap.val() || [];
+        setPopupAds((Array.isArray(value) ? value : Object.values(value)).filter(Boolean));
+      },
+      (err) => console.error("อ่านโฆษณา Popup ไม่ได้ (เช็คว่า deploy database.rules.json ล่าสุดหรือยัง):", err.message),
+    );
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); unsub7(); unsub7b(); unsub7c(); unsub8(); unsub9(); unsub10(); unsub10b(); unsub11(); unsub12(); unsub13(); unsub14(); };
   }, [authUid, shopUid]);
 
-  // เช็คเมล็ดสะสมของเบอร์นี้แบบสด — debounce กันยิง query ทุกครั้งที่พิมพ์ และรอให้เบอร์ครบอย่างน้อย 9 หลักก่อน
-  // แยกสถานะ loading/error ออกจากตัวข้อมูล เพื่อให้ UI บอกลูกค้าได้ว่ากำลังโหลดอยู่ หรือโหลดไม่สำเร็จ (ไม่ใช่แค่ "ยังไม่มีข้อมูล")
+  // เมนูผูกกลุ่ม/ตัวเลือกด้วย id จึงใช้ชื่อจากต้นทางล่าสุดเสมอ แม้ลูกค้าจะใส่เมนู
+  // ลงตะกร้าไว้ก่อนที่แอดมินจะเปลี่ยนชื่อ (ราคาในตะกร้ายังคงเป็น snapshot เดิมตามตอนเลือก)
+  useEffect(() => {
+    if (optionGroups.length === 0) return;
+    const groupsById = Object.fromEntries(optionGroups.filter(Boolean).map((group) => [group.id, group]));
+    setCart((current) => {
+      let changed = false;
+      const next = current.map((line) => {
+        if (!line.options?.length) return line;
+        const options = line.options.map((option) => {
+          const group = groupsById[option.groupId];
+          const choice = group?.choices?.find((item) => item.id === option.choiceId);
+          if (!choice || (choice.label === option.label && group.name === option.groupName)) return option;
+          changed = true;
+          return { ...option, label: choice.label, groupName: group.name };
+        });
+        return options === line.options ? line : { ...line, options };
+      });
+      return changed ? next : current;
+    });
+  }, [optionGroups]);
+
+  // Read a sanitized customer summary through a callable function. Direct customer-record reads
+  // are intentionally blocked by database rules to protect phone-linked loyalty/pass data.
   useEffect(() => {
     const phoneKey = normalizeThaiPhone(phone);
-    if (!phoneKey) { setBeanRecord(null); setLoyaltyStatus("idle"); return; }
+    if (!phoneKey || !authUid) { setBeanRecord(null); setLoyaltyStatus("idle"); return undefined; }
     setLoyaltyStatus("loading");
-    const t = setTimeout(() => {
-      const unsub = onValue(
-        ref(db, `customers/${shopUid}/${phoneKey}`),
-        (snap) => {
-          setBeanRecord(snap.exists() ? snap.val() : { beans: 0, lifetimeBeans: 0, isNew: true });
-          setLoyaltyStatus("loaded");
-        },
-        () => setLoyaltyStatus("error")
-      );
-      beanUnsubRef.current = unsub;
-    }, 400);
+    let cancelled = false;
+    const getSummary = httpsCallable(functions, "getCustomerSummary");
+    const load = () => getSummary({ shopUid, customerPhone:phoneKey })
+      .then((response) => {
+        if (cancelled) return;
+        setBeanRecord({ ...(response.data || {}), isNew:!(response.data?.beans || Object.keys(response.data?.passes || {}).length) });
+        setLoyaltyStatus("loaded");
+      })
+      .catch(() => { if (!cancelled) setLoyaltyStatus("error"); });
+    const t = setTimeout(load, 400);
+    const poll = setInterval(load, 15000);
     return () => {
+      cancelled = true;
       clearTimeout(t);
-      if (beanUnsubRef.current) { beanUnsubRef.current(); beanUnsubRef.current = null; }
+      clearInterval(poll);
     };
-  }, [phone, shopUid, loyaltyRetryTick]);
+  }, [phone, shopUid, loyaltyRetryTick, authUid]);
 
   useEffect(() => {
     if (!order) return;
@@ -1261,6 +1615,7 @@ export default function CustomerOrder({ shopUid }) {
     setOrder(null);
     setQrDataUrl(null);
     setError("");
+    setFieldErrors({});
     setRedeemLineId(null);
     setRedeemMode(false);
     setRewardVerification(null);
@@ -1276,6 +1631,7 @@ export default function CustomerOrder({ shopUid }) {
     setPassCodeCheckStatus("idle");
     setPassCodeCheckError("");
     setPassExtraPaymentMethod("promptpay");
+    setCheckoutSection("customer");
   }
 
   const menusById = useMemo(() => {
@@ -1332,33 +1688,47 @@ export default function CustomerOrder({ shopUid }) {
     });
   }, [promotions, menusById]);
 
-  const closePromotionTakeover = useCallback(() => setTakeoverPromo(null), []);
+  const closePromotionTakeover = useCallback(() => setTakeoverContent(null), []);
+
+  useEffect(() => {
+    if (!splashDone || step !== "menu") return undefined;
+    const timer = window.setInterval(() => setPopupScheduleTick((tick) => tick + 1), 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [splashDone, step]);
 
   useEffect(() => {
     if (!splashDone || !acceptingOrders || step !== "menu") return;
+    const now = Date.now();
+    const featuredAd = popupAds.find((ad) => ad.active !== false
+      && (!ad.startAt || now >= Number(ad.startAt))
+      && (!ad.endAt || now <= Number(ad.endAt)));
     const featuredPromo = activePromotions.find((promo) => promo.showAsPopup === true);
-    if (!featuredPromo) return;
-    const sessionKey = `promotionTakeover:${shopUid}:${featuredPromo.id}`;
+    const featured = featuredAd
+      ? { kind: "ad", item: featuredAd }
+      : featuredPromo ? { kind: "promotion", item: featuredPromo } : null;
+    if (!featured) return;
+    const sessionKey = `${featured.kind === "ad" ? "popupAd" : "promotionTakeover"}:${shopUid}:${featured.item.id}`;
     try {
       if (sessionStorage.getItem(sessionKey)) return;
       sessionStorage.setItem(sessionKey, "shown");
     } catch {
       // เปิดต่อได้แม้ browser จำกัด sessionStorage เช่น private/in-app browser บางรุ่น
     }
-    setTakeoverPromo(featuredPromo);
-  }, [splashDone, acceptingOrders, step, activePromotions, shopUid]);
+    setTakeoverContent(featured);
+  }, [splashDone, acceptingOrders, step, activePromotions, popupAds, popupScheduleTick, shopUid]);
 
   const categories = useMemo(() => {
     if (!menus) return [];
     const seen = [];
     for (const m of menus) {
-      if (![HOT_DEAL_CATEGORY, COFFEE_PASS_CATEGORY].includes(m.category) && !seen.includes(m.category)) seen.push(m.category);
+      if (![HOT_DEAL_CATEGORY, RECOMMENDED_CATEGORY, COFFEE_PASS_CATEGORY].includes(m.category) && !seen.includes(m.category)) seen.push(m.category);
     }
     const ordered = categoryOrder && categoryOrder.length
       ? [...categoryOrder.filter((c) => seen.includes(c)), ...seen.filter((c) => !categoryOrder.includes(c))]
       : seen;
     const featured = [];
     if (activePromotions.length > 0) featured.push(HOT_DEAL_CATEGORY);
+    if (menus.some((menu) => menu?.recommended === true && menu.available !== false)) featured.push(RECOMMENDED_CATEGORY);
     const hasCoffeePassMenus = coffeePass.enabled === true && coffeePassEligibleMenus.length > 0;
     if (hasCoffeePassMenus) featured.push(COFFEE_PASS_CATEGORY);
     return [...featured, ...ordered];
@@ -1477,7 +1847,11 @@ export default function CustomerOrder({ shopUid }) {
 
   function groupsForMenu(menu) {
     const ids = menu.optionGroupIds || [];
-    return optionGroups.filter((g) => ids.includes(g.id));
+    const groupsById = new Map(optionGroups.filter(Boolean).map((group) => [group.id, group]));
+    return ids.map((id) => groupsById.get(id)).filter(Boolean).map((group) => ({
+      ...group,
+      choices: (Array.isArray(group.choices) ? group.choices : Object.values(group.choices || {})).filter((choice) => choice && choice.enabled !== false),
+    })).filter((group) => group.choices.length > 0);
   }
 
   function linesForMenu(menuId, promoId = null) {
@@ -1539,7 +1913,7 @@ export default function CustomerOrder({ shopUid }) {
     setTimeout(() => setOfferRippleId((cur) => (cur === id ? null : cur)), 500);
   }
 
-  function openMenu(menu, promo) {
+  function openMenu(menu, promo, sourceRefKey) {
     if (menu.available === false) return;
     if (cart.some((line) => String(line.promoKind || "").startsWith("coffee-pass"))) {
       setError("Coffee Pass ต้องชำระแยกจากรายการปกติ กรุณาชำระแพ็กนี้ก่อนเลือกเมนูอื่น");
@@ -1552,7 +1926,7 @@ export default function CustomerOrder({ shopUid }) {
     const priceOverride = effectivePromo ? (isQty ? qtyPromoUnitPrice(effectivePromo, menu, 1) : singlePromoPrice(effectivePromo, menu)) : undefined;
     const promoId = effectivePromo ? effectivePromo.id : null;
     const promoKind = effectivePromo ? (isQty ? "qty" : "single") : null;
-    const refKey = promo ? "promo_" + menu.id : menu.id;
+    const refKey = sourceRefKey || (promo ? "promo_" + menu.id : menu.id);
     if (groups.length === 0) {
       spawnFly(refKey, menu.imageUrl);
       const existing = cart.find((l) => l.menuId === menu.id && l.options.length === 0 && (l.promoId || null) === promoId);
@@ -1562,6 +1936,7 @@ export default function CustomerOrder({ shopUid }) {
     }
     setPickingMenu(menu);
     setPickingPromo(promo || null);
+    setPickingRefKey(refKey);
   }
 
   function addToCart(menu, qty, options, priceOverride, promoId, promoKind) {
@@ -1668,6 +2043,20 @@ export default function CustomerOrder({ shopUid }) {
     }
     const menu = menusById[promo.menuIds?.[0]];
     if (menu) openMenu(menu, promo);
+  }
+
+  function openTakeoverAd(ad) {
+    closePromotionTakeover();
+    const value = String(ad.ctaUrl || "").trim();
+    if (!value) return;
+    try {
+      const url = new URL(value);
+      if (!["http:", "https:"].includes(url.protocol)) return;
+      if (ad.openInNewTab === false) window.location.assign(url.href);
+      else window.open(url.href, "_blank", "noopener,noreferrer");
+    } catch {
+      // URL ถูกตรวจสอบใน Admin แล้ว แต่ไม่ทำอะไรหากเจอข้อมูลเก่าที่ไม่ถูกต้อง
+    }
   }
 
   function confirmBundleFlowStep(qty, options) {
@@ -1800,14 +2189,22 @@ export default function CustomerOrder({ shopUid }) {
     menuIds: Array.isArray(raw?.menuIds) ? raw.menuIds : Object.values(raw?.menuIds || {}),
   })).sort((a, b) => (Number(a.expiresAt) || 0) - (Number(b.expiresAt) || 0));
   const activeCustomerPasses = customerPasses.filter((pass) => Number(pass.remainingUses) > 0 && Number(pass.expiresAt) >= Date.now() && pass.status !== "cancelled");
-  const redeemDiscount = beanGoalMet && redeemLine && rewardVerified ? redeemLine.unitPrice : 0;
+  const redeemDiscount = beanGoalMet && redeemLine && rewardVerified ? Math.min(Number(redeemLine.unitPrice) || 0, loyaltyRewardValue) : 0;
   const total = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0) - redeemDiscount;
   const cartCount = cart.reduce((s, l) => s + l.qty, 0);
   const loyaltyCartCount = cart.reduce((sum, line) => sum + (productTypeOf(line) === "drink" ? line.qty : 0), 0);
   const coffeePassPurchaseLine = cart.find((line) => line.promoKind === "coffee-pass-purchase") || null;
   const passCartLine = !coffeePassPurchaseLine && cart.length === 1 && cart[0].qty === 1 && productTypeOf(cart[0]) === "drink" ? cart[0] : null;
   const compatibleCustomerPasses = passCartLine
-    ? activeCustomerPasses.filter((pass) => pass.menuIds.length === 0 || pass.menuIds.includes(passCartLine.menuId))
+    ? activeCustomerPasses.filter((pass) => {
+        // A purchased Pass keeps its original menu snapshot. Menus added to the
+        // current package later are also valid, so existing customers receive
+        // newly-added choices without weakening the original entitlement.
+        const currentMenuIds = coffeePass.menuIds || [];
+        const allowedByPurchasedPass = pass.menuIds.length === 0 || pass.menuIds.includes(passCartLine.menuId);
+        const allowedByCurrentPackage = coffeePass.configured && (currentMenuIds.length === 0 || currentMenuIds.includes(passCartLine.menuId));
+        return allowedByPurchasedPass || allowedByCurrentPackage;
+      })
     : [];
   const selectedCustomerPass = compatibleCustomerPasses.find((pass) => pass.id === selectedPassId) || null;
   const compatiblePassIds = compatibleCustomerPasses.map((pass) => pass.id).join("|");
@@ -1817,6 +2214,7 @@ export default function CustomerOrder({ shopUid }) {
     : 0;
   const passCoveredAmount = usingCoffeePass ? Math.max(0, total - passOptionTotal) : 0;
   const checkoutTotal = usingCoffeePass ? passOptionTotal : total;
+  const rewardCoversTotal = Boolean(!usingCoffeePass && redeemLine && rewardVerified && checkoutTotal <= 0);
   const passPurchaseMismatch = passPurchaseCodeConfirm.length > 0 && !passPurchaseCode.startsWith(passPurchaseCodeConfirm);
   const passPurchaseCodesMatch = /^\d{6}$/.test(passPurchaseCode) && passPurchaseCode === passPurchaseCodeConfirm;
 
@@ -1824,15 +2222,22 @@ export default function CustomerOrder({ shopUid }) {
     if (step !== "phone" || coffeePassPurchaseLine) return;
     if (compatibleCustomerPasses.length > 0) {
       setSelectedPassId((current) => compatibleCustomerPasses.some((pass) => pass.id === current) ? current : compatibleCustomerPasses[0].id);
+      setPassRedeemCode("");
+      setPassRedemptionAttemptId(newRedemptionAttemptId());
+      setPassCodeCheckStatus("idle");
+      setPassCodeCheckError("");
+      // If both benefits are available, do not let Coffee Pass silently win.
+      // Start from a normal payment method so the loyalty card remains visible;
+      // the customer can still explicitly choose Coffee Pass below.
+      if (beanGoalMet) {
+        setPaymentMethod((current) => current === "coffee-pass" ? "promptpay" : current);
+        return;
+      }
       setPaymentMethod("coffee-pass");
       setRedeemLineId(null);
       setRedeemMode(false);
       setRewardVerification(null);
       setRedemptionAttemptId("");
-      setPassRedeemCode("");
-      setPassRedemptionAttemptId(newRedemptionAttemptId());
-      setPassCodeCheckStatus("idle");
-      setPassCodeCheckError("");
       return;
     }
     setSelectedPassId("");
@@ -1844,7 +2249,7 @@ export default function CustomerOrder({ shopUid }) {
     // compatiblePassIds changes only when the loaded phone/pass/cart result changes,
     // so a customer's later manual payment choice is not overwritten.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, coffeePassPurchaseLine?.lineId, phoneDigits, cartFingerprint, compatiblePassIds]);
+  }, [step, coffeePassPurchaseLine?.lineId, phoneDigits, cartFingerprint, compatiblePassIds, beanGoalMet]);
 
   useEffect(() => {
     if (!usingCoffeePass || passRedeemCode.length !== 6 || !selectedPassId || !passRedemptionAttemptId) {
@@ -1916,6 +2321,12 @@ export default function CustomerOrder({ shopUid }) {
   }
 
   function selectRedeemLine(lineId) {
+    if (lineId) {
+      setPaymentMethod((current) => current === "coffee-pass" ? "promptpay" : current);
+      setPassRedeemCode("");
+      setPassCodeCheckStatus("idle");
+      setPassCodeCheckError("");
+    }
     setRedeemLineId(lineId);
     setRewardVerification(null);
     setRedemptionAttemptId("");
@@ -1971,22 +2382,11 @@ export default function CustomerOrder({ shopUid }) {
     setRewardOtpError("");
     try {
       const credential = PhoneAuthProvider.credential(rewardVerificationIdRef.current, rewardOtpCode);
-      const currentUser = auth.currentUser;
-      let credentialResult;
-      if (!currentUser) {
-        credentialResult = await signInWithCredential(auth, credential);
-      } else if (currentUser.isAnonymous) {
-        try {
-          credentialResult = await linkWithCredential(currentUser, credential);
-        } catch (linkError) {
-          if (linkError.code !== "auth/credential-already-in-use") throw linkError;
-          credentialResult = await signInWithCredential(auth, credential);
-        }
-      } else if (normalizeThaiPhone(currentUser.phoneNumber) === phoneDigits) {
-        credentialResult = await reauthenticateWithCredential(currentUser, credential);
-      } else {
-        credentialResult = await signInWithCredential(auth, credential);
-      }
+      // A phone number is the customer identity for rewards. Signing in with
+      // the verified credential works for both new and returning customers and
+      // avoids consuming the same OTP first in an anonymous-account link that
+      // can fail with credential-already-in-use.
+      const credentialResult = await signInWithCredential(auth, credential);
       await credentialResult.user.getIdToken(true);
       setRewardVerification({
         phone: phoneDigits,
@@ -1996,23 +2396,59 @@ export default function CustomerOrder({ shopUid }) {
       });
       closeRewardOtp();
     } catch (otpError) {
+      console.error("Reward OTP verification failed", otpError?.code || "unknown");
       setRewardOtpStatus("code-sent");
       setRewardOtpError(rewardOtpErrorMessage(otpError));
     }
   }
 
+  function clearFieldError(key) {
+    setFieldErrors((current) => {
+      if (!current[key]) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  }
+
   async function checkout() {
     setError("");
     if (cart.length === 0) { setError("กรุณาเลือกเมนูอย่างน้อย 1 รายการ"); return; }
-    if (!name.trim()) { setError("กรุณาใส่ชื่อ"); return; }
-    if (!phone.trim()) { setError("กรุณาใส่เบอร์โทร"); return; }
-    if (pickupDate < addDays(1) || pickupDate > addDays(7)) { setError("วันที่รับต้องล่วงหน้าอย่างน้อย 1 วัน และไม่เกิน 7 วัน"); return; }
+    const nextFieldErrors = {};
+    if (!name.trim()) nextFieldErrors.name = "กรุณากรอกชื่อ";
+    if (!phone.trim()) nextFieldErrors.phone = "กรุณากรอกเบอร์โทรศัพท์";
+    else if (!normalizeThaiPhone(phone)) nextFieldErrors.phone = "กรุณากรอกเบอร์โทรศัพท์ไทย 10 หลัก";
+    if (!coffeePassPurchaseLine && (pickupDate < addDays(1) || pickupDate > addDays(7))) {
+      nextFieldErrors.pickupDate = "วันที่รับต้องล่วงหน้าอย่างน้อย 1 วัน และไม่เกิน 7 วัน";
+    }
+    if (coffeePassPurchaseLine && !/^\d{6}$/.test(passPurchaseCode)) {
+      nextFieldErrors.passPurchaseCode = "กรุณาตั้ง Passcode เป็นตัวเลข 6 หลัก";
+    }
+    if (coffeePassPurchaseLine && !/^\d{6}$/.test(passPurchaseCodeConfirm)) {
+      nextFieldErrors.passPurchaseCodeConfirm = "กรุณายืนยัน Passcode 6 หลัก";
+    } else if (coffeePassPurchaseLine && passPurchaseCode !== passPurchaseCodeConfirm) {
+      nextFieldErrors.passPurchaseCodeConfirm = "Passcode และรหัสยืนยันไม่ตรงกัน";
+    }
+    const wantsCoffeePass = paymentMethod === "coffee-pass" && Boolean(passCartLine);
+    if (wantsCoffeePass && !selectedCustomerPass) nextFieldErrors.selectedPass = "กรุณาเลือก Coffee Pass ที่ต้องการใช้";
+    if (wantsCoffeePass && !/^\d{6}$/.test(passRedeemCode)) {
+      nextFieldErrors.passRedeemCode = "กรุณากรอก Passcode 6 หลักของ Pass";
+    } else if (wantsCoffeePass && passCodeCheckStatus !== "valid") {
+      nextFieldErrors.passRedeemCode = passCodeCheckError || "กรุณารอระบบตรวจสอบ Passcode";
+    }
+    setFieldErrors(nextFieldErrors);
+    const firstInvalidField = Object.keys(nextFieldErrors)[0];
+    if (firstInvalidField) {
+      const sectionByField = {
+        name: "customer", phone: "customer", passPurchaseCode: "customer", passPurchaseCodeConfirm: "customer",
+        selectedPass: "payment", passRedeemCode: "payment", pickupDate: "pickup",
+      };
+      setCheckoutSection(sectionByField[firstInvalidField] || "customer");
+      requestAnimationFrame(() => document.querySelector(`[data-checkout-field="${firstInvalidField}"]`)?.focus());
+      return;
+    }
     const checkoutPaymentMethod = usingCoffeePass ? passExtraPaymentMethod : paymentMethod;
-    if ((!usingCoffeePass || passOptionTotal > 0) && checkoutPaymentMethod === "promptpay" && !promptpayId) { setError("ร้านนี้ยังไม่เปิดรับชำระผ่าน QR (ยังไม่ได้ตั้งค่า PromptPay)"); return; }
-    if (coffeePassPurchaseLine && !/^\d{6}$/.test(passPurchaseCode)) { setError("กรุณาตั้ง Passcode เป็นตัวเลข 6 หลัก"); return; }
-    if (coffeePassPurchaseLine && passPurchaseCode !== passPurchaseCodeConfirm) { setError("Passcode และรหัสยืนยันไม่ตรงกัน"); return; }
-    if (usingCoffeePass && !/^\d{6}$/.test(passRedeemCode)) { setError("กรุณากรอก Passcode 6 หลักของ Pass"); return; }
-    if (usingCoffeePass && passCodeCheckStatus !== "valid") { setError(passCodeCheckError || "กรุณารอระบบตรวจสอบ Passcode"); return; }
+    if (checkoutTotal > 0 && (!usingCoffeePass || passOptionTotal > 0) && checkoutPaymentMethod === "promptpay" && !promptpayId) { setError("ร้านนี้ยังไม่เปิดรับชำระผ่าน QR (ยังไม่ได้ตั้งค่า PromptPay)"); return; }
     if (!usingCoffeePass && redeemLine && !rewardVerified) {
       startRewardOtp();
       return;
@@ -2091,7 +2527,7 @@ export default function CustomerOrder({ shopUid }) {
       }
 
       saveMyOrderId(shopUid, orderId);
-      if (orderData.paymentMethod === "promptpay") {
+      if (orderData.paymentMethod === "promptpay" && Number(orderData.total) > 0) {
         const payload = generatePayload(promptpayId, { amount: orderData.total });
         const url = await QRCode.toDataURL(payload, { width: 260, margin: 1 });
         setQrDataUrl(url);
@@ -2147,7 +2583,7 @@ export default function CustomerOrder({ shopUid }) {
   }
 
   async function reopenOrder(o) {
-    if (o.status === "pending" && o.paymentMethod === "promptpay" && promptpayId) {
+    if (o.status === "pending" && o.paymentMethod === "promptpay" && Number(o.total) > 0 && promptpayId) {
       const payload = generatePayload(promptpayId, { amount: o.total });
       const url = await QRCode.toDataURL(payload, { width: 260, margin: 1 });
       setQrDataUrl(url);
@@ -2197,7 +2633,7 @@ export default function CustomerOrder({ shopUid }) {
               </button>
             ))
           )}
-          <button style={{ ...btn, marginTop: 8 }} onClick={() => setStep("menu")}>ย้อนกลับ</button>
+          <BackIconButton onClick={() => setStep("menu")} style={{ marginTop: 8 }} />
         </div>
       </div>
     );
@@ -2221,12 +2657,13 @@ export default function CustomerOrder({ shopUid }) {
             </svg>
           </div>
           <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, margin: "6px 0 4px", color: COLORS.successDark }}>
-            ชำระเงินสำเร็จ
+            ส่งคำสั่งซื้อแล้ว
           </h1>
           <p style={{ fontSize: 12, color: COLORS.espresso2, margin: "0 0 4px" }}>เลขที่อ้างอิงออเดอร์</p>
           <p style={{ fontSize: 24, fontWeight: 700, fontFamily: "'Space Grotesk', sans-serif", letterSpacing: ".04em", margin: "0 0 18px", color: COLORS.espresso5 }}>
             #{shortCode}
           </p>
+          <OrderStatusTimeline status={order.status} />
           <p style={{ fontSize: 12, color: COLORS.espresso2, margin: 0 }}>
             กลับไปหน้าออเดอร์ของฉันใน {successCountdown} วินาที...
           </p>
@@ -2243,8 +2680,11 @@ export default function CustomerOrder({ shopUid }) {
 
   if (step === "pay" && order) {
     const isPending = order.status === "pending";
-    const isCash = isCashLikeMethod(order.paymentMethod);
-    const payAtStoreText = PAY_AT_STORE_TEXT[order.paymentMethod] || PAY_AT_STORE_TEXT.cash;
+    const orderRewardDiscount = Math.max(0, Number(order.rewardDiscount) || (order.items || []).reduce((sum, item) => sum + (item.freeUnit ? Math.max(0, Number(item.rewardDiscount ?? item.unitPrice) || 0) : 0), 0));
+    const noPaymentRequired = order.paymentMethod === "reward" || (Number(order.total) <= 0 && orderRewardDiscount > 0);
+    const settlementMethod = noPaymentRequired ? "reward" : order.paymentMethod;
+    const isCash = isCashLikeMethod(settlementMethod);
+    const payAtStoreText = PAY_AT_STORE_TEXT[settlementMethod] || PAY_AT_STORE_TEXT.cash;
     return (
       <div className="corder" style={centerWrap}>
         <style>{GLOBAL_CSS}</style>
@@ -2252,12 +2692,13 @@ export default function CustomerOrder({ shopUid }) {
         <div style={{ ...centerCard, textAlign: "center" }}>
           <p style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: COLORS.sageDark, fontWeight: 500, margin: 0 }}>{shopName}</p>
           <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, margin: "4px 0 14px" }}>
-            {isPending ? (isCash ? payAtStoreText.title : "สแกนจ่ายผ่าน PromptPay") : "สถานะออเดอร์"}
+            {isPending ? (isCash ? payAtStoreText.title : "สแกนจ่ายผ่านพร้อมเพย์") : "สถานะออเดอร์"}
           </h1>
+          <OrderStatusTimeline status={order.status} />
           {isPending ? (
             isCash ? (
               <div style={{ padding: "10px 0" }}>
-                <p style={{ fontSize: 40, margin: 0 }}>💵</p>
+                <p style={{ fontSize: 40, margin: 0 }}>{noPaymentRequired ? "🎁" : "💵"}</p>
                 <p style={{ fontSize: 22, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif", margin: "10px 0 4px" }}>{money(order.total)}</p>
                 <p style={{ fontSize: 12, color: COLORS.espresso2, margin: "0 0 14px" }}>{payAtStoreText.instruction}</p>
               </div>
@@ -2277,7 +2718,7 @@ export default function CustomerOrder({ shopUid }) {
                 )}
                 <p style={{ fontSize: 22, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif", margin: "14px 0 4px" }}>{money(order.total)}</p>
                 <p style={{ fontSize: 12, color: COLORS.espresso2, margin: "0 0 14px" }}>
-                  {order.paymentVerified ? "ยืนยันการชำระเงินแล้ว ✅" : `${STATUS_TEXT.pending} (หน้านี้จะอัปเดตอัตโนมัติ)`}
+                  {order.paymentVerified ? "ยืนยันการชำระเงินแล้ว · รอร้านยืนยันคำสั่งซื้อ" : `${STATUS_DESCRIPTION.pending} (หน้านี้จะอัปเดตอัตโนมัติ)`}
                 </p>
                 {!order.paymentVerified && (
                   <>
@@ -2299,9 +2740,10 @@ export default function CustomerOrder({ shopUid }) {
               </>
             )
           ) : (
-            <div style={{ padding: "24px 0", display: "flex", flexDirection: "column", alignItems: "center" }}>
+            <div style={{ padding: "10px 0 20px", display: "flex", flexDirection: "column", alignItems: "center" }}>
               <OrderStatusIcon status={order.status} size={38} />
               <p style={{ fontSize: 16, fontWeight: 600, margin: "12px 0 4px" }}>{STATUS_TEXT[order.status] || order.status}</p>
+              <p style={{ fontSize: 12, color: COLORS.espresso2, margin: 0 }}>{STATUS_DESCRIPTION[order.status] || "หน้านี้จะอัปเดตอัตโนมัติ"}</p>
             </div>
           )}
           {order.pickupDate && !order.coffeePassPurchase && (
@@ -2334,6 +2776,11 @@ export default function CustomerOrder({ shopUid }) {
                 )}
               </div>
             ))}
+            {orderRewardDiscount > 0 && (
+              <div style={{ display:"flex", justifyContent:"space-between", marginTop:8, paddingTop:8, borderTop:`1px dashed ${COLORS.line}`, color:COLORS.sageDark, fontSize:12.5, fontWeight:700 }}>
+                <span>ส่วนลดรางวัลสมาชิก</span><span>-{money(orderRewardDiscount)}</span>
+              </div>
+            )}
           </div>
           <button style={{ ...btn, marginTop: 14, width: "100%" }} onClick={() => { resetOrderFlow(); setStep("menu"); }}>กลับไปหน้าเมนู</button>
         </div>
@@ -2364,10 +2811,10 @@ export default function CustomerOrder({ shopUid }) {
           ))}
           {redeemDiscount > 0 && (
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: COLORS.sageDark, marginTop: 8 }}>
-              <span>แลกเมล็ดรับฟรี 1 แก้ว</span><span>-{money(redeemDiscount)}</span>
+              <span>ส่วนลดรางวัลสมาชิก (สูงสุด {money(loyaltyRewardValue)})</span><span>-{money(redeemDiscount)}</span>
             </div>
           )}
-          {usingCoffeePass && (
+          {paymentMethod === "coffee-pass" && passCartLine && (
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: COLORS.sageDark, marginTop: 8 }}>
               <span>Coffee Pass ครอบคลุมค่าเครื่องดื่ม</span><span>-{money(passCoveredAmount)}</span>
             </div>
@@ -2376,16 +2823,42 @@ export default function CustomerOrder({ shopUid }) {
             <span>รวมที่ต้องชำระ</span><span>{money(checkoutTotal)}</span>
           </div>
 
-          <label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 16 }}>ชื่อ</label>
-          <input style={field} value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" />
-
-          <label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>เบอร์โทรศัพท์</label>
+          <CheckoutSection
+            title="ข้อมูลผู้สั่ง"
+            summary={name.trim() && phone.trim() ? `${name.trim()} · ${phone.trim()}` : "ชื่อ เบอร์โทร และสิทธิ์สมาชิก"}
+            icon="user"
+            open={checkoutSection === "customer"}
+            onToggle={() => setCheckoutSection((current) => current === "customer" ? null : "customer")}
+          >
+          <label htmlFor="checkout-name" style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 16 }}>ชื่อ <span style={{ color: COLORS.danger }}>*</span></label>
           <input
-            style={field}
+            id="checkout-name"
+            className={fieldErrors.name ? "customer-field-invalid" : undefined}
+            data-checkout-field="name"
+            required
+            aria-invalid={!!fieldErrors.name}
+            aria-describedby={fieldErrors.name ? "checkout-name-error" : undefined}
+            style={{ ...field, borderColor: fieldErrors.name ? COLORS.danger : "rgba(0,163,224,0.22)", boxShadow: fieldErrors.name ? "0 0 0 3px rgba(178,58,46,.10)" : "none" }}
+            value={name}
+            onChange={(e) => { setName(e.target.value); clearFieldError("name"); }}
+            placeholder="กรอกชื่อ"
+          />
+          <InlineFieldError id="checkout-name-error" message={fieldErrors.name} />
+
+          <label htmlFor="checkout-phone" style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>เบอร์โทรศัพท์ <span style={{ color: COLORS.danger }}>*</span></label>
+          <input
+            id="checkout-phone"
+            className={fieldErrors.phone ? "customer-field-invalid" : undefined}
+            data-checkout-field="phone"
+            required
+            aria-invalid={!!fieldErrors.phone}
+            aria-describedby={fieldErrors.phone ? "checkout-phone-error" : undefined}
+            style={{ ...field, borderColor: fieldErrors.phone ? COLORS.danger : "rgba(0,163,224,0.22)", boxShadow: fieldErrors.phone ? "0 0 0 3px rgba(178,58,46,.10)" : "none" }}
             type="tel"
             value={phone}
             onChange={(e) => {
               setPhone(e.target.value);
+              clearFieldError("phone");
               setRewardVerification(null);
               setRedemptionAttemptId("");
               setSelectedPassId("");
@@ -2394,16 +2867,18 @@ export default function CustomerOrder({ shopUid }) {
               setPassCodeCheckStatus("idle");
               setPassCodeCheckError("");
             }}
-            placeholder="Phone number"
+            placeholder="0XX-XXX-XXXX"
           />
+          <InlineFieldError id="checkout-phone-error" message={fieldErrors.phone} />
 
-          {!coffeePassPurchaseLine && !usingCoffeePass && (
+          {!coffeePassPurchaseLine && (
             <>
               <LoyaltyCard
                 phone={phone}
                 loyaltyStatus={loyaltyStatus}
                 beanRecord={beanRecord}
                 loyaltyBeanGoal={loyaltyBeanGoal}
+                loyaltyRewardValue={loyaltyRewardValue}
                 onRetry={() => setLoyaltyRetryTick((t) => t + 1)}
                 cart={cart}
                 cartCount={loyaltyCartCount}
@@ -2415,7 +2890,7 @@ export default function CustomerOrder({ shopUid }) {
                 onRequestRewardVerification={startRewardOtp}
                 onShowRewardTerms={() => setShowRewardTerms(true)}
               />
-              {showRewardTerms && <RewardTermsSheet goal={loyaltyBeanGoal} onClose={() => setShowRewardTerms(false)} />}
+              {showRewardTerms && <RewardTermsSheet goal={loyaltyBeanGoal} rewardValue={loyaltyRewardValue} onClose={() => setShowRewardTerms(false)} />}
               <RewardOtpModal
                 open={rewardOtpOpen}
                 phone={phone}
@@ -2433,17 +2908,52 @@ export default function CustomerOrder({ shopUid }) {
 
           {coffeePassPurchaseLine && (
             <div style={{ marginTop:12, padding:"10px 12px", border:`1px solid ${COLORS.line}`, borderRadius:11, background:COLORS.sageLight }}>
-              <label style={{ display:"block", color:COLORS.espresso4, fontSize:11.5, fontWeight:700 }}>ตั้ง Passcode 6 หลัก</label>
+              <label style={{ display:"block", color:COLORS.espresso4, fontSize:11.5, fontWeight:700 }}>ตั้ง Passcode 6 หลัก <span style={{ color: COLORS.danger }}>*</span></label>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginTop:6 }}>
-                <input style={{ ...field, letterSpacing:".2em", textAlign:"center", fontWeight:800 }} type="password" inputMode="numeric" autoComplete="new-password" maxLength={6} value={passPurchaseCode} onChange={(event) => setPassPurchaseCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="6-digit code" />
-                <input style={{ ...field, letterSpacing:".2em", textAlign:"center", fontWeight:800, borderColor:passPurchaseMismatch ? COLORS.danger : (passPurchaseCodesMatch ? COLORS.success : COLORS.line) }} type="password" inputMode="numeric" autoComplete="new-password" maxLength={6} value={passPurchaseCodeConfirm} onChange={(event) => setPassPurchaseCodeConfirm(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="Confirm code" />
+                <div>
+                  <input
+                    className={fieldErrors.passPurchaseCode ? "customer-field-invalid" : undefined}
+                    data-checkout-field="passPurchaseCode"
+                    required
+                    aria-label="ตั้ง Passcode 6 หลัก"
+                    aria-invalid={!!fieldErrors.passPurchaseCode}
+                    aria-describedby={fieldErrors.passPurchaseCode ? "checkout-passcode-error" : undefined}
+                    style={{ ...field, letterSpacing:".2em", textAlign:"center", fontWeight:800, borderColor:fieldErrors.passPurchaseCode ? COLORS.danger : COLORS.line, boxShadow:fieldErrors.passPurchaseCode ? "0 0 0 3px rgba(178,58,46,.10)" : "none" }}
+                    type="password" inputMode="numeric" autoComplete="new-password" maxLength={6} value={passPurchaseCode}
+                    onChange={(event) => { setPassPurchaseCode(event.target.value.replace(/\D/g, "").slice(0, 6)); clearFieldError("passPurchaseCode"); clearFieldError("passPurchaseCodeConfirm"); }}
+                    placeholder="รหัส 6 หลัก"
+                  />
+                  <InlineFieldError id="checkout-passcode-error" message={fieldErrors.passPurchaseCode} />
+                </div>
+                <div>
+                  <input
+                    className={(fieldErrors.passPurchaseCodeConfirm || passPurchaseMismatch) ? "customer-field-invalid" : undefined}
+                    data-checkout-field="passPurchaseCodeConfirm"
+                    required
+                    aria-label="ยืนยัน Passcode 6 หลัก"
+                    aria-invalid={!!fieldErrors.passPurchaseCodeConfirm || passPurchaseMismatch}
+                    aria-describedby={(fieldErrors.passPurchaseCodeConfirm || passPurchaseMismatch) ? "checkout-passcode-confirm-error" : undefined}
+                    style={{ ...field, letterSpacing:".2em", textAlign:"center", fontWeight:800, borderColor:(fieldErrors.passPurchaseCodeConfirm || passPurchaseMismatch) ? COLORS.danger : (passPurchaseCodesMatch ? COLORS.success : COLORS.line), boxShadow:(fieldErrors.passPurchaseCodeConfirm || passPurchaseMismatch) ? "0 0 0 3px rgba(178,58,46,.10)" : "none" }}
+                    type="password" inputMode="numeric" autoComplete="new-password" maxLength={6} value={passPurchaseCodeConfirm}
+                    onChange={(event) => { setPassPurchaseCodeConfirm(event.target.value.replace(/\D/g, "").slice(0, 6)); clearFieldError("passPurchaseCodeConfirm"); }}
+                    placeholder="ยืนยันรหัส"
+                  />
+                  <InlineFieldError id="checkout-passcode-confirm-error" message={fieldErrors.passPurchaseCodeConfirm || (passPurchaseMismatch ? "Passcode ไม่ตรงกัน กรุณาตรวจสอบอีกครั้ง" : "")} />
+                </div>
               </div>
-              {passPurchaseMismatch && <div role="alert" style={{ marginTop:6, color:COLORS.danger, fontSize:11, fontWeight:700 }}>Passcode ไม่ตรงกัน กรุณาตรวจสอบอีกครั้ง</div>}
               {passPurchaseCodesMatch && <div style={{ marginTop:6, color:COLORS.successDark, fontSize:11, fontWeight:700 }}>Passcode ตรงกัน ✓</div>}
               {!passPurchaseMismatch && !passPurchaseCodesMatch && <div style={{ marginTop:6, color:COLORS.espresso2, fontSize:10.5 }}>กรุณาจำรหัสนี้ไว้และไม่บอกรหัสแก่ผู้อื่น</div>}
             </div>
           )}
+          </CheckoutSection>
 
+          <CheckoutSection
+            title="วิธีชำระเงิน"
+            summary={rewardCoversTotal ? "รางวัลสมาชิก · ไม่ต้องชำระ" : (PAYMENT_METHOD_META[paymentMethod]?.label || "เลือกวิธีชำระเงิน")}
+            icon="wallet"
+            open={checkoutSection === "payment"}
+            onToggle={() => setCheckoutSection((current) => current === "payment" ? null : "payment")}
+          >
           {!coffeePassPurchaseLine && passCartLine && loyaltyStatus === "loading" && (
             <div style={{ marginTop:12, color:COLORS.espresso2, fontSize:11 }}>กำลังตรวจสอบ Coffee Pass ของเบอร์นี้...</div>
           )}
@@ -2458,18 +2968,25 @@ export default function CustomerOrder({ shopUid }) {
             </div>
           )}
 
-          <label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>วิธีชำระเงิน</label>
-          <div style={{ display: "flex", flexWrap:"wrap", gap: 8, marginTop: 4 }}>
+          {rewardCoversTotal ? (
+            <div style={{ display:"flex", alignItems:"center", gap:9, marginTop:12, padding:"11px 12px", border:`1px solid ${COLORS.success}55`, borderRadius:11, background:COLORS.successLight, color:COLORS.successDark }}>
+              <i className="ti ti-gift" style={{fontSize:20}} aria-hidden="true" />
+              <span><strong style={{display:"block",fontSize:12.5}}>ยอดชำระ 0 บาท</strong><small style={{fontSize:10.5}}>ใช้รางวัลสมาชิกแล้ว ไม่ต้องเลือกวิธีชำระเงิน</small></span>
+            </div>
+          ) : <>
+            <label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>วิธีชำระเงิน</label>
+            <div style={{ display: "flex", flexWrap:"wrap", gap: 8, marginTop: 4 }}>
             {[
-              ...(!coffeePassPurchaseLine && compatibleCustomerPasses.length > 0 ? [["coffee-pass", "Coffee Pass"]] : []),
-              ["promptpay", "พร้อมเพย์ (QR)"], ["cash", "เงินสด"], ["thaihelpthai", "ไทยช่วยไทย"],
-            ].map(([val, label]) => (
-              <button
-                key={val}
-                type="button"
+              ...(!coffeePassPurchaseLine && compatibleCustomerPasses.length > 0 ? ["coffee-pass"] : []),
+              "promptpay", "cash", "thaihelpthai",
+            ].map((method) => (
+              <PaymentMethodButton
+                key={method}
+                method={method}
+                selected={paymentMethod === method}
                 onClick={() => {
-                  setPaymentMethod(val);
-                  if (val === "coffee-pass") {
+                  setPaymentMethod(method);
+                  if (method === "coffee-pass") {
                     setRedeemLineId(null);
                     setRedeemMode(false);
                     setRewardVerification(null);
@@ -2477,27 +2994,26 @@ export default function CustomerOrder({ shopUid }) {
                     if (!passRedemptionAttemptId) setPassRedemptionAttemptId(newRedemptionAttemptId());
                   }
                 }}
-                style={{
-                  flex: "1 1 42%", padding: "10px 8px", borderRadius: 9, fontSize: 13, fontWeight: 500, cursor: "pointer",
-                  border: paymentMethod === val ? `1.5px solid ${COLORS.sage}` : `1px solid ${COLORS.line}`,
-                  background: paymentMethod === val ? COLORS.sageLight : "#fff",
-                  color: paymentMethod === val ? COLORS.sageDark : COLORS.espresso4,
-                }}
-              >
-                {label}
-              </button>
+              />
             ))}
-          </div>
+            </div>
+          </>}
 
           {usingCoffeePass && (
-            <div style={{ marginTop:10, padding:"11px 12px", border:`1px solid ${COLORS.sage}`, borderRadius:12, background:COLORS.sageLight }}>
-              <div style={{ color:COLORS.espresso5, fontSize:12, fontWeight:800 }}>เลือก Pass ที่จะใช้</div>
+            <div
+              data-checkout-field="selectedPass"
+              tabIndex={-1}
+              style={{ marginTop:10, padding:"11px 12px", border:`${fieldErrors.selectedPass ? 2 : 1}px solid ${fieldErrors.selectedPass ? COLORS.danger : COLORS.sage}`, borderRadius:12, background:COLORS.sageLight, boxShadow:fieldErrors.selectedPass ? "0 0 0 3px rgba(178,58,46,.10)" : "none", outline:"none" }}
+            >
+              <div style={{ color:COLORS.espresso5, fontSize:12, fontWeight:800 }}>เลือก Pass ที่จะใช้ <span style={{ color: COLORS.danger }}>*</span></div>
+              <InlineFieldError id="checkout-selected-pass-error" message={fieldErrors.selectedPass} />
               {compatibleCustomerPasses.map((pass) => (
                 <button
                   type="button"
                   key={pass.id}
                   onClick={() => {
                     setSelectedPassId(pass.id);
+                    clearFieldError("selectedPass");
                     setPassRedeemCode("");
                     setPassRedemptionAttemptId(newRedemptionAttemptId());
                     setPassCodeCheckStatus("idle");
@@ -2509,38 +3025,66 @@ export default function CustomerOrder({ shopUid }) {
                   <strong style={{ color:COLORS.sageDark, fontSize:12 }}>{Number(pass.remainingUses) || 0} สิทธิ์</strong>
                 </button>
               ))}
-              <label style={{ display:"block", color:COLORS.espresso4, fontSize:11.5, fontWeight:700, marginTop:10 }}>Passcode</label>
+              <label htmlFor="checkout-redeem-passcode" style={{ display:"block", color:COLORS.espresso4, fontSize:11.5, fontWeight:700, marginTop:10 }}>Passcode <span style={{ color: COLORS.danger }}>*</span></label>
               <input
-                style={{ ...field, marginTop:5, letterSpacing:".28em", textAlign:"center", fontWeight:800, borderColor:passCodeCheckStatus === "error" ? COLORS.danger : (passCodeCheckStatus === "valid" ? COLORS.success : COLORS.line) }}
+                id="checkout-redeem-passcode"
+                className={(fieldErrors.passRedeemCode || passCodeCheckStatus === "error") ? "customer-field-invalid" : undefined}
+                data-checkout-field="passRedeemCode"
+                required
+                aria-invalid={!!fieldErrors.passRedeemCode || passCodeCheckStatus === "error"}
+                aria-describedby={(fieldErrors.passRedeemCode || passCodeCheckStatus === "error") ? "checkout-redeem-passcode-error" : undefined}
+                style={{ ...field, marginTop:5, letterSpacing:".28em", textAlign:"center", fontWeight:800, borderColor:(fieldErrors.passRedeemCode || passCodeCheckStatus === "error") ? COLORS.danger : (passCodeCheckStatus === "valid" ? COLORS.success : COLORS.line), boxShadow:(fieldErrors.passRedeemCode || passCodeCheckStatus === "error") ? "0 0 0 3px rgba(178,58,46,.10)" : "none" }}
                 type="password" inputMode="numeric" autoComplete="off" maxLength={6}
                 value={passRedeemCode}
                 onChange={(event) => {
                   setPassRedeemCode(event.target.value.replace(/\D/g, "").slice(0, 6));
+                  clearFieldError("passRedeemCode");
                   setPassRedemptionAttemptId(newRedemptionAttemptId());
                   setPassCodeCheckStatus("idle");
                   setPassCodeCheckError("");
                 }}
-                placeholder="Enter 6-digit code"
+                placeholder="รหัส Pass 6 หลัก"
               />
               {passCodeCheckStatus === "checking" && <div style={{ marginTop:6, color:COLORS.espresso2, fontSize:11 }}>กำลังตรวจสอบ Passcode...</div>}
               {passCodeCheckStatus === "valid" && <div style={{ marginTop:6, color:COLORS.successDark, fontSize:11, fontWeight:700 }}>Pass พร้อมใช้งาน ✓</div>}
-              {passCodeCheckStatus === "error" && <div role="alert" style={{ marginTop:6, color:COLORS.danger, fontSize:11, fontWeight:700 }}>{passCodeCheckError}</div>}
+              <InlineFieldError id="checkout-redeem-passcode-error" message={fieldErrors.passRedeemCode || (passCodeCheckStatus === "error" ? passCodeCheckError : "")} />
 
               {passOptionTotal > 0 && (
                 <>
                   <div style={{ marginTop:11, color:COLORS.espresso4, fontSize:11.5, fontWeight:700 }}>ชำระค่า option เพิ่ม {money(passOptionTotal)} บาท</div>
                   <div style={{ display:"flex", gap:7, marginTop:5 }}>
-                    {[["promptpay", "พร้อมเพย์"], ["cash", "เงินสด"], ["thaihelpthai", "ไทยช่วยไทย"]].map(([val, label]) => (
-                      <button type="button" key={val} onClick={() => setPassExtraPaymentMethod(val)} style={{ flex:1, padding:"8px 5px", borderRadius:8, border:passExtraPaymentMethod === val ? `1.5px solid ${COLORS.sage}` : `1px solid ${COLORS.line}`, background:passExtraPaymentMethod === val ? "#fff" : "rgba(255,255,255,.55)", color:COLORS.espresso4, fontSize:10.5 }}>{label}</button>
+                    {["promptpay", "cash", "thaihelpthai"].map((method) => (
+                      <PaymentMethodButton key={method} compact method={method} selected={passExtraPaymentMethod === method} onClick={() => setPassExtraPaymentMethod(method)} />
                     ))}
                   </div>
                 </>
               )}
             </div>
           )}
+          </CheckoutSection>
 
-          {!coffeePassPurchaseLine && <><label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>วันที่รับ (ล่วงหน้า 1-7 วัน)</label>
-          <input style={field} type="date" value={pickupDate} min={addDays(1)} max={addDays(7)} onChange={(e) => setPickupDate(e.target.value)} /></>}
+          <CheckoutSection
+            title="วันรับและรายละเอียด"
+            summary={coffeePassPurchaseLine ? "เริ่มหลังร้านยืนยันการชำระเงิน" : formatPickupDate(pickupDate)}
+            icon="calendar-event"
+            open={checkoutSection === "pickup"}
+            onToggle={() => setCheckoutSection((current) => current === "pickup" ? null : "pickup")}
+          >
+          {!coffeePassPurchaseLine && <>
+          <label htmlFor="checkout-pickup-date" style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>วันที่รับ (ล่วงหน้า 1-7 วัน) <span style={{ color: COLORS.danger }}>*</span></label>
+          <input
+            id="checkout-pickup-date"
+            className={fieldErrors.pickupDate ? "customer-field-invalid" : undefined}
+            data-checkout-field="pickupDate"
+            required
+            aria-invalid={!!fieldErrors.pickupDate}
+            aria-describedby={fieldErrors.pickupDate ? "checkout-pickup-date-error" : undefined}
+            style={{ ...field, borderColor:fieldErrors.pickupDate ? COLORS.danger : "rgba(0,163,224,0.22)", boxShadow:fieldErrors.pickupDate ? "0 0 0 3px rgba(178,58,46,.10)" : "none" }}
+            type="date" value={pickupDate} min={addDays(1)} max={addDays(7)}
+            onChange={(e) => { setPickupDate(e.target.value); clearFieldError("pickupDate"); }}
+          />
+          <InlineFieldError id="checkout-pickup-date-error" message={fieldErrors.pickupDate} />
+          </>}
           {coffeePassPurchaseLine && <div style={{ marginTop:12, padding:"10px 12px", border:`1px solid ${COLORS.line}`, borderRadius:11, background:COLORS.sageLight, color:COLORS.espresso4, fontSize:11.5 }}>Pass จะเริ่มนับอายุและเข้าบัญชีเบอร์นี้หลังร้านยืนยันการชำระเงิน</div>}
 
           <label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>โน้ตถึงร้าน (ถ้ามี)</label>
@@ -2548,14 +3092,15 @@ export default function CustomerOrder({ shopUid }) {
             style={{ ...field, resize: "vertical", minHeight: 60, fontFamily: "inherit" }}
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="Note to shop (optional)"
+            placeholder="ระบุรายละเอียดเพิ่มเติม"
           />
+          </CheckoutSection>
 
           {error && <p style={{ fontSize: 12, color: COLORS.danger, margin: "10px 0 0" }}>{error}</p>}
 
-          <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-            <button style={btn} onClick={() => setStep("menu")}>ย้อนกลับ</button>
-            <button style={{ ...btnAccent }} disabled={submitting || (coffeePassPurchaseLine && !passPurchaseCodesMatch) || (usingCoffeePass && passCodeCheckStatus !== "valid")} onClick={checkout}>
+          <div className="customer-checkout-actions" style={{ display: "flex", gap: 8 }}>
+            <BackIconButton onClick={() => setStep("menu")} />
+            <button style={{ ...btnAccent }} disabled={submitting} onClick={checkout}>
               {submitting ? "กำลังสร้าง QR..." : "ยืนยันสั่งซื้อ"}
             </button>
           </div>
@@ -2577,6 +3122,7 @@ export default function CustomerOrder({ shopUid }) {
           visible={!!editingCartLine}
           menu={editingCartLine ? menusById[editingCartLine.menuId] : null}
           groups={editingCartLine ? groupsForMenu(menusById[editingCartLine.menuId]) : []}
+          fromTop
           hideQty
           initialOptions={editingCartLine ? editingCartLine.options : undefined}
           onCancel={() => setEditingCartLine(null)}
@@ -2595,12 +3141,17 @@ export default function CustomerOrder({ shopUid }) {
       <style>{GLOBAL_CSS}</style>
       <GlassBackdrop seasonalEffect={activeSeasonalEffect} />
 
-      {takeoverPromo && (
+      {takeoverContent && (
         <PromotionTakeover
-          promo={takeoverPromo}
-          imageUrl={takeoverPromo.popupImageUrl || menusById[takeoverPromo.menuIds?.[0]]?.imageUrl || ""}
+          promo={takeoverContent.item}
+          variant={takeoverContent.kind}
+          imageUrl={takeoverContent.kind === "ad"
+            ? takeoverContent.item.imageUrl || ""
+            : takeoverContent.item.popupImageUrl || menusById[takeoverContent.item.menuIds?.[0]]?.imageUrl || ""}
           onClose={closePromotionTakeover}
-          onCta={() => openTakeoverPromotion(takeoverPromo)}
+          onCta={() => takeoverContent.kind === "ad"
+            ? openTakeoverAd(takeoverContent.item)
+            : openTakeoverPromotion(takeoverContent.item)}
         />
       )}
 
@@ -2665,7 +3216,9 @@ export default function CustomerOrder({ shopUid }) {
         )}
       </div>
 
-      <BannerCarousel images={bannerImageUrls.length > 0 ? bannerImageUrls : (bannerImageUrl ? [bannerImageUrl] : [])} />
+      <BannerCarousel images={bannerImageUrls.length > 0
+        ? (bannerEnabledStates === null ? [] : bannerImageUrls.filter((_, index) => bannerEnabledStates[index] !== false))
+        : (bannerImageUrl ? [bannerImageUrl] : [])} />
 
       {menus.length === 0 ? (
         <div style={{ padding: 24, textAlign: "center", color: COLORS.espresso2, fontSize: 13 }}>ร้านยังไม่มีเมนู</div>
@@ -2785,7 +3338,7 @@ export default function CustomerOrder({ shopUid }) {
                         <ol style={{ margin:"8px 0 0", paddingLeft:20, color:COLORS.espresso4, fontSize:11.5, lineHeight:1.65 }}>
                           <li>เลือกเครื่องดื่มจากเมนูตามปกติ แล้วไปหน้าชำระเงิน</li>
                           <li>กรอกเบอร์โทรศัพท์ที่ใช้ซื้อ Pass</li>
-                          <li>ถ้าเมนูใช้สิทธิ์ได้ ระบบจะเลือก Coffee Pass เป็นวิธีชำระหลัก</li>
+                          <li>ถ้าเมนูใช้สิทธิ์ได้ เลือก Coffee Pass ในวิธีชำระเงิน หรือเลือกใช้รางวัลเมล็ดแทนได้</li>
                           <li>กรอก Passcode ให้ถูกต้อง แล้วกดยืนยันสั่งซื้อ</li>
                         </ol>
                       </div>
@@ -2907,8 +3460,11 @@ export default function CustomerOrder({ shopUid }) {
                   </>
                 ) : (
                   <>
-                    <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 600, color: COLORS.espresso5, margin: "0 0 10px" }}>{cat}</h2>
-                    {menus.filter((m) => m.category === cat).map((m) => {
+                    <h2 style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 600, color: COLORS.espresso5, margin: "0 0 10px" }}>
+                      {cat === RECOMMENDED_CATEGORY && <i className="ti ti-star-filled" style={{ color: COLORS.sage, fontSize: 15 }} aria-hidden="true" />}
+                      {cat}
+                    </h2>
+                    {(cat === RECOMMENDED_CATEGORY ? menus.filter((m) => m.recommended === true && m.available !== false) : menus.filter((m) => m.category === cat)).map((m) => {
                       const soldOut = m.available === false;
                       const lines = directLinesForMenu(m.id);
                       const qty = lines.reduce((s, l) => s + l.qty, 0);
@@ -2916,24 +3472,28 @@ export default function CustomerOrder({ shopUid }) {
                       const canAddDirectly = groupsForMenu(m).length === 0;
                       const directPromo = bestDirectPromoForMenu(m, Math.max(1, qty));
                       const directPromoPrice = directPromo?.type === "single" ? singlePromoPrice(directPromo, m) : null;
+                      const tag = customerMenuTag(m);
+                      const refKey = cat === RECOMMENDED_CATEGORY ? `recommended_${m.id}` : m.id;
                       return (
-                        <div key={m.id} onClick={() => !soldOut && !singleLine && openMenu(m)} style={{
+                        <div key={m.id} onClick={() => !soldOut && !singleLine && openMenu(m, null, refKey)} style={{
                           ...GLASS_PANEL, display: "flex", gap: 12, alignItems: "center", padding: "10px 12px", borderRadius: 14, marginBottom: 8,
                           opacity: soldOut ? 0.5 : 1, cursor: soldOut || singleLine ? "default" : "pointer",
                         }}>
-                          <div ref={(el) => { menuThumbRefs.current[m.id] = el; }}>
+                          <div ref={(el) => { menuThumbRefs.current[refKey] = el; }} style={{ position: "relative", flexShrink: 0 }}>
                             <MenuThumb imageUrl={m.imageUrl} productType={productTypeOf(m)} />
                           </div>
                           <div style={{ flex: 1, minWidth: 0 }}>
+                            {tag && <span style={{ display: "inline-block", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 4, padding: "3px 8px", borderRadius: 999, background: tag.color, color: tag.textColor, boxShadow: "0 3px 8px rgba(0,0,0,.10)", fontSize: 9.5, lineHeight: 1.25, fontWeight: 800 }}>{tag.label}</span>}
                             <div style={{ fontWeight: 500, fontSize: 14, color: COLORS.espresso5 }}>{m.name}</div>
+                            {m.description && <div style={{ marginTop: 2, color: COLORS.espresso2, fontSize: 11, lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{m.description}</div>}
                             <div style={{ fontSize: 13, color: soldOut ? COLORS.danger : COLORS.gold, fontWeight: 600, marginTop: 3 }}>
                               {soldOut ? "หมดวันนี้" : directPromoPrice !== null ? (
                                 <span style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
                                   <span style={{ color: COLORS.espresso2, fontSize: 11.5, textDecoration: "line-through" }}>{money(m.priceStore)}</span>
-                                  <span style={{ color: COLORS.danger }}>{money(directPromoPrice)} / {productUnitLabel(m)}</span>
+                                  <span style={{ color: COLORS.danger }}>{money(directPromoPrice)}</span>
                                   <span style={{ color: "#fff", background: COLORS.danger, borderRadius: 999, padding: "1px 6px", fontSize: 9.5 }}>ราคาโปร</span>
                                 </span>
-                              ) : `${money(m.priceStore)} / ${productUnitLabel(m)}`}
+                              ) : money(m.priceStore)}
                             </div>
                             {!soldOut && directPromo?.type === "qty" && (
                               <div style={{ marginTop: 3, color: COLORS.danger, fontSize: 10.5, fontWeight: 600 }}>
@@ -2943,30 +3503,36 @@ export default function CustomerOrder({ shopUid }) {
                           </div>
                           {singleLine ? (
                             <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
-                              <button onClick={() => setLineQty(singleLine.lineId, singleLine.qty - 1)} style={{
-                                width: 28, height: 28, borderRadius: 9, border: "1px solid rgba(255,255,255,0.7)", background: "rgba(255,255,255,0.6)",
+                              <button className="customer-qty-button" aria-label={`ลดจำนวน ${m.name}`} onClick={() => setLineQty(singleLine.lineId, singleLine.qty - 1)} style={{
+                                borderRadius: 10, border: "1px solid rgba(0,163,224,.22)", background: "rgba(255,255,255,0.75)",
                                 color: COLORS.espresso5, fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
                               }}>−</button>
                               <span style={{ minWidth: 16, textAlign: "center", fontWeight: 600, color: COLORS.espresso5 }}><AnimatedQty value={qty} /></span>
                               <button
-                                onClick={() => { if (canAddDirectly) { spawnFly(m.id, m.imageUrl); setLineQty(singleLine.lineId, singleLine.qty + 1); } else openMenu(m); }}
+                                className={`${canAddDirectly ? "customer-add-button" : "customer-configure-button"} customer-qty-button`}
+                                aria-label={canAddDirectly ? `เพิ่ม ${m.name}` : `เลือกตัวเลือกของ ${m.name}`}
+                                title={canAddDirectly ? "เพิ่มสินค้า" : "เลือกตัวเลือก"}
+                                onClick={() => { if (canAddDirectly) { spawnFly(refKey, m.imageUrl); setLineQty(singleLine.lineId, singleLine.qty + 1); } else openMenu(m, null, refKey); }}
                                 style={{
-                                  width: 28, height: 28, borderRadius: 8, border: "none", background: COLORS.espresso5,
+                                  borderRadius: 10, border: "none",
                                   color: "#fff", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
                                 }}
-                              >+</button>
+                              >{canAddDirectly ? "+" : <i className="ti ti-adjustments-horizontal" style={{ fontSize: 18 }} aria-hidden="true" />}</button>
                             </div>
                           ) : (
                             <button
+                              className={`${canAddDirectly ? "customer-add-button" : "customer-configure-button"} customer-qty-button`}
+                              aria-label={canAddDirectly ? `เพิ่ม ${m.name}` : `เลือกตัวเลือกของ ${m.name}`}
+                              title={canAddDirectly ? "เพิ่มสินค้า" : "เลือกตัวเลือก"}
                               disabled={soldOut}
-                              onClick={(e) => { e.stopPropagation(); openMenu(m); }}
+                              onClick={(e) => { e.stopPropagation(); openMenu(m, null, refKey); }}
                               style={{
-                                position: "relative", width: 32, height: 32, borderRadius: 9, flexShrink: 0, border: "none",
-                                background: soldOut ? COLORS.line : COLORS.espresso5, color: "#fff", fontSize: 18, lineHeight: 1,
+                                position: "relative", borderRadius: 10, flexShrink: 0, border: "none",
+                                background: soldOut ? COLORS.line : COLORS.sage, color: "#fff", fontSize: 18, lineHeight: 1,
                                 display: "flex", alignItems: "center", justifyContent: "center",
                               }}
                             >
-                              +
+                              {canAddDirectly ? "+" : <i className="ti ti-adjustments-horizontal" style={{ fontSize: 18 }} aria-hidden="true" />}
                               {qty > 0 && (
                                 <span style={{
                                   position: "absolute", top: -6, right: -6, background: COLORS.danger, color: "#fff",
@@ -2991,32 +3557,37 @@ export default function CustomerOrder({ shopUid }) {
       )}
 
       {cartCount > 0 && (
-        <div style={{
+        <div className="customer-cart-bar" style={{
           position: "fixed", left: 16, right: 16, bottom: 16, maxWidth: 420, margin: "0 auto",
-          background: "rgba(0,59,92,0.92)", backdropFilter: "blur(20px) saturate(180%)", WebkitBackdropFilter: "blur(20px) saturate(180%)",
-          border: "1px solid rgba(255,255,255,0.15)", color: "#fff", borderRadius: 16,
-          padding: "12px 14px 12px 18px", display: "flex", alignItems: "center", justifyContent: "space-between",
-          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.18), 0 8px 24px rgba(0,59,92,0.3)", animation: "fadeIn .2s ease",
+          backdropFilter: "blur(20px) saturate(180%)", WebkitBackdropFilter: "blur(20px) saturate(180%)",
+          border: "1px solid rgba(0,163,224,0.24)", borderRadius: 20,
+          padding: "8px 8px 8px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+          animation: "fadeIn .2s ease", zIndex: 24,
         }}>
           <button
+            className="customer-cart-summary"
             onClick={() => setShowCart(true)}
-            style={{ display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", color: "#fff", padding: 0 }}
+            style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1, background: "none", border: "none", padding: "2px 4px 2px 2px", textAlign: "left" }}
           >
-            <div ref={cartIconRef} style={{ position: "relative", animation: cartBump ? "cartBump .32s ease" : "none" }}>
-              <i className="ti ti-shopping-bag" style={{ fontSize: 22 }} aria-hidden="true"></i>
+            <div ref={cartIconRef} style={{ position: "relative", width: 40, height: 40, flexShrink: 0, borderRadius: 13, background: COLORS.sageLight, color: COLORS.sageDark, display: "grid", placeItems: "center", animation: cartBump ? "cartBump .32s ease" : "none" }}>
+              <i className="ti ti-shopping-bag" style={{ fontSize: 21 }} aria-hidden="true"></i>
               <span style={{
-                position: "absolute", top: -8, right: -8, background: COLORS.sage, color: "#fff", fontSize: 10,
-                fontWeight: 700, borderRadius: 999, minWidth: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                position: "absolute", top: -5, right: -5, background: COLORS.sage, color: "#fff", fontSize: 9.5,
+                fontWeight: 800, border: "2px solid #fff", borderRadius: 999, minWidth: 18, height: 18, display: "flex", alignItems: "center", justifyContent: "center",
               }}><AnimatedQty value={cartCount} /></span>
             </div>
-            <span style={{ fontSize: 16, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif" }}><AnimatedMoney value={total} /></span>
-            <i className="ti ti-chevron-up" style={{ fontSize: 15, opacity: 0.6 }} aria-hidden="true"></i>
+            <span style={{ minWidth: 0 }}>
+              <span className="customer-cart-total-label" style={{ display: "block", fontSize: 10.5, fontWeight: 600, marginBottom: 1 }}>ยอดรวม · {cartCount} รายการ</span>
+              <span style={{ display: "block", fontSize: 17, lineHeight: 1.2, fontWeight: 700, fontFamily: "'Space Grotesk', sans-serif" }}><AnimatedMoney value={total} /></span>
+            </span>
+            <i className="ti ti-chevron-up" style={{ marginLeft: "auto", fontSize: 15, color: COLORS.sageDark, opacity: 0.72 }} aria-hidden="true"></i>
           </button>
           <button
+            className="customer-cart-checkout"
             onClick={() => { setError(""); setStep("phone"); }}
-            style={{ background: COLORS.sage, color: COLORS.espresso5, border: "none", borderRadius: 10, padding: "10px 22px", fontSize: 13.5, fontWeight: 700 }}
+            style={{ minHeight: 44, display: "inline-flex", alignItems: "center", gap: 6, border: "none", borderRadius: 13, padding: "10px 16px", fontSize: 13.5, fontWeight: 700, flexShrink: 0, boxShadow: "0 6px 16px rgba(0,163,224,.24)" }}
           >
-            สั่งซื้อ
+            สั่งซื้อ <i className="ti ti-arrow-right" style={{ fontSize: 16 }} aria-hidden="true" />
           </button>
         </div>
       )}
@@ -3039,13 +3610,13 @@ export default function CustomerOrder({ shopUid }) {
         groups={editingCartLine ? groupsForMenu(menusById[editingCartLine.menuId]) : (pickingMenu ? groupsForMenu(pickingMenu) : [])}
         hideQty={!!editingCartLine}
         initialOptions={editingCartLine ? editingCartLine.options : undefined}
-        onCancel={() => { setPickingMenu(null); setPickingPromo(null); setEditingCartLine(null); }}
+        onCancel={() => { setPickingMenu(null); setPickingPromo(null); setPickingRefKey(""); setEditingCartLine(null); }}
         onConfirm={(qty, options) => {
           if (editingCartLine) {
             confirmEditCartLine(editingCartLine, options);
             return;
           }
-          const refKey = pickingPromo ? "promo_" + pickingMenu.id : pickingMenu.id;
+          const refKey = pickingRefKey || (pickingPromo ? "promo_" + pickingMenu.id : pickingMenu.id);
           spawnFly(refKey, pickingMenu.imageUrl);
           const effectivePromo = pickingPromo || bestDirectPromoForMenu(pickingMenu, qty);
           const isQty = effectivePromo && effectivePromo.type === "qty";
@@ -3053,6 +3624,7 @@ export default function CustomerOrder({ shopUid }) {
           addToCart(pickingMenu, qty, options, priceOverride, effectivePromo ? effectivePromo.id : null, effectivePromo ? (isQty ? "qty" : "single") : null);
           setPickingMenu(null);
           setPickingPromo(null);
+          setPickingRefKey("");
         }}
       />
 
@@ -3151,10 +3723,10 @@ function CartDrawer({ visible, cart, total, onClose, onSetQty, onRemove, onCheck
   const { mounted, shown } = useSheetTransition(visible);
   if (!mounted) return null;
   return (
-    <div style={{ ...overlay, opacity: shown ? 1 : 0, transition: "opacity .25s ease" }} onClick={onClose}>
+    <div style={{ ...overlay, alignItems: "flex-end", padding: "10px 10px 0", opacity: shown ? 1 : 0, transition: "opacity .25s ease" }} onClick={onClose}>
       <div style={{
-        ...GLASS_PANEL, borderRadius: "20px 20px 0 0", padding: 20, width: "100%", maxWidth: 420, maxHeight: "80vh", overflowY: "auto",
-        transform: shown ? "translateY(0)" : "translateY(100%)", transition: "transform .34s cubic-bezier(.22,1,.36,1)",
+        ...GLASS_PANEL, borderRadius: "20px 20px 0 0", padding: "20px 20px calc(20px + env(safe-area-inset-bottom))", width: "100%", maxWidth: 420, maxHeight: "85dvh", overflowY: "auto",
+        transform: shown ? "translateY(0)" : "translateY(calc(100% + 24px))", transition: "transform .34s cubic-bezier(.22,1,.36,1)",
       }} onClick={(e) => e.stopPropagation()}>
         <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 18, margin: "0 0 14px", color: COLORS.espresso5 }}>ตะกร้าของคุณ</h2>
 
@@ -3182,17 +3754,17 @@ function CartDrawer({ visible, cart, total, onClose, onSetQty, onRemove, onCheck
                   <span style={{ fontSize: 12, color: COLORS.espresso2, marginRight: 2 }}>x{l.qty}</span>
                 ) : (
                   <>
-                    <button style={{ ...btn, padding: "4px 10px" }} onClick={() => onSetQty(l.lineId, l.qty - 1)}>−</button>
+                    <button className="customer-qty-button" aria-label={`ลดจำนวน ${l.name}`} style={btn} onClick={() => onSetQty(l.lineId, l.qty - 1)}>−</button>
                     <span style={{ minWidth: 18, textAlign: "center" }}><AnimatedQty value={l.qty} /></span>
-                    <button style={{ ...btn, padding: "4px 10px" }} onClick={() => onSetQty(l.lineId, l.qty + 1)}>+</button>
+                    <button className="customer-add-button customer-qty-button" aria-label={`เพิ่มจำนวน ${l.name}`} style={btn} onClick={() => onSetQty(l.lineId, l.qty + 1)}>+</button>
                   </>
                 )}
                 {canEditOptions && canEditOptions(l) && (
-                  <button style={{ ...btn, padding: "4px 8px" }} onClick={() => onEditOptions(l)} title="แก้ไขตัวเลือก">
+                  <button className="customer-icon-touch" style={btn} onClick={() => onEditOptions(l)} title="แก้ไขตัวเลือก" aria-label={`แก้ไขตัวเลือก ${l.name}`}>
                     <i className="ti ti-edit" style={{ fontSize: 14 }} aria-hidden="true"></i>
                   </button>
                 )}
-                <button style={{ ...btn, padding: "4px 8px", color: COLORS.danger, borderColor: COLORS.danger }} onClick={() => onRemove(l)}>
+                <button className="customer-icon-touch" style={{ ...btn, color: COLORS.danger, borderColor: COLORS.danger }} onClick={() => onRemove(l)} aria-label={`ลบ ${l.name} จากตะกร้า`}>
                   <i className="ti ti-trash" style={{ fontSize: 14 }} aria-hidden="true"></i>
                 </button>
               </div>
@@ -3205,7 +3777,7 @@ function CartDrawer({ visible, cart, total, onClose, onSetQty, onRemove, onCheck
         </div>
 
         <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-          <button style={btn} onClick={onClose}>เลือกเพิ่ม</button>
+          <BackIconButton onClick={onClose} label="เลือกเพิ่ม" />
           <button style={btnAccent} disabled={cart.length === 0} onClick={onCheckout}>ไปต่อ</button>
         </div>
       </div>
@@ -3213,7 +3785,7 @@ function CartDrawer({ visible, cart, total, onClose, onSetQty, onRemove, onCheck
   );
 }
 
-function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm, hideQty, initialOptions }) {
+function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm, hideQty, initialOptions, fromTop = false }) {
   const { mounted, shown } = useSheetTransition(visible);
   const cachedRef = useRef({ menu, groups });
   if (menu) cachedRef.current = { menu, groups };
@@ -3221,7 +3793,7 @@ function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm, hideQty
 
   const [qty, setQty] = useState(1);
   const [selections, setSelections] = useState({});
-  const [err, setErr] = useState("");
+  const [err, setErr] = useState(null);
 
   useEffect(() => {
     if (menu) {
@@ -3229,55 +3801,69 @@ function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm, hideQty
       if (initialOptions && initialOptions.length) {
         const sel = {};
         for (const o of initialOptions) {
-          sel[o.groupId] = { id: o.choiceId, label: o.label, note: "", priceDelta: o.priceDelta || 0, ingredientId: o.ingredientId || null, qtyPercent: o.qtyPercent != null ? o.qtyPercent : 100, extraAdjustments: o.extraAdjustments || [], groupId: o.groupId, groupName: o.groupName };
+          const currentGroup = cg.find((group) => group.id === o.groupId);
+          const currentChoice = currentGroup?.choices?.find((choice) => choice.id === o.choiceId);
+          sel[o.groupId] = currentChoice
+            ? { ...currentChoice, groupId: currentGroup.id, groupName: currentGroup.name }
+            : { id: o.choiceId, label: o.label, note: "", priceDelta: o.priceDelta || 0, ingredientId: o.ingredientId || null, qtyPercent: o.qtyPercent != null ? o.qtyPercent : 100, extraAdjustments: o.extraAdjustments || [], groupId: o.groupId, groupName: o.groupName };
         }
         setSelections(sel);
       } else {
         const defaults = {};
         for (const g of cg) {
-          const def = (g.choices || []).find((c) => c.isDefault);
+          const def = (g.choices || []).find((c) => c.enabled !== false && c.isDefault);
           if (def) defaults[g.id] = { ...def, groupId: g.id, groupName: g.name };
         }
         setSelections(defaults);
       }
-      setErr("");
+      setErr(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [menu?.id]);
 
   function pick(groupId, choice) {
     setSelections((s) => ({ ...s, [groupId]: choice }));
+    setErr((current) => current?.groupId === groupId ? null : current);
   }
 
   function confirm() {
     for (const grp of cg) {
-      if (grp.required && !selections[grp.id]) {
-        setErr(`กรุณาเลือก "${grp.name}"`);
+      const selectedIsAvailable = grp.choices.some((choice) => choice.id === selections[grp.id]?.id);
+      if (grp.required && !selectedIsAvailable) {
+        setErr({ groupId: grp.id, message: `กรุณาเลือก "${grp.name}"` });
         return;
       }
     }
-    const options = cg
-      .map((grp) => selections[grp.id])
-      .filter(Boolean)
-      .map((c) => ({
-        groupId: c.groupId, groupName: c.groupName, choiceId: c.id, label: c.label, priceDelta: c.priceDelta || 0,
-        ingredientId: c.ingredientId || null, qtyPercent: c.qtyPercent != null ? c.qtyPercent : 100,
-        extraAdjustments: c.extraAdjustments || [],
-      }));
+    const options = cg.flatMap((grp) => {
+      const selected = selections[grp.id];
+      if (!selected) return [];
+      const choice = grp.choices.find((item) => item.id === selected.id);
+      if (!choice) return [];
+      return [{
+        groupId: grp.id, groupName: grp.name, choiceId: choice.id, label: choice.label, priceDelta: choice.priceDelta || 0,
+        ingredientId: choice.ingredientId || null, qtyPercent: choice.qtyPercent != null ? choice.qtyPercent : 100,
+        extraAdjustments: choice.extraAdjustments || [],
+      }];
+    });
     onConfirm(hideQty ? 1 : qty, options);
   }
 
   if (!mounted) return null;
   return (
-    <div style={{ ...overlay, opacity: shown ? 1 : 0, transition: "opacity .25s ease" }} onClick={onCancel}>
+    <div style={{
+      ...overlay,
+      ...(fromTop ? { alignItems: "flex-start", padding: "max(env(safe-area-inset-top), 10px) 10px 10px" } : {}),
+      opacity: shown ? 1 : 0, transition: "opacity .25s ease",
+    }} onClick={onCancel}>
       <div style={{
-        ...GLASS_PANEL, borderRadius: "20px 20px 0 0", padding: 20, width: "100%", maxWidth: 420, maxHeight: "85vh", overflowY: "auto",
-        transform: shown ? "translateY(0)" : "translateY(100%)", transition: "transform .34s cubic-bezier(.22,1,.36,1)",
+        ...GLASS_PANEL, borderRadius: 20, padding: 20, width: "100%", maxWidth: 420, maxHeight: fromTop ? "calc(100dvh - 20px)" : "85dvh", overflowY: "auto",
+        transform: shown ? "translateY(0)" : (fromTop ? "translateY(calc(-100% - 24px))" : "translateY(calc(100% + 24px))"), transition: "transform .34s cubic-bezier(.22,1,.36,1)",
       }} onClick={(e) => e.stopPropagation()}>
-        <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 18, margin: "0 0 14px" }}>{cm?.name}</h2>
+        <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 18, margin: cm?.description ? "0 0 4px" : "0 0 14px" }}>{cm?.name}</h2>
+        {cm?.description && <p style={{ margin: "0 0 14px", color: COLORS.espresso2, fontSize: 12, lineHeight: 1.5 }}>{cm.description}</p>}
 
         {cg.map((g) => (
-          <div key={g.id} style={{ marginBottom: 16 }}>
+          <div key={g.id} style={{ marginBottom: 16, padding: err?.groupId === g.id ? 10 : 0, border: err?.groupId === g.id ? `1.5px solid ${COLORS.danger}` : "1.5px solid transparent", borderRadius: 11, boxShadow: err?.groupId === g.id ? "0 0 0 3px rgba(178,58,46,.10)" : "none" }}>
             <p style={{ fontSize: 13, fontWeight: 600, margin: "0 0 2px" }}>{g.name}</p>
             <p style={{ fontSize: 11, color: COLORS.espresso2, margin: "0 0 8px" }}>{g.required ? "กรุณาเลือก 1 ข้อ" : "เลือกได้ (ไม่บังคับ)"}</p>
             {g.choices.map((c) => {
@@ -3302,22 +3888,21 @@ function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm, hideQty
                 </button>
               );
             })}
+            {err?.groupId === g.id && <InlineFieldError id={`option-group-${g.id}-error`} message={err.message} />}
           </div>
         ))}
 
         {!hideQty && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "6px 0 16px" }}>
             <span style={{ fontSize: 13 }}>จำนวน</span>
-            <button style={{ ...btn, padding: "4px 10px" }} onClick={() => setQty((q) => Math.max(1, q - 1))}>−</button>
+            <button className="customer-qty-button" aria-label="ลดจำนวน" style={btn} onClick={() => setQty((q) => Math.max(1, q - 1))}>−</button>
             <span style={{ minWidth: 18, textAlign: "center" }}><AnimatedQty value={qty} /></span>
-            <button style={{ ...btn, padding: "4px 10px" }} onClick={() => setQty((q) => q + 1)}>+</button>
+            <button className="customer-add-button customer-qty-button" aria-label="เพิ่มจำนวน" style={btn} onClick={() => setQty((q) => q + 1)}>+</button>
           </div>
         )}
 
-        {err && <p style={{ fontSize: 12, color: COLORS.danger, margin: "10px 0 10px" }}>{err}</p>}
-
         <div style={{ display: "flex", gap: 8 }}>
-          <button style={btn} onClick={onCancel}>ยกเลิก</button>
+          <BackIconButton onClick={onCancel} label="ยกเลิก" />
           <button style={btnAccent} onClick={confirm}>เพิ่มลงตะกร้า</button>
         </div>
       </div>
@@ -3360,8 +3945,8 @@ function ChoicePickerModal({ promo, menusById, visible, onCancel, onConfirm }) {
   return (
     <div style={{ ...overlay, opacity: shown ? 1 : 0, transition: "opacity .25s ease" }} onClick={onCancel}>
       <div style={{
-        ...GLASS_PANEL, borderRadius: "20px 20px 0 0", padding: 20, width: "100%", maxWidth: 420, maxHeight: "85vh", overflowY: "auto",
-        transform: shown ? "translateY(0)" : "translateY(100%)", transition: "transform .34s cubic-bezier(.22,1,.36,1)",
+        ...GLASS_PANEL, borderRadius: 20, padding: 20, width: "100%", maxWidth: 420, maxHeight: "85dvh", overflowY: "auto",
+        transform: shown ? "translateY(0)" : "translateY(calc(100% + 24px))", transition: "transform .34s cubic-bezier(.22,1,.36,1)",
       }} onClick={(e) => e.stopPropagation()}>
         <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 18, margin: "0 0 4px" }}>{cp.name || "เลือกเมนู"}</h2>
         <p style={{ fontSize: 12, color: COLORS.espresso2, margin: "0 0 14px" }}>เลือก {need} รายการจาก {pool.length} รายการ ({selected.length}/{need})</p>
@@ -3390,7 +3975,7 @@ function ChoicePickerModal({ promo, menusById, visible, onCancel, onConfirm }) {
         })}
 
         <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-          <button style={btn} onClick={onCancel}>ยกเลิก</button>
+          <BackIconButton onClick={onCancel} label="ยกเลิก" />
           <button style={btnAccent} disabled={selected.length !== need} onClick={confirm}>
             เพิ่มลงตะกร้า ({selected.length}/{need})
           </button>
