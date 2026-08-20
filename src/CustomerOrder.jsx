@@ -60,6 +60,37 @@ function runSharedMenuTransition(source, transitionName, update) {
   }
 }
 
+function runSharedCartTransition(source, cartIconRef, update) {
+  const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  if (!source || !document.startViewTransition || reduceMotion) {
+    update();
+    return;
+  }
+
+  const transitionName = "cart-fly";
+  const root = document.documentElement;
+  source.style.viewTransitionName = transitionName;
+  root.classList.add("cart-shared-transition");
+
+  const cleanup = () => {
+    source.style.removeProperty("view-transition-name");
+    cartIconRef.current?.style.removeProperty("view-transition-name");
+    root.classList.remove("cart-shared-transition");
+  };
+
+  try {
+    const transition = document.startViewTransition(() => {
+      source.style.viewTransitionName = "none";
+      flushSync(update);
+      if (cartIconRef.current) cartIconRef.current.style.viewTransitionName = transitionName;
+    });
+    transition.finished.then(cleanup, cleanup);
+  } catch {
+    cleanup();
+    update();
+  }
+}
+
 const STATUS_TEXT = {
   pending: "รอยืนยัน",
   paid: "ยืนยันคำสั่งซื้อ",
@@ -734,8 +765,13 @@ const GLOBAL_CSS = `
   ::view-transition-group(*) { animation-duration: .42s; animation-timing-function: cubic-bezier(.22,1,.36,1); }
   ::view-transition-old(root) { animation: customerViewOld .22s ease both; }
   ::view-transition-new(root) { animation: customerViewNew .34s cubic-bezier(.22,1,.36,1) both; }
+  html.cart-shared-transition::view-transition-old(root), html.cart-shared-transition::view-transition-new(root) { animation: none; }
+  html.cart-shared-transition::view-transition-group(cart-fly) { animation-duration: 1.05s; animation-timing-function: cubic-bezier(.2,.72,.24,1); }
+  html.cart-shared-transition::view-transition-image-pair(cart-fly) { animation: cartSharedLift 1.05s cubic-bezier(.2,.72,.24,1) both; }
+  html.cart-shared-transition::view-transition-old(cart-fly), html.cart-shared-transition::view-transition-new(cart-fly) { border-radius: 14px; overflow: hidden; }
   @keyframes customerViewOld { to { opacity: .72; transform: scale(.985); } }
   @keyframes customerViewNew { from { opacity: 0; transform: translateY(8px) scale(.992); } }
+  @keyframes cartSharedLift { 0%, 100% { transform: translateY(0) rotate(0deg); } 48% { transform: translateY(-46px) rotate(-5deg); } }
   .corder * { box-sizing: border-box; }
   .corder button { font-family: inherit; cursor: pointer; }
   .corder ::-webkit-scrollbar { display: none; }
@@ -935,11 +971,6 @@ const GLOBAL_CSS = `
     100% { transform: translate3d(var(--season-drift),122vh,0) rotate(118deg) scale(1); opacity: 0; }
   }
   @keyframes seasonalWaterPulse { 0%,100% { transform: scale(.92); opacity: .52; } 50% { transform: scale(1.1); opacity: .9; } }
-  @keyframes flyToCart {
-    0% { transform: translate(0,0) scale(1); opacity: 1; }
-    50% { transform: translate(calc(var(--dx) * 0.6), calc(var(--dy) * 0.5 - 50px)) scale(0.7); opacity: 1; }
-    100% { transform: translate(var(--dx), var(--dy)) scale(0.15); opacity: 0; }
-  }
   @keyframes cartBump {
     0% { transform: scale(1); }
     40% { transform: scale(1.25); }
@@ -1573,9 +1604,9 @@ export default function CustomerOrder({ shopUid }) {
   const rewardRecaptchaRef = useRef(null);
   const [showRewardTerms, setShowRewardTerms] = useState(false);
   const [cart, setCart] = useState(() => loadSavedCustomerCart(shopUid));
-  const [flyItems, setFlyItems] = useState([]);
   const [cartBump, setCartBump] = useState(false);
   const menuThumbRefs = useRef({});
+  const pickerThumbRef = useRef(null);
   const cartIconRef = useRef(null);
   const prevCartCountRef = useRef(0);
   const [pickingMenu, setPickingMenu] = useState(null);
@@ -2132,18 +2163,8 @@ export default function CustomerOrder({ shopUid }) {
     return linesForMenu(menuId, promoId).reduce((s, l) => s + l.qty, 0);
   }
 
-  function spawnFly(refKey, imageUrl) {
-    const startEl = menuThumbRefs.current[refKey];
-    const startRect = startEl && startEl.getBoundingClientRect();
-    if (!startRect) return;
-    const cartRect = cartIconRef.current && cartIconRef.current.getBoundingClientRect();
-    const startX = startRect.left + startRect.width / 2;
-    const startY = startRect.top + startRect.height / 2;
-    const endX = cartRect ? cartRect.left + cartRect.width / 2 : 40;
-    const endY = cartRect ? cartRect.top + cartRect.height / 2 : window.innerHeight - 40;
-    const id = Math.random().toString(36).slice(2);
-    setFlyItems((list) => [...list, { id, imageUrl, startX, startY, dx: endX - startX, dy: endY - startY }]);
-    setTimeout(() => setFlyItems((list) => list.filter((f) => f.id !== id)), 650);
+  function transitionMenuToCart(refKey, update, source = menuThumbRefs.current[refKey]) {
+    runSharedCartTransition(source, cartIconRef, update);
   }
 
   function scrollOfferCarousel(dir) {
@@ -2175,10 +2196,11 @@ export default function CustomerOrder({ shopUid }) {
     const promoKind = effectivePromo ? (isQty ? "qty" : "single") : null;
     const refKey = sourceRefKey || (promo ? "promo_" + menu.id : menu.id);
     if (groups.length === 0) {
-      spawnFly(refKey, menu.imageUrl);
-      const existing = cart.find((l) => l.menuId === menu.id && l.options.length === 0 && (l.promoId || null) === promoId);
-      if (existing) setLineQty(existing.lineId, existing.qty + 1);
-      else addToCart(menu, 1, [], priceOverride, promoId, promoKind);
+      transitionMenuToCart(refKey, () => {
+        const existing = cart.find((l) => l.menuId === menu.id && l.options.length === 0 && (l.promoId || null) === promoId);
+        if (existing) setLineQty(existing.lineId, existing.qty + 1);
+        else addToCart(menu, 1, [], priceOverride, promoId, promoKind);
+      });
       return;
     }
     runSharedMenuTransition(menuThumbRefs.current[refKey], viewTransitionNameForMenu(refKey), () => {
@@ -3500,20 +3522,6 @@ export default function CustomerOrder({ shopUid }) {
         />
       )}
 
-      {flyItems.map((f) => (
-        <div
-          key={f.id}
-          style={{
-            position: "fixed", left: f.startX - 20, top: f.startY - 20, width: 40, height: 40,
-            borderRadius: "50%", overflow: "hidden", zIndex: 999, pointerEvents: "none",
-            boxShadow: "0 4px 14px rgba(0,59,92,0.28)", border: "2px solid #fff",
-            background: f.imageUrl ? `url(${f.imageUrl}) center/cover` : `linear-gradient(135deg, ${COLORS.sage}, ${COLORS.espresso5})`,
-            "--dx": `${f.dx}px`, "--dy": `${f.dy}px`,
-            animation: "flyToCart .65s cubic-bezier(.3,.8,.4,1) forwards",
-          }}
-        />
-      ))}
-
       <div className="zone-header" style={{
         margin: "10px 10px 0", height: 74, padding: "0 16px", borderRadius: 28,
         background: "#FFFFFF", border: "1px solid rgba(0,163,224,.16)", boxShadow: "0 8px 30px rgba(0,91,133,0.10)",
@@ -3893,7 +3901,7 @@ export default function CustomerOrder({ shopUid }) {
                                 className={`${canAddDirectly ? "customer-add-button" : "customer-configure-button"} customer-qty-button`}
                                 aria-label={canAddDirectly ? `เพิ่ม ${m.name}` : `เลือกตัวเลือกของ ${m.name}`}
                                 title={canAddDirectly ? "เพิ่มสินค้า" : "เลือกตัวเลือก"}
-                                onClick={() => { if (canAddDirectly) { spawnFly(refKey, m.imageUrl); setLineQty(singleLine.lineId, singleLine.qty + 1); } else openMenu(m, null, refKey); }}
+                                onClick={() => { if (canAddDirectly) transitionMenuToCart(refKey, () => setLineQty(singleLine.lineId, singleLine.qty + 1)); else openMenu(m, null, refKey); }}
                                 style={{
                                   borderRadius: 10, border: "none",
                                   color: "#fff", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
@@ -4010,6 +4018,7 @@ export default function CustomerOrder({ shopUid }) {
         menu={editingCartLine ? menusById[editingCartLine.menuId] : pickingMenu}
         groups={editingCartLine ? groupsForMenu(menusById[editingCartLine.menuId]) : (pickingMenu ? groupsForMenu(pickingMenu) : [])}
         sharedTransitionName={!editingCartLine && pickingRefKey ? viewTransitionNameForMenu(pickingRefKey) : undefined}
+        thumbRef={pickerThumbRef}
         hideQty={!!editingCartLine}
         initialOptions={editingCartLine ? editingCartLine.options : undefined}
         onCancel={() => runViewTransition(() => { setPickingMenu(null); setPickingPromo(null); setPickingRefKey(""); setEditingCartLine(null); })}
@@ -4019,16 +4028,15 @@ export default function CustomerOrder({ shopUid }) {
             return;
           }
           const refKey = pickingRefKey || (pickingPromo ? "promo_" + pickingMenu.id : pickingMenu.id);
-          spawnFly(refKey, pickingMenu.imageUrl);
           const effectivePromo = pickingPromo || bestDirectPromoForMenu(pickingMenu, qty);
           const isQty = effectivePromo && effectivePromo.type === "qty";
           const priceOverride = effectivePromo ? (isQty ? qtyPromoUnitPrice(effectivePromo, pickingMenu, qty) : singlePromoPrice(effectivePromo, pickingMenu)) : undefined;
-          addToCart(pickingMenu, qty, options, priceOverride, effectivePromo ? effectivePromo.id : null, effectivePromo ? (isQty ? "qty" : "single") : null);
-          // The cart already has its own fly-to-cart animation. Closing the
-          // picker with another shared transition creates a second image clone.
-          setPickingMenu(null);
-          setPickingPromo(null);
-          setPickingRefKey("");
+          transitionMenuToCart(refKey, () => {
+            addToCart(pickingMenu, qty, options, priceOverride, effectivePromo ? effectivePromo.id : null, effectivePromo ? (isQty ? "qty" : "single") : null);
+            setPickingMenu(null);
+            setPickingPromo(null);
+            setPickingRefKey("");
+          }, pickerThumbRef.current);
         }}
       />
 
@@ -4189,7 +4197,7 @@ function CartDrawer({ visible, cart, total, onClose, onSetQty, onRemove, onCheck
   );
 }
 
-function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm, hideQty, initialOptions, fromTop = false, sharedTransitionName }) {
+function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm, hideQty, initialOptions, fromTop = false, sharedTransitionName, thumbRef }) {
   const { mounted, shown } = useSheetTransition(visible);
   const cachedRef = useRef({ menu, groups, sharedTransitionName });
   if (menu) cachedRef.current = { menu, groups, sharedTransitionName };
@@ -4264,7 +4272,7 @@ function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm, hideQty
         transform: shown ? "translateY(0)" : (fromTop ? "translateY(calc(-100% - 24px))" : "translateY(calc(100% + 24px))"), transition: "transform .34s cubic-bezier(.22,1,.36,1)",
       }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
-          <div style={{ flexShrink: 0, viewTransitionName: cachedTransitionName || "none" }}>
+          <div ref={thumbRef} style={{ flexShrink: 0, viewTransitionName: cachedTransitionName || "none" }}>
             <MenuThumb imageUrl={cm?.imageUrl} size={72} productType={productTypeOf(cm)} />
           </div>
           <div style={{ minWidth: 0 }}>
