@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from "react";
+import { flushSync } from "react-dom";
 import { initializeApp, getApps, getApp } from "firebase/app";
 import {
   getAuth, signInAnonymously, onAuthStateChanged, PhoneAuthProvider, RecaptchaVerifier,
@@ -22,6 +23,42 @@ const customerApp = getApps().some((a) => a.name === "customer-order")
 const auth = getAuth(customerApp);
 const db = getDatabase(customerApp);
 const functions = getFunctions(customerApp, "asia-southeast1");
+
+function runViewTransition(update) {
+  const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  if (!document.startViewTransition || reduceMotion) {
+    update();
+    return;
+  }
+  try {
+    document.startViewTransition(() => flushSync(update));
+  } catch {
+    update();
+  }
+}
+
+function viewTransitionNameForMenu(key) {
+  return `menu-${String(key || "item").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}
+
+function runSharedMenuTransition(source, transitionName, update) {
+  const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  if (!source || !document.startViewTransition || reduceMotion) {
+    update();
+    return;
+  }
+  source.style.viewTransitionName = transitionName;
+  try {
+    const transition = document.startViewTransition(() => {
+      source.style.viewTransitionName = "none";
+      flushSync(update);
+    });
+    transition.finished.finally(() => source.style.removeProperty("view-transition-name")).catch(() => {});
+  } catch {
+    source.style.removeProperty("view-transition-name");
+    update();
+  }
+}
 
 const STATUS_TEXT = {
   pending: "รอยืนยัน",
@@ -70,6 +107,22 @@ function normalizeThaiPhone(value) {
   const digits = String(value || "").replace(/\D/g, "");
   if (/^66\d{9}$/.test(digits)) return `0${digits.slice(2)}`;
   if (/^0\d{9}$/.test(digits)) return digits;
+  return "";
+}
+
+function checkoutPhoneError(value) {
+  const raw = String(value || "").trim();
+  const digits = raw.replace(/\D/g, "");
+  if (!raw) return "กรุณากรอกเบอร์โทรศัพท์สำหรับติดตามออเดอร์";
+  if (digits.startsWith("66")) {
+    if (digits.length < 11) return `เบอร์นี้ยังขาด ${11 - digits.length} หลัก`;
+    if (digits.length > 11) return `เบอร์นี้เกินมา ${digits.length - 11} หลัก`;
+  } else {
+    if (digits.length < 10) return `เบอร์นี้ยังขาด ${10 - digits.length} หลัก`;
+    if (digits.length > 10) return `เบอร์นี้เกินมา ${digits.length - 10} หลัก`;
+    if (!digits.startsWith("0")) return "เบอร์โทรศัพท์ไทยควรขึ้นต้นด้วย 0 เช่น 081-234-5678";
+  }
+  if (!normalizeThaiPhone(raw)) return "รูปแบบเบอร์ยังไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง";
   return "";
 }
 
@@ -632,6 +685,31 @@ function OrderMoodBackdrop({ mood }) {
   );
 }
 
+const TASTE_FILTERS = [
+  { id: "all", label: "ทั้งหมด", icon: "apps" },
+  { id: "popular", label: "ขายดี", icon: "star-filled" },
+  { id: "bold", label: "เข้ม", icon: "flame" },
+  { id: "refreshing", label: "สดชื่น", icon: "lemon-2" },
+  { id: "matcha", label: "มัทฉะ", icon: "leaf" },
+  { id: "noncoffee", label: "ไม่มีกาแฟ", icon: "coffee-off" },
+  { id: "bakery", label: "ขนม", icon: "bread" },
+];
+
+function menuMatchesTaste(menu, filter) {
+  if (!menu || filter === "all") return Boolean(menu);
+  const text = `${menu.name || ""} ${menu.category || ""} ${menu.description || ""}`.toLowerCase();
+  const isCoffee = /coffee|กาแฟ|americano|latte|ลาเต้|espresso|เอสเพรสโซ|mocha|มอคค่า/.test(text);
+  const isMatcha = /matcha|มัทฉะ/.test(text);
+  const isFood = productTypeOf(menu) === "food" || /bread|bakery|toast|ขนมปัง|เบเกอรี่|อาหาร/.test(text);
+  if (filter === "popular") return menu.recommended === true;
+  if (filter === "bold") return /espresso|เอสเพรสโซ|americano|อเมริกาโน|cocoa|โกโก้|mocha|มอคค่า|เข้ม/.test(text);
+  if (filter === "refreshing") return /orange|ส้ม|berry|เบอร์รี|grape|องุ่น|fruit|ผลไม้|juice|น้ำผลไม้|coconut|มะพร้าว|lemon|มะนาว|yuzu|ยูซุ|soda|โซดา/.test(text);
+  if (filter === "matcha") return isMatcha;
+  if (filter === "noncoffee") return productTypeOf(menu) === "drink" && !isCoffee;
+  if (filter === "bakery") return isFood;
+  return true;
+}
+
 const field = {
   width: "100%", border: "1px solid rgba(0,163,224,0.22)", background: "rgba(255,255,255,0.86)",
   borderRadius: 10, padding: "9px 10px", fontSize: 14, boxSizing: "border-box", marginTop: 4,
@@ -653,6 +731,11 @@ const centerCard = {
 
 const GLOBAL_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
+  ::view-transition-group(*) { animation-duration: .42s; animation-timing-function: cubic-bezier(.22,1,.36,1); }
+  ::view-transition-old(root) { animation: customerViewOld .22s ease both; }
+  ::view-transition-new(root) { animation: customerViewNew .34s cubic-bezier(.22,1,.36,1) both; }
+  @keyframes customerViewOld { to { opacity: .72; transform: scale(.985); } }
+  @keyframes customerViewNew { from { opacity: 0; transform: translateY(8px) scale(.992); } }
   .corder * { box-sizing: border-box; }
   .corder button { font-family: inherit; cursor: pointer; }
   .corder ::-webkit-scrollbar { display: none; }
@@ -722,6 +805,21 @@ const GLOBAL_CSS = `
   .customer-cart-total-label { color: #718A99 !important; }
   .customer-cart-checkout { background: #00A3E0 !important; color: #FFFFFF !important; }
   .customer-cart-checkout:hover { background: #008FC5 !important; }
+  .customer-quick-reorder { margin: 10px 10px 0; padding: 11px 12px; display: flex; align-items: center; gap: 10px; border: 1px solid rgba(0,163,224,.18); border-radius: 15px; background: linear-gradient(135deg, rgba(255,255,255,.86), rgba(217,243,252,.72)); box-shadow: 0 7px 20px rgba(0,91,133,.08); }
+  .customer-quick-reorder__icon { width: 38px; height: 38px; flex: 0 0 38px; display: grid; place-items: center; border-radius: 12px; color: #0077A8; background: #FFFFFF; box-shadow: 0 4px 12px rgba(0,91,133,.1); }
+  .customer-quick-reorder__copy { min-width: 0; flex: 1; }
+  .customer-quick-reorder__copy strong, .customer-quick-reorder__copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .customer-quick-reorder__copy strong { color: #003B5C; font-size: 12.5px; }
+  .customer-quick-reorder__copy small { margin-top: 2px; color: #55778A; font-size: 10.5px; }
+  .customer-quick-reorder__button { min-height: 38px; flex-shrink: 0; padding: 0 12px; border: 0; border-radius: 11px; color: #FFFFFF; background: #0077A8; font-size: 11.5px; font-weight: 800; box-shadow: 0 5px 13px rgba(0,119,168,.22); }
+  .customer-taste-filters { display: flex; gap: 7px; margin-top: 10px; padding: 0 10px 2px; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; }
+  .customer-taste-filter { min-height: 38px; padding: 0 11px; flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; scroll-snap-align: start; border: 1px solid rgba(0,163,224,.18); border-radius: 999px; color: #55778A; background: rgba(255,255,255,.78); font-size: 11.5px; font-weight: 700; transition: color .2s ease, background .2s ease, border-color .2s ease, transform .2s ease; }
+  .customer-taste-filter.active { color: #FFFFFF; background: #0077A8; border-color: #0077A8; box-shadow: 0 5px 13px rgba(0,119,168,.2); }
+  .customer-taste-filter:active { transform: scale(.96); }
+  .customer-live-order-pill { position: fixed; left: 16px; right: 16px; max-width: 420px; margin: 0 auto; z-index: 23; min-height: 58px; padding: 8px 10px; display: flex; align-items: center; gap: 10px; border: 1px solid rgba(0,163,224,.3); border-radius: 18px; color: #003B5C; background: rgba(245,252,254,.96); box-shadow: 0 14px 34px rgba(0,91,133,.2); backdrop-filter: blur(20px) saturate(170%); -webkit-backdrop-filter: blur(20px) saturate(170%); animation: liveOrderPillIn .42s cubic-bezier(.22,1,.36,1) both; }
+  .customer-live-order-pill__pulse { width: 10px; height: 10px; flex: 0 0 10px; border-radius: 50%; background: #00A3E0; box-shadow: 0 0 0 0 rgba(0,163,224,.35); animation: liveOrderPulse 1.8s ease-out infinite; }
+  @keyframes liveOrderPillIn { from { opacity: 0; transform: translateY(18px) scale(.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
+  @keyframes liveOrderPulse { 70%, 100% { box-shadow: 0 0 0 8px rgba(0,163,224,0); } }
   .zone2-splash {
     position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; overflow: hidden;
     color: #F7FBFF; background: radial-gradient(circle at 50% 42%, rgba(17,148,207,.12), transparent 30%), linear-gradient(145deg, #05070A 0%, #0A1017 55%, #05070A 100%);
@@ -889,6 +987,11 @@ const GLOBAL_CSS = `
   html[data-theme="dark"] .corder .customer-cart-bar { background: rgba(241,250,253,.97) !important; border-color: rgba(0,163,224,.42) !important; color: #003B5C !important; }
   html[data-theme="dark"] .corder .customer-cart-summary { color: #003B5C !important; }
   html[data-theme="dark"] .corder .customer-cart-total-label { color: #55778A !important; }
+  html[data-theme="dark"] .corder .customer-quick-reorder { background: linear-gradient(135deg, rgba(23,35,51,.92), rgba(0,91,133,.34)); border-color: rgba(116,209,238,.25); }
+  html[data-theme="dark"] .corder .customer-quick-reorder__copy strong { color: #E7F7FC; }
+  html[data-theme="dark"] .corder .customer-quick-reorder__copy small { color: #B7D2DF; }
+  html[data-theme="dark"] .corder .customer-taste-filter { color: #B7D2DF; background: rgba(23,35,51,.88); border-color: rgba(116,209,238,.2); }
+  html[data-theme="dark"] .corder .customer-taste-filter.active { color: #FFFFFF; background: #0077A8; border-color: #00A3E0; }
   html[data-theme="dark"] .corder .customer-checkout-section { background: rgba(15,24,36,.72) !important; border-color: rgba(148,163,184,.18) !important; }
   html[data-theme="dark"] .corder .customer-checkout-section__header { color: #E7F7FC !important; }
   html[data-theme="dark"] .corder .customer-checkout-section__icon { background: rgba(0,163,224,.20) !important; color: #74D1EE !important; }
@@ -989,6 +1092,7 @@ const GLOBAL_CSS = `
   @media (prefers-reduced-motion: reduce) {
     .customer-checkout-section, .customer-checkout-section__body, .customer-checkout-section__chevron { transition: none !important; }
     .order-mood-particle { display: none !important; }
+    .customer-live-order-pill__pulse { animation: none !important; }
     .banner-slide { transition-duration: 0ms; }
     .zone2-splash *, .zone2-splash *::before, .zone2-splash *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
     .coffee-pass-buy-border::before { animation: none; }
@@ -1504,13 +1608,15 @@ export default function CustomerOrder({ shopUid }) {
   const [qrDataUrl, setQrDataUrl] = useState(null);
   const [myOrders, setMyOrders] = useState([]);
   const [activeCategory, setActiveCategory] = useState(null);
+  const [tasteFilter, setTasteFilter] = useState("all");
   const [showCart, setShowCart] = useState(false);
   const [splashDone, setSplashDone] = useState(false);
   const [splashMinimumElapsed, setSplashMinimumElapsed] = useState(false);
   const [splashLeaving, setSplashLeaving] = useState(false);
   const [takeoverContent, setTakeoverContent] = useState(null);
   const [popupScheduleTick, setPopupScheduleTick] = useState(0);
-  const [hasActiveOrder, setHasActiveOrder] = useState(false);
+  const [activeOrderSummary, setActiveOrderSummary] = useState(null);
+  const [repeatableOrder, setRepeatableOrder] = useState(null);
   const [headerRipple, setHeaderRipple] = useState(false);
   const [checkoutSection, setCheckoutSection] = useState("customer");
 
@@ -1838,7 +1944,7 @@ export default function CustomerOrder({ shopUid }) {
     setTakeoverContent(featured);
   }, [splashDone, acceptingOrders, step, activePromotions, popupAds, popupScheduleTick, shopUid]);
 
-  const categories = useMemo(() => {
+  const baseCategories = useMemo(() => {
     if (!menus) return [];
     const seen = [];
     for (const m of menus) {
@@ -1855,8 +1961,28 @@ export default function CustomerOrder({ shopUid }) {
     return [...featured, ...ordered];
   }, [menus, activePromotions, categoryOrder, coffeePass.enabled, coffeePassEligibleMenus]);
 
+  const tasteFilteredMenuIds = useMemo(() => new Set(
+    (menus || []).filter((menu) => menuMatchesTaste(menu, tasteFilter)).map((menu) => menu.id),
+  ), [menus, tasteFilter]);
+
+  const categories = useMemo(() => {
+    if (tasteFilter === "all") return baseCategories;
+    return baseCategories.filter((category) => {
+      if (category === HOT_DEAL_CATEGORY) return activePromotions.some((promo) => (promo.menuIds || []).some((id) => tasteFilteredMenuIds.has(id)));
+      if (category === RECOMMENDED_CATEGORY) return (menus || []).some((menu) => menu.recommended === true && menu.available !== false && tasteFilteredMenuIds.has(menu.id));
+      if (category === COFFEE_PASS_CATEGORY) return coffeePassEligibleMenus.some((menu) => tasteFilteredMenuIds.has(menu.id));
+      return (menus || []).some((menu) => menu.category === category && tasteFilteredMenuIds.has(menu.id));
+    });
+  }, [tasteFilter, baseCategories, activePromotions, tasteFilteredMenuIds, menus, coffeePassEligibleMenus]);
+
+  const visiblePromotions = useMemo(() => tasteFilter === "all"
+    ? activePromotions
+    : activePromotions.filter((promo) => (promo.menuIds || []).some((id) => tasteFilteredMenuIds.has(id))),
+  [tasteFilter, activePromotions, tasteFilteredMenuIds]);
+
   useEffect(() => {
-    if (categories.length > 0 && (!activeCategory || !categories.includes(activeCategory))) setActiveCategory(categories[0]);
+    if (categories.length === 0) setActiveCategory(null);
+    else if (!activeCategory || !categories.includes(activeCategory)) setActiveCategory(categories[0]);
   }, [categories, activeCategory]);
 
   // เลื่อนการ์ดโปรโมชันให้ลูกค้าเห็นว่ามีรายการถัดไป โดยเว้นช่วงหลังลูกค้าแตะ/ลากเอง
@@ -2055,9 +2181,11 @@ export default function CustomerOrder({ shopUid }) {
       else addToCart(menu, 1, [], priceOverride, promoId, promoKind);
       return;
     }
-    setPickingMenu(menu);
-    setPickingPromo(promo || null);
-    setPickingRefKey(refKey);
+    runSharedMenuTransition(menuThumbRefs.current[refKey], viewTransitionNameForMenu(refKey), () => {
+      setPickingMenu(menu);
+      setPickingPromo(promo || null);
+      setPickingRefKey(refKey);
+    });
   }
 
   function addToCart(menu, qty, options, priceOverride, promoId, promoKind) {
@@ -2532,15 +2660,31 @@ export default function CustomerOrder({ shopUid }) {
     });
   }
 
+  function validateCheckoutField(key) {
+    let message = "";
+    if (key === "name" && !name.trim()) message = "กรุณากรอกชื่อที่ร้านใช้เรียกตอนรับออเดอร์";
+    if (key === "phone") message = checkoutPhoneError(phone);
+    if (key === "pickupDate" && !coffeePassPurchaseLine && (pickupDate < addDays(1) || pickupDate > addDays(7))) {
+      message = pickupDate < addDays(1) ? "กรุณาเลือกวันรับตั้งแต่วันพรุ่งนี้เป็นต้นไป" : "สามารถเลือกรับล่วงหน้าได้ไม่เกิน 7 วัน";
+    }
+    setFieldErrors((current) => {
+      const next = { ...current };
+      if (message) next[key] = message;
+      else delete next[key];
+      return next;
+    });
+    return !message;
+  }
+
   async function checkout() {
     setError("");
     if (cart.length === 0) { setError("กรุณาเลือกเมนูอย่างน้อย 1 รายการ"); return; }
     const nextFieldErrors = {};
-    if (!name.trim()) nextFieldErrors.name = "กรุณากรอกชื่อ";
-    if (!phone.trim()) nextFieldErrors.phone = "กรุณากรอกเบอร์โทรศัพท์";
-    else if (!normalizeThaiPhone(phone)) nextFieldErrors.phone = "กรุณากรอกเบอร์โทรศัพท์ไทย 10 หลัก";
+    if (!name.trim()) nextFieldErrors.name = "กรุณากรอกชื่อที่ร้านใช้เรียกตอนรับออเดอร์";
+    const phoneError = checkoutPhoneError(phone);
+    if (phoneError) nextFieldErrors.phone = phoneError;
     if (!coffeePassPurchaseLine && (pickupDate < addDays(1) || pickupDate > addDays(7))) {
-      nextFieldErrors.pickupDate = "วันที่รับต้องล่วงหน้าอย่างน้อย 1 วัน และไม่เกิน 7 วัน";
+      nextFieldErrors.pickupDate = pickupDate < addDays(1) ? "กรุณาเลือกวันรับตั้งแต่วันพรุ่งนี้เป็นต้นไป" : "สามารถเลือกรับล่วงหน้าได้ไม่เกิน 7 วัน";
     }
     if (coffeePassPurchaseLine && !/^\d{6}$/.test(passPurchaseCode)) {
       nextFieldErrors.passPurchaseCode = "กรุณาตั้ง Passcode เป็นตัวเลข 6 หลัก";
@@ -2673,21 +2817,51 @@ export default function CustomerOrder({ shopUid }) {
   }
 
   useEffect(() => {
-    if (!authUid || step !== "menu") return;
-    const ids = loadMyOrderIds(shopUid);
-    if (ids.length === 0) { setHasActiveOrder(false); return; }
-    let cancelled = false;
-    Promise.allSettled(ids.map((id) => get(ref(db, `orders/${shopUid}/${id}/status`)))).then((results) => {
-      if (cancelled) return;
-      const active = results.some((r) => r.status === "fulfilled" && r.value.exists() && r.value.val() !== "done" && r.value.val() !== "cancelled");
-      setHasActiveOrder(active);
-    });
-    return () => { cancelled = true; };
-  }, [authUid, shopUid, step]);
+    if (!authUid) return undefined;
+    const ids = loadMyOrderIds(shopUid).slice(0, 12);
+    if (ids.length === 0) {
+      setActiveOrderSummary(null);
+      setRepeatableOrder(null);
+      return undefined;
+    }
+    const records = new Map();
+    const publishOrders = () => {
+      const orders = [...records.values()].sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+      setActiveOrderSummary(orders.find((candidate) => !["done", "cancelled"].includes(candidate.status)) || null);
+      setRepeatableOrder(orders.find((candidate) => candidate.status === "done" && Array.isArray(candidate.items) && candidate.items.length > 0) || null);
+    };
+    const unsubscribers = ids.map((id) => onValue(
+      ref(db, `orders/${shopUid}/${id}`),
+      (snap) => {
+        if (snap.exists()) {
+          const value = snap.val() || {};
+          const items = (Array.isArray(value.items) ? value.items : Object.values(value.items || {})).filter(Boolean);
+          records.set(id, { id, ...value, items });
+        }
+        else records.delete(id);
+        publishOrders();
+      },
+      () => {
+        records.delete(id);
+        publishOrders();
+      },
+    ));
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+  }, [authUid, shopUid]);
+
+  const hasActiveOrder = Boolean(activeOrderSummary);
 
   function triggerHeaderRipple() {
     setHeaderRipple(true);
     setTimeout(() => setHeaderRipple(false), 500);
+  }
+
+  function openCheckoutSummary() {
+    runViewTransition(() => {
+      setShowCart(false);
+      setError("");
+      setStep("phone");
+    });
   }
 
   async function openMyOrders() {
@@ -2713,6 +2887,47 @@ export default function CustomerOrder({ shopUid }) {
     }
     setOrder(o);
     setStep("pay");
+  }
+
+  function repeatOrder(o) {
+    if (!o?.items?.length || cart.length > 0) return;
+    const skipped = [];
+    const repeatedLines = o.items.flatMap((item) => {
+      const menu = menusById[item.menuId];
+      if (!menu || menu.available === false || item.productType === "pass" || String(item.promoKind || "").startsWith("coffee-pass")) {
+        skipped.push(item.name || "เมนูเดิม");
+        return [];
+      }
+      const qty = Math.max(1, Number(item.qty) || 1);
+      const options = Array.isArray(item.options) ? item.options : [];
+      const optionDelta = options.reduce((sum, option) => sum + (Number(option.priceDelta) || 0), 0);
+      const promo = bestDirectPromoForMenu(menu, qty);
+      const promoBase = promo
+        ? (promo.type === "qty" ? qtyPromoUnitPrice(promo, menu, qty) : singlePromoPrice(promo, menu))
+        : Number(menu.priceStore) || 0;
+      return [{
+        lineId: genLineId(), menuId: menu.id, name: menu.name, productType: productTypeOf(menu),
+        unitPrice: promoBase + optionDelta, originalUnitPrice: (Number(menu.priceStore) || 0) + optionDelta,
+        qty, options, promoId: promo?.id || null, promoGroupId: promo?.id || null,
+        promoKind: promo ? (promo.type === "qty" ? "qty" : "single") : null,
+      }];
+    });
+    if (repeatedLines.length === 0) {
+      setError("เมนูจากออเดอร์เดิมไม่พร้อมขายในขณะนี้");
+      return;
+    }
+    runViewTransition(() => {
+      setCart(repeatedLines);
+      setName(String(o.customerName || ""));
+      setPhone(String(o.customerPhone || ""));
+      setNote("");
+      setPaymentMethod("promptpay");
+      setPickupDate(addDays(1));
+      setCheckoutSection("customer");
+      setFieldErrors({});
+      setError(skipped.length > 0 ? `ข้ามเมนูที่ไม่พร้อมขาย: ${skipped.join(", ")}` : "");
+      setStep("phone");
+    });
   }
 
   const activeSeasonalEffect = resolveSeasonalEffect(seasonalEffect);
@@ -2754,7 +2969,7 @@ export default function CustomerOrder({ shopUid }) {
               </button>
             ))
           )}
-          <BackIconButton onClick={() => setStep("menu")} style={{ marginTop: 8 }} />
+          <BackIconButton onClick={() => runViewTransition(() => setStep("menu"))} style={{ marginTop: 8 }} />
         </div>
       </div>
     );
@@ -2903,7 +3118,7 @@ export default function CustomerOrder({ shopUid }) {
               </div>
             )}
           </div>
-          <button style={{ ...btn, marginTop: 14, width: "100%" }} onClick={() => { resetOrderFlow(); setStep("menu"); }}>กลับไปหน้าเมนู</button>
+          <button style={{ ...btn, marginTop: 14, width: "100%" }} onClick={() => runViewTransition(() => { resetOrderFlow(); setStep("menu"); })}>กลับไปหน้าเมนู</button>
         </div>
       </div>
     );
@@ -2963,6 +3178,7 @@ export default function CustomerOrder({ shopUid }) {
             style={{ ...field, borderColor: fieldErrors.name ? COLORS.danger : "rgba(0,163,224,0.22)", boxShadow: fieldErrors.name ? "0 0 0 3px rgba(178,58,46,.10)" : "none" }}
             value={name}
             onChange={(e) => { setName(e.target.value); clearFieldError("name"); }}
+            onBlur={() => validateCheckoutField("name")}
             placeholder="กรอกชื่อ"
           />
           <InlineFieldError id="checkout-name-error" message={fieldErrors.name} />
@@ -2974,7 +3190,7 @@ export default function CustomerOrder({ shopUid }) {
             data-checkout-field="phone"
             required
             aria-invalid={!!fieldErrors.phone}
-            aria-describedby={fieldErrors.phone ? "checkout-phone-error" : undefined}
+            aria-describedby={`checkout-phone-help${fieldErrors.phone ? " checkout-phone-error" : ""}`}
             style={{ ...field, borderColor: fieldErrors.phone ? COLORS.danger : "rgba(0,163,224,0.22)", boxShadow: fieldErrors.phone ? "0 0 0 3px rgba(178,58,46,.10)" : "none" }}
             type="tel"
             value={phone}
@@ -2989,8 +3205,13 @@ export default function CustomerOrder({ shopUid }) {
               setPassCodeCheckStatus("idle");
               setPassCodeCheckError("");
             }}
+            onBlur={() => validateCheckoutField("phone")}
             placeholder="0XX-XXX-XXXX"
           />
+          <div id="checkout-phone-help" style={{ display: "flex", alignItems: "flex-start", gap: 5, marginTop: 6, color: COLORS.espresso2, fontSize: 10.5, lineHeight: 1.4 }}>
+            <i className="ti ti-lock" style={{ marginTop: 1, color: COLORS.sageDark }} aria-hidden="true" />
+            ใช้แจ้งสถานะออเดอร์และค้นหาสิทธิ์สมาชิกเท่านั้น
+          </div>
           <InlineFieldError id="checkout-phone-error" message={fieldErrors.phone} />
 
           {!coffeePassPurchaseLine && (
@@ -3204,6 +3425,7 @@ export default function CustomerOrder({ shopUid }) {
             style={{ ...field, borderColor:fieldErrors.pickupDate ? COLORS.danger : "rgba(0,163,224,0.22)", boxShadow:fieldErrors.pickupDate ? "0 0 0 3px rgba(178,58,46,.10)" : "none" }}
             type="date" value={pickupDate} min={addDays(1)} max={addDays(7)}
             onChange={(e) => { setPickupDate(e.target.value); clearFieldError("pickupDate"); }}
+            onBlur={() => validateCheckoutField("pickupDate")}
           />
           <InlineFieldError id="checkout-pickup-date-error" message={fieldErrors.pickupDate} />
           </>}
@@ -3221,7 +3443,7 @@ export default function CustomerOrder({ shopUid }) {
           {error && <p style={{ fontSize: 12, color: COLORS.danger, margin: "10px 0 0" }}>{error}</p>}
 
           <div className="customer-checkout-actions" style={{ display: "flex", gap: 8 }}>
-            <BackIconButton onClick={() => setStep("menu")} />
+            <BackIconButton onClick={() => runViewTransition(() => setStep("menu"))} />
             <button style={{ ...btnAccent }} disabled={submitting} onClick={checkout}>
               {submitting ? "กำลังสร้าง QR..." : "ยืนยันสั่งซื้อ"}
             </button>
@@ -3342,8 +3564,42 @@ export default function CustomerOrder({ shopUid }) {
         ? (bannerEnabledStates === null ? [] : bannerImageUrls.filter((_, index) => bannerEnabledStates[index] !== false))
         : (bannerImageUrl ? [bannerImageUrl] : [])} />
 
+      {repeatableOrder && cartCount === 0 && (
+        <section className="customer-quick-reorder" aria-label="สั่งออเดอร์เดิมอีกครั้ง">
+          <span className="customer-quick-reorder__icon" aria-hidden="true"><i className="ti ti-history" style={{ fontSize: 19 }} /></span>
+          <span className="customer-quick-reorder__copy">
+            <strong>สั่งเหมือนเดิม</strong>
+            <small>{repeatableOrder.items.map((item) => `${item.name} ×${item.qty}`).join(" · ")}</small>
+          </span>
+          <button type="button" className="customer-quick-reorder__button" onClick={() => repeatOrder(repeatableOrder)}>
+            สั่งอีกครั้ง
+          </button>
+        </section>
+      )}
+
+      <nav className="customer-taste-filters" aria-label="กรองเมนูตามรสชาติ">
+        {TASTE_FILTERS.map((filter) => (
+          <button
+            key={filter.id}
+            type="button"
+            className={`customer-taste-filter${tasteFilter === filter.id ? " active" : ""}`}
+            aria-pressed={tasteFilter === filter.id}
+            onClick={() => {
+              setTasteFilter(filter.id);
+              mainRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+          >
+            <i className={`ti ti-${filter.icon}`} aria-hidden="true" /> {filter.label}
+          </button>
+        ))}
+      </nav>
+
       {menus.length === 0 ? (
         <div style={{ padding: 24, textAlign: "center", color: COLORS.espresso2, fontSize: 13 }}>ร้านยังไม่มีเมนู</div>
+      ) : categories.length === 0 ? (
+        <div style={{ margin: 10, padding: "24px 16px", border: `1px solid ${COLORS.line}`, borderRadius: 16, background: "rgba(255,255,255,.72)", textAlign: "center", color: COLORS.espresso2, fontSize: 12.5 }}>
+          ยังไม่มีเมนูที่ตรงกับตัวกรองนี้
+        </div>
       ) : (
         <div style={{ display: "flex", flex: 1, minHeight: 0, gap: 10, padding: "10px 10px 0" }}>
           <nav ref={categoryNavRef} className="customer-category-nav" style={{ ...GLASS_PANEL, width: 88, flexShrink: 0, overflowY: "auto", borderRadius: 16, padding: "8px 0" }}>
@@ -3487,7 +3743,7 @@ export default function CustomerOrder({ shopUid }) {
                       display: "flex", gap: 14, overflowX: "auto", scrollSnapType: "x mandatory",
                       padding: "2px 16px 10px", margin: "0 -6px",
                     }}>
-                      {activePromotions.map((promo) => {
+                      {visiblePromotions.map((promo) => {
                         let images = [];
                         let label = "";
                         let title = "";
@@ -3586,7 +3842,9 @@ export default function CustomerOrder({ shopUid }) {
                       {cat === RECOMMENDED_CATEGORY && <i className="ti ti-star-filled" style={{ color: COLORS.sage, fontSize: 15 }} aria-hidden="true" />}
                       {cat}
                     </h2>
-                    {(cat === RECOMMENDED_CATEGORY ? menus.filter((m) => m.recommended === true && m.available !== false) : menus.filter((m) => m.category === cat)).map((m) => {
+                    {(cat === RECOMMENDED_CATEGORY
+                      ? menus.filter((m) => m.recommended === true && m.available !== false && tasteFilteredMenuIds.has(m.id))
+                      : menus.filter((m) => m.category === cat && tasteFilteredMenuIds.has(m.id))).map((m) => {
                       const soldOut = m.available === false;
                       const lines = directLinesForMenu(m.id);
                       const qty = lines.reduce((s, l) => s + l.qty, 0);
@@ -3678,6 +3936,26 @@ export default function CustomerOrder({ shopUid }) {
         </div>
       )}
 
+      {activeOrderSummary && (
+        <button
+          type="button"
+          className="customer-live-order-pill"
+          onClick={() => reopenOrder(activeOrderSummary)}
+          style={{ bottom: cartCount > 0 ? 88 : 16 }}
+          aria-label={`เปิดออเดอร์ที่กำลังดำเนินการ สถานะ ${ORDER_PROGRESS_STEPS[orderProgressIndex(activeOrderSummary.status)]?.label || STATUS_TEXT[activeOrderSummary.status]}`}
+        >
+          <span className="customer-live-order-pill__pulse" aria-hidden="true" />
+          <span style={{ minWidth: 0, flex: 1, textAlign: "left" }}>
+            <strong style={{ display: "block", fontSize: 12.5 }}>ออเดอร์กำลังดำเนินการ</strong>
+            <small style={{ display: "block", marginTop: 2, overflow: "hidden", color: COLORS.espresso2, fontSize: 10.5, textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {ORDER_PROGRESS_STEPS[orderProgressIndex(activeOrderSummary.status)]?.label || STATUS_TEXT[activeOrderSummary.status]}
+              {activeOrderSummary.pickupDate ? ` · รับ ${formatPickupDate(activeOrderSummary.pickupDate)}` : ""} · #{activeOrderSummary.id.slice(-6).toUpperCase()}
+            </small>
+          </span>
+          <i className="ti ti-chevron-right" style={{ color: COLORS.sageDark, fontSize: 17 }} aria-hidden="true" />
+        </button>
+      )}
+
       {cartCount > 0 && (
         <div className="customer-cart-bar" style={{
           position: "fixed", left: 16, right: 16, bottom: 16, maxWidth: 420, margin: "0 auto",
@@ -3706,7 +3984,7 @@ export default function CustomerOrder({ shopUid }) {
           </button>
           <button
             className="customer-cart-checkout"
-            onClick={() => { setError(""); setStep("phone"); }}
+            onClick={openCheckoutSummary}
             style={{ minHeight: 44, display: "inline-flex", alignItems: "center", gap: 6, border: "none", borderRadius: 13, padding: "10px 16px", fontSize: 13.5, fontWeight: 700, flexShrink: 0, boxShadow: "0 6px 16px rgba(0,163,224,.24)" }}
           >
             สั่งซื้อ <i className="ti ti-arrow-right" style={{ fontSize: 16 }} aria-hidden="true" />
@@ -3723,16 +4001,17 @@ export default function CustomerOrder({ shopUid }) {
         onRemove={removeCartLine}
         canEditOptions={canEditLineOptions}
         onEditOptions={setEditingCartLine}
-        onCheckout={() => { setShowCart(false); setError(""); setStep("phone"); }}
+        onCheckout={openCheckoutSummary}
       />
 
       <OptionPickerModal
         visible={!!pickingMenu || !!editingCartLine}
         menu={editingCartLine ? menusById[editingCartLine.menuId] : pickingMenu}
         groups={editingCartLine ? groupsForMenu(menusById[editingCartLine.menuId]) : (pickingMenu ? groupsForMenu(pickingMenu) : [])}
+        sharedTransitionName={!editingCartLine && pickingRefKey ? viewTransitionNameForMenu(pickingRefKey) : undefined}
         hideQty={!!editingCartLine}
         initialOptions={editingCartLine ? editingCartLine.options : undefined}
-        onCancel={() => { setPickingMenu(null); setPickingPromo(null); setPickingRefKey(""); setEditingCartLine(null); }}
+        onCancel={() => runViewTransition(() => { setPickingMenu(null); setPickingPromo(null); setPickingRefKey(""); setEditingCartLine(null); })}
         onConfirm={(qty, options) => {
           if (editingCartLine) {
             confirmEditCartLine(editingCartLine, options);
@@ -3744,9 +4023,11 @@ export default function CustomerOrder({ shopUid }) {
           const isQty = effectivePromo && effectivePromo.type === "qty";
           const priceOverride = effectivePromo ? (isQty ? qtyPromoUnitPrice(effectivePromo, pickingMenu, qty) : singlePromoPrice(effectivePromo, pickingMenu)) : undefined;
           addToCart(pickingMenu, qty, options, priceOverride, effectivePromo ? effectivePromo.id : null, effectivePromo ? (isQty ? "qty" : "single") : null);
-          setPickingMenu(null);
-          setPickingPromo(null);
-          setPickingRefKey("");
+          runViewTransition(() => {
+            setPickingMenu(null);
+            setPickingPromo(null);
+            setPickingRefKey("");
+          });
         }}
       />
 
@@ -3907,11 +4188,11 @@ function CartDrawer({ visible, cart, total, onClose, onSetQty, onRemove, onCheck
   );
 }
 
-function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm, hideQty, initialOptions, fromTop = false }) {
+function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm, hideQty, initialOptions, fromTop = false, sharedTransitionName }) {
   const { mounted, shown } = useSheetTransition(visible);
-  const cachedRef = useRef({ menu, groups });
-  if (menu) cachedRef.current = { menu, groups };
-  const { menu: cm, groups: cg } = cachedRef.current;
+  const cachedRef = useRef({ menu, groups, sharedTransitionName });
+  if (menu) cachedRef.current = { menu, groups, sharedTransitionName };
+  const { menu: cm, groups: cg, sharedTransitionName: cachedTransitionName } = cachedRef.current;
 
   const [qty, setQty] = useState(1);
   const [selections, setSelections] = useState({});
@@ -3981,8 +4262,15 @@ function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm, hideQty
         ...GLASS_PANEL, borderRadius: 20, padding: 20, width: "100%", maxWidth: 420, maxHeight: fromTop ? "calc(100dvh - 20px)" : "85dvh", overflowY: "auto",
         transform: shown ? "translateY(0)" : (fromTop ? "translateY(calc(-100% - 24px))" : "translateY(calc(100% + 24px))"), transition: "transform .34s cubic-bezier(.22,1,.36,1)",
       }} onClick={(e) => e.stopPropagation()}>
-        <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 18, margin: cm?.description ? "0 0 4px" : "0 0 14px" }}>{cm?.name}</h2>
-        {cm?.description && <p style={{ margin: "0 0 14px", color: COLORS.espresso2, fontSize: 12, lineHeight: 1.5 }}>{cm.description}</p>}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+          <div style={{ flexShrink: 0, viewTransitionName: cachedTransitionName || "none" }}>
+            <MenuThumb imageUrl={cm?.imageUrl} size={72} productType={productTypeOf(cm)} />
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 18, margin: cm?.description ? "0 0 4px" : 0 }}>{cm?.name}</h2>
+            {cm?.description && <p style={{ margin: 0, color: COLORS.espresso2, fontSize: 12, lineHeight: 1.5 }}>{cm.description}</p>}
+          </div>
+        </div>
 
         {cg.map((g) => (
           <div key={g.id} style={{ marginBottom: 16, padding: err?.groupId === g.id ? 10 : 0, border: err?.groupId === g.id ? `1.5px solid ${COLORS.danger}` : "1.5px solid transparent", borderRadius: 11, boxShadow: err?.groupId === g.id ? "0 0 0 3px rgba(178,58,46,.10)" : "none" }}>
