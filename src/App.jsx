@@ -179,6 +179,16 @@ function money(n) {
 
 const DEFAULT_CUSTOMER_THEME = { mode: "schedule", darkStart: "19:00", lightStart: "06:00" };
 const CUSTOMER_THEME_MODES = new Set(["light", "dark", "schedule"]);
+const BANNER_TRANSITION_PRESETS = [
+  { value: "slide", icon: "arrows-horizontal", name: "Slide", note: "เลื่อนซ้าย–ขวา เห็นการเปลี่ยนภาพชัดเจน" },
+  { value: "fade", icon: "opacity", name: "Fade", note: "ภาพค่อย ๆ จางสลับอย่างนุ่มนวล" },
+  { value: "zoom", icon: "zoom-in", name: "Zoom + Fade", note: "ซูมเบา ๆ พร้อมจางสลับแบบโฆษณา" },
+];
+const BANNER_TRANSITIONS = new Set(BANNER_TRANSITION_PRESETS.map((preset) => preset.value));
+
+function normalizeBannerTransition(value) {
+  return BANNER_TRANSITIONS.has(value) ? value : "slide";
+}
 
 function normalizeCustomerThemeSettings(raw) {
   const timeValue = (value, fallback) => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value || "")) ? String(value) : fallback;
@@ -355,7 +365,7 @@ function defaultState() {
     menus,
     sales: [],
     purchases: [],
-    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true, slipTestMode: false, bannerImageUrl: "", bannerImageUrls: [], bannerEnabledStates: [], categoryOrder: [], defaultPackagingLines: [], loyaltyBeanGoal: 10, loyaltyRewardValue: 60, seasonalEffect: "auto", customerTheme: { ...DEFAULT_CUSTOMER_THEME }, coffeePass: { name: "Coffee Pass", enabled: false, uses: 5, price: 250, validityDays: 30, menuIds: [] } },
+    settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true, slipTestMode: false, bannerImageUrl: "", bannerImageUrls: [], bannerEnabledStates: [], bannerTransition: "slide", categoryOrder: [], defaultPackagingLines: [], loyaltyBeanGoal: 10, loyaltyRewardValue: 60, seasonalEffect: "auto", customerTheme: { ...DEFAULT_CUSTOMER_THEME }, coffeePass: { name: "Coffee Pass", enabled: false, uses: 5, price: 250, validityDays: 30, menuIds: [] } },
     optionGroups,
     promotions: [],
     popupAds: [],
@@ -422,6 +432,7 @@ function normalizeData(raw) {
       bannerImageUrl: raw.settings?.bannerImageUrl || "",
       bannerImageUrls: raw.settings?.bannerImageUrls || [],
       bannerEnabledStates: raw.settings?.bannerEnabledStates || [],
+      bannerTransition: normalizeBannerTransition(raw.settings?.bannerTransition),
       categoryOrder: raw.settings?.categoryOrder || [],
       defaultPackagingLines: raw.settings?.defaultPackagingLines || [],
       loyaltyBeanGoal: raw.settings?.loyaltyBeanGoal || 10,
@@ -9799,6 +9810,7 @@ function SettingsPanel({ data, updateData, showToast, uid, auditLogs, onDirtyCha
   const originalBannerEnabledStates = normalizeBannerEnabledStates(s.bannerEnabledStates, originalBannerUrls.length);
   const [bannerImageUrls, setBannerImageUrls] = useState(originalBannerUrls);
   const [bannerEnabledStates, setBannerEnabledStates] = useState(originalBannerEnabledStates);
+  const [bannerTransition, setBannerTransition] = useState(normalizeBannerTransition(s.bannerTransition));
   const [editingBannerIdx, setEditingBannerIdx] = useState(null);
   const [dragBannerIdx, setDragBannerIdx] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -9935,7 +9947,8 @@ function SettingsPanel({ data, updateData, showToast, uid, auditLogs, onDirtyCha
     customerDarkStart !== savedCustomerTheme.darkStart ||
     customerLightStart !== savedCustomerTheme.lightStart ||
     JSON.stringify(bannerImageUrls) !== JSON.stringify(originalBannerUrls) ||
-    JSON.stringify(bannerEnabledStates) !== JSON.stringify(originalBannerEnabledStates);
+    JSON.stringify(bannerEnabledStates) !== JSON.stringify(originalBannerEnabledStates) ||
+    bannerTransition !== normalizeBannerTransition(s.bannerTransition);
 
   useEffect(() => {
     onDirtyChange?.(dirty);
@@ -9963,6 +9976,7 @@ function SettingsPanel({ data, updateData, showToast, uid, auditLogs, onDirtyCha
     setCustomerLightStart(savedCustomerTheme.lightStart);
     setBannerImageUrls(originalBannerUrls);
     setBannerEnabledStates(originalBannerEnabledStates);
+    setBannerTransition(normalizeBannerTransition(s.bannerTransition));
     setEditingBannerIdx(null);
   }
 
@@ -9979,6 +9993,7 @@ function SettingsPanel({ data, updateData, showToast, uid, auditLogs, onDirtyCha
         next.settings.customerTheme = { mode:customerThemeMode, darkStart:customerDarkStart, lightStart:customerLightStart };
         next.settings.bannerImageUrls = bannerImageUrls.map((url) => url.trim());
         next.settings.bannerEnabledStates = bannerImageUrls.map((_, index) => bannerEnabledStates[index] !== false);
+        next.settings.bannerTransition = bannerTransition;
       });
       savedPlatformIdsRef.current = new Set(platforms.map((platform)=>platform.id));
       savedBannerUrlsRef.current = new Set(bannerImageUrls.map((url)=>url.trim()));
@@ -10017,6 +10032,14 @@ function SettingsPanel({ data, updateData, showToast, uid, auditLogs, onDirtyCha
         .set-banner-card.is-disabled { background: var(--cream-2); }
         .set-banner-card.is-disabled .set-banner-thumb { opacity: .45; filter: grayscale(.65); }
         .set-icon-btn.is-banner-enabled { color: var(--success-dark); border-color: var(--success); background: var(--success-light); }
+        .set-banner-transition-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+        .set-banner-transition-option { min-height: 82px; padding: 10px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); color: var(--espresso-4); text-align: left; cursor: pointer; transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease; }
+        .set-banner-transition-option:hover { border-color: var(--sage); background: var(--cream-2); }
+        .set-banner-transition-option.active { border-color: var(--sage); background: var(--sage-light); box-shadow: inset 0 0 0 1px var(--sage); }
+        .set-banner-transition-option:focus-visible { outline: 2px solid var(--sage); outline-offset: 2px; }
+        .set-banner-transition-option i { display: block; margin-bottom: 6px; color: var(--sage-dark); font-size: 18px; }
+        .set-banner-transition-option strong { display: block; font-size: 12px; }
+        .set-banner-transition-option small { display: block; margin-top: 2px; color: var(--espresso-2); font-size: 10px; line-height: 1.35; }
         .set-drag-handle { color: var(--espresso-2); flex-shrink: 0; cursor: grab; touch-action: none; }
         .set-banner-thumb { width: 76px; height: 40px; border-radius: 8px; overflow: hidden; flex-shrink: 0; background: var(--cream-2); }
         .set-banner-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -10031,7 +10054,7 @@ function SettingsPanel({ data, updateData, showToast, uid, auditLogs, onDirtyCha
         .set-season-name { display: block; font-size: 12.5px; font-weight: 700; }
         .set-season-note { display: block; margin-top: 2px; font-size: 10.5px; line-height: 1.35; color: var(--espresso-2); }
         .set-theme-times { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:12px; padding:12px; border:1px solid var(--line); border-radius:12px; background:var(--cream-2); }
-        @media (max-width: 560px) { .set-theme-grid { grid-template-columns: 1fr; } .set-theme-times { grid-template-columns:1fr; } }
+        @media (max-width: 560px) { .set-theme-grid { grid-template-columns: 1fr; } .set-theme-times { grid-template-columns:1fr; } .set-banner-transition-grid { grid-template-columns: 1fr; } .set-banner-transition-option { min-height: 68px; } }
         .set-alert { display: flex; gap: 8px; align-items: flex-start; background: var(--gold-light); border: 1px solid var(--gold); color: var(--gold-dark); border-radius: 10px; padding: 10px 12px; font-size: 12px; line-height: 1.5; margin-top: 10px; }
         .set-savebar { position: sticky; bottom: 0; margin-top: 24px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 18px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; box-shadow: 0 -4px 20px rgba(0,0,0,.06); z-index: 10; }
         .set-empty { text-align: center; padding: 24px 10px; color: var(--espresso-2); font-size: 12.5px; }
@@ -10220,6 +10243,23 @@ function SettingsPanel({ data, updateData, showToast, uid, auditLogs, onDirtyCha
           </SettingsCard>
 
           <SettingsCard icon="photo" title="แบนเนอร์หน้าลูกค้า" subtitle="ใส่ได้หลายรูปและกดไอคอนรูปตาเพื่อซ่อนบางแบนเนอร์ชั่วคราว โดยไม่ต้องลบรูปออก">
+            <div style={{ marginBottom: 7, fontSize: 11.5, fontWeight: 700, color: "var(--espresso-3)" }}>รูปแบบ Animation</div>
+            <div className="set-banner-transition-grid" role="radiogroup" aria-label="เลือกรูปแบบ Animation ของแบนเนอร์">
+              {BANNER_TRANSITION_PRESETS.map((preset) => (
+                <button
+                  key={preset.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={bannerTransition === preset.value}
+                  className={`set-banner-transition-option${bannerTransition === preset.value ? " active" : ""}`}
+                  onClick={() => setBannerTransition(preset.value)}
+                >
+                  <Icon name={preset.icon} size={18} />
+                  <strong>{preset.name}</strong>
+                  <small>{preset.note}</small>
+                </button>
+              ))}
+            </div>
             {bannerImageUrls.length === 0 ? (
               <div className="set-empty">
                 <Icon name="photo-off" size={26} style={{ display: "block", margin: "0 auto 8px", color: "var(--espresso-2)" }} />

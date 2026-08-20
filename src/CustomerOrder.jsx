@@ -108,6 +108,11 @@ const COLORS = {
 };
 
 const SEASONAL_EFFECTS = new Set(["off", "auto", "christmas", "songkran"]);
+const BANNER_TRANSITIONS = new Set(["slide", "fade", "zoom"]);
+
+function normalizeBannerTransition(value) {
+  return BANNER_TRANSITIONS.has(value) ? value : "slide";
+}
 const CUSTOMER_THEME_MODES = new Set(["light", "dark", "schedule"]);
 const DEFAULT_CUSTOMER_THEME = { mode: "schedule", darkStart: "19:00", lightStart: "06:00" };
 
@@ -676,7 +681,8 @@ const GLOBAL_CSS = `
   @keyframes zone2BeanBounce { 0%,60%,100% { transform: translateY(0) scale(1); opacity: .35; } 30% { transform: translateY(-7px) scale(1.1); opacity: 1; } }
   @keyframes zone2AmbientFloat { to { transform: translate3d(28px,18px,0) scale(1.08); } }
   .banner-carousel { height: 84px; touch-action: pan-y; }
-  .banner-slide { object-fit: cover; transition: opacity .45s ease; }
+  .banner-slide { object-fit: cover; transition: opacity .45s ease, transform .55s cubic-bezier(.22,.61,.36,1); }
+  .banner-slide.is-zoom { transition-duration: .65s, 1.2s; }
   .banner-carousel:focus-visible { outline: 3px solid rgba(0,163,224,.42); outline-offset: 2px; }
   @media (max-width: 640px) {
     .banner-carousel { height: auto; aspect-ratio: 3 / 1; background: #10091A; }
@@ -1086,32 +1092,48 @@ function OfferCard({ images, label, title, subtitle, priceNode, qty, rippling, o
   );
 }
 
-function BannerSlide({ url, active, position, total }) {
+function BannerSlide({ url, active, position, total, transition, slideOffset = 0 }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [url]);
   if (failed) return null;
+  const isSlide = transition === "slide";
+  const transform = isSlide
+    ? `translateX(${slideOffset * 100}%)`
+    : transition === "zoom" ? `scale(${active ? 1 : 1.045})` : "none";
   return (
     <img
       src={url}
       alt={active ? `แบนเนอร์โปรโมชั่น ${position} จาก ${total}` : ""}
       aria-hidden={!active}
-      className="banner-slide"
+      className={`banner-slide is-${transition}`}
       style={{
         position: "absolute", inset: 0, width: "100%", height: "100%",
-        opacity: active ? 1 : 0,
+        opacity: isSlide || active ? 1 : 0,
+        transform,
+        zIndex: active ? 2 : 1,
       }}
       onError={() => setFailed(true)}
     />
   );
 }
 
-function BannerCarousel({ images }) {
+function BannerCarousel({ images, transition = "slide" }) {
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
   const pointerStartRef = useRef(null);
   const lastSwipeAtRef = useRef(0);
   const validImages = (images || []).filter(Boolean);
+  const activeTransition = normalizeBannerTransition(transition);
   const key = validImages.join("|");
+
+  function slideOffsetFor(position) {
+    let offset = position - index;
+    if (validImages.length > 1) {
+      if (offset > validImages.length / 2) offset -= validImages.length;
+      if (offset < -validImages.length / 2) offset += validImages.length;
+    }
+    return offset;
+  }
 
   const goPrevious = () => setIndex((current) => (current - 1 + validImages.length) % validImages.length);
   const goNext = () => setIndex((current) => (current + 1) % validImages.length);
@@ -1165,7 +1187,15 @@ function BannerCarousel({ images }) {
       cursor: validImages.length > 1 ? "pointer" : "default",
     }}>
       {validImages.map((url, i) => (
-        <BannerSlide key={url + i} url={url} active={i === index} position={i + 1} total={validImages.length} />
+        <BannerSlide
+          key={url + i}
+          url={url}
+          active={i === index}
+          position={i + 1}
+          total={validImages.length}
+          transition={activeTransition}
+          slideOffset={slideOffsetFor(i)}
+        />
       ))}
       {validImages.length > 1 && (
         <div aria-hidden="true" style={{ position: "absolute", bottom: 6, left: 0, right: 0, display: "flex", justifyContent: "center", gap: 4, pointerEvents: "none" }}>
@@ -1336,6 +1366,7 @@ export default function CustomerOrder({ shopUid }) {
   const [bannerImageUrl, setBannerImageUrl] = useState("");
   const [bannerImageUrls, setBannerImageUrls] = useState([]);
   const [bannerEnabledStates, setBannerEnabledStates] = useState(null);
+  const [bannerTransition, setBannerTransition] = useState("slide");
   const [categoryOrder, setCategoryOrder] = useState([]);
   const [loyaltyBeanGoal, setLoyaltyBeanGoal] = useState(10);
   const [loyaltyRewardValue, setLoyaltyRewardValue] = useState(60);
@@ -1484,6 +1515,11 @@ export default function CustomerOrder({ shopUid }) {
         console.error("อ่านสถานะแบนเนอร์ไม่ได้ (เช็คว่า deploy database.rules.json ล่าสุดหรือยัง):", err.message);
       },
     );
+    const unsub7d = onValue(
+      ref(db, `shops/${shopUid}/settings/bannerTransition`),
+      (snap) => setBannerTransition(normalizeBannerTransition(snap.val())),
+      (err) => console.error("อ่านรูปแบบ Animation แบนเนอร์ไม่ได้ (เช็คว่า deploy database.rules.json ล่าสุดหรือยัง):", err.message),
+    );
     const unsub9 = onValue(ref(db, `shops/${shopUid}/settings/categoryOrder`), (snap) => setCategoryOrder(snap.val() || []));
     const unsub10 = onValue(ref(db, `shops/${shopUid}/settings/loyaltyBeanGoal`), (snap) => setLoyaltyBeanGoal(snap.val() || 10));
     const unsub10b = onValue(ref(db, `shops/${shopUid}/settings/loyaltyRewardValue`), (snap) => setLoyaltyRewardValue(Math.min(10000, Math.max(1, Number(snap.val()) || 60))));
@@ -1534,7 +1570,7 @@ export default function CustomerOrder({ shopUid }) {
       },
       (err) => console.error("อ่านโฆษณา Popup ไม่ได้ (เช็คว่า deploy database.rules.json ล่าสุดหรือยัง):", err.message),
     );
-    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); unsub7(); unsub7b(); unsub7c(); unsub8(); unsub9(); unsub10(); unsub10b(); unsub11(); unsub12(); unsub13(); unsub14(); };
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); unsub7(); unsub7b(); unsub7c(); unsub7d(); unsub8(); unsub9(); unsub10(); unsub10b(); unsub11(); unsub12(); unsub13(); unsub14(); };
   }, [authUid, shopUid]);
 
   // เมนูผูกกลุ่ม/ตัวเลือกด้วย id จึงใช้ชื่อจากต้นทางล่าสุดเสมอ แม้ลูกค้าจะใส่เมนู
@@ -3220,7 +3256,7 @@ export default function CustomerOrder({ shopUid }) {
         )}
       </div>
 
-      <BannerCarousel images={bannerImageUrls.length > 0
+      <BannerCarousel transition={bannerTransition} images={bannerImageUrls.length > 0
         ? (bannerEnabledStates === null ? [] : bannerImageUrls.filter((_, index) => bannerEnabledStates[index] !== false))
         : (bannerImageUrl ? [bannerImageUrl] : [])} />
 

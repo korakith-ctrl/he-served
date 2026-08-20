@@ -24,6 +24,7 @@
           "bannerImageUrl": { ".read": "auth != null" },
           "bannerImageUrls": { ".read": "auth != null" },
           "bannerEnabledStates": { ".read": "auth != null" },
+          "bannerTransition": { ".read": "auth != null" },
           "categoryOrder": { ".read": "auth != null" },
           "loyaltyBeanGoal": { ".read": "auth != null" },
           "loyaltyRewardValue": { ".read": "auth != null" },
