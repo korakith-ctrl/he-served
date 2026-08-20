@@ -578,6 +578,60 @@ function CheckoutSection({ title, summary, icon, open, onToggle, children }) {
     </section>
   );
 }
+
+const ORDER_MOOD_PARTICLES = Array.from({ length: 11 }, (_, index) => ({
+  left: [5, 16, 28, 41, 55, 69, 82, 93, 35, 74, 12][index],
+  delay: [-1.2, -7.4, -3.8, -10.1, -5.5, -12.2, -2.7, -8.6, -14.1, -4.4, -11.3][index],
+  duration: [11, 14, 12.5, 16, 13, 15.5, 10.5, 14.5, 17, 12, 15][index],
+  drift: [-18, 14, -10, 22, -15, 12, -20, 16, 9, -12, 19][index],
+  scale: [0.75, 1.1, 0.9, 1.25, 0.82, 1.05, 0.7, 1.18, 0.92, 1.12, 0.78][index],
+  rotate: [-32, 18, 54, -12, 38, -48, 22, 62, -20, 44, 8][index],
+}));
+
+function orderMoodForMenu(menu, line) {
+  const text = `${menu?.name || line?.name || ""} ${menu?.category || ""}`.toLowerCase();
+  if (/matcha|มัทฉะ/.test(text)) return "matcha";
+  if (/cocoa|โกโก้|chocolate|ช็อกโกแลต/.test(text)) return "cocoa";
+  if (/orange|ส้ม|berry|เบอร์รี|grape|องุ่น|fruit|ผลไม้|juice|น้ำผลไม้|coconut|มะพร้าว|lemon|มะนาว|yuzu|ยูซุ/.test(text)) return "fruit";
+  if (/tea|ชา/.test(text)) return "tea";
+  if (productTypeOf(menu || line) === "food" || /bread|bakery|toast|ขนมปัง|เบเกอรี่|อาหาร/.test(text)) return "bakery";
+  if (/coffee|กาแฟ|americano|latte|ลาเต้|espresso|เอสเพรสโซ|mocha|มอคค่า/.test(text)) return "coffee";
+  return "sparkle";
+}
+
+function dominantOrderMood(cart, menusById) {
+  const scores = {};
+  const firstSeen = {};
+  (cart || []).forEach((line, index) => {
+    if (line?.productType === "pass") return;
+    const mood = orderMoodForMenu(menusById?.[line.menuId], line);
+    scores[mood] = (scores[mood] || 0) + Math.max(1, Number(line.qty) || 1);
+    if (firstSeen[mood] === undefined) firstSeen[mood] = index;
+  });
+  return Object.keys(scores).sort((a, b) => scores[b] - scores[a] || firstSeen[a] - firstSeen[b])[0] || "sparkle";
+}
+
+function OrderMoodBackdrop({ mood }) {
+  return (
+    <div className={`order-mood-backdrop order-mood-backdrop--${mood}`} aria-hidden="true">
+      {ORDER_MOOD_PARTICLES.map((particle, index) => (
+        <span
+          key={index}
+          className="order-mood-particle"
+          style={{
+            "--mood-left": `${particle.left}%`,
+            "--mood-delay": `${particle.delay}s`,
+            "--mood-duration": `${particle.duration}s`,
+            "--mood-drift": `${particle.drift}px`,
+            "--mood-scale": particle.scale,
+            "--mood-rotate": `${particle.rotate}deg`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
 const field = {
   width: "100%", border: "1px solid rgba(0,163,224,0.22)", background: "rgba(255,255,255,0.86)",
   borderRadius: 10, padding: "9px 10px", fontSize: 14, boxSizing: "border-box", marginTop: 4,
@@ -636,6 +690,30 @@ const GLOBAL_CSS = `
   .customer-checkout-section__body-inner { min-height: 0; overflow: hidden; }
   .customer-checkout-section__content { padding: 2px 12px 14px; }
   .customer-checkout-actions { position: sticky; bottom: max(env(safe-area-inset-bottom), 10px); z-index: 12; margin: 16px -8px -8px; padding: 8px; border: 1px solid rgba(0,163,224,.18); border-radius: 15px; background: rgba(255,255,255,.94); box-shadow: 0 10px 28px rgba(0,91,133,.18); backdrop-filter: blur(18px) saturate(160%); -webkit-backdrop-filter: blur(18px) saturate(160%); }
+  .customer-order-summary-card { position: relative; isolation: isolate; overflow: hidden; }
+  .customer-order-summary-card > :not(.order-mood-backdrop) { position: relative; z-index: 1; }
+  .order-mood-backdrop { position: absolute; z-index: 0; inset: 0; overflow: hidden; pointer-events: none; opacity: .9; }
+  .order-mood-backdrop::before { content: ""; position: absolute; inset: 0; opacity: .6; }
+  .order-mood-particle { position: absolute; left: var(--mood-left); bottom: -28px; width: 18px; height: 11px; opacity: 0; transform: translateX(0) rotate(var(--mood-rotate)) scale(var(--mood-scale)); animation: orderMoodFloat var(--mood-duration) linear var(--mood-delay) infinite; }
+  .order-mood-particle::after { content: ""; position: absolute; }
+  .order-mood-backdrop--matcha::before { background: radial-gradient(circle at 82% 12%, rgba(128,174,81,.2), transparent 34%), radial-gradient(circle at 8% 54%, rgba(184,211,127,.16), transparent 30%); }
+  .order-mood-backdrop--matcha .order-mood-particle, .order-mood-backdrop--tea .order-mood-particle { border-radius: 100% 0 100% 0; background: linear-gradient(135deg, rgba(113,153,65,.38), rgba(183,207,119,.16)); box-shadow: 0 2px 5px rgba(64,90,31,.08); }
+  .order-mood-backdrop--matcha .order-mood-particle::after, .order-mood-backdrop--tea .order-mood-particle::after { left: 2px; right: 2px; top: 5px; height: 1px; background: rgba(76,109,43,.24); transform: rotate(-18deg); transform-origin: left; }
+  .order-mood-backdrop--tea::before { background: radial-gradient(circle at 85% 18%, rgba(196,137,64,.16), transparent 34%), radial-gradient(circle at 10% 62%, rgba(132,91,46,.11), transparent 31%); }
+  .order-mood-backdrop--tea .order-mood-particle { background: linear-gradient(135deg, rgba(166,112,52,.3), rgba(214,170,101,.13)); }
+  .order-mood-backdrop--coffee::before { background: radial-gradient(circle at 86% 14%, rgba(126,75,43,.16), transparent 35%), radial-gradient(circle at 5% 70%, rgba(181,126,77,.13), transparent 28%); }
+  .order-mood-backdrop--coffee .order-mood-particle { width: 15px; height: 10px; border-radius: 50%; background: linear-gradient(145deg, rgba(115,66,38,.36), rgba(187,128,79,.18)); }
+  .order-mood-backdrop--coffee .order-mood-particle::after { left: 7px; top: 1px; width: 2px; height: 8px; border-left: 1px solid rgba(72,42,26,.28); border-radius: 50%; transform: rotate(18deg); }
+  .order-mood-backdrop--cocoa::before { background: radial-gradient(circle at 84% 16%, rgba(111,62,53,.17), transparent 34%), radial-gradient(circle at 8% 66%, rgba(173,112,82,.12), transparent 30%); }
+  .order-mood-backdrop--cocoa .order-mood-particle { width: 10px; height: 10px; border-radius: 50%; background: radial-gradient(circle at 32% 28%, rgba(190,128,99,.32), rgba(91,48,39,.25) 68%, transparent 70%); box-shadow: 12px -8px 0 -3px rgba(111,62,53,.14), -9px -13px 0 -4px rgba(154,93,69,.16); }
+  .order-mood-backdrop--fruit::before { background: radial-gradient(circle at 82% 14%, rgba(255,178,67,.18), transparent 36%), radial-gradient(circle at 7% 64%, rgba(240,104,91,.13), transparent 31%); }
+  .order-mood-backdrop--fruit .order-mood-particle { width: 14px; height: 14px; border: 2px solid rgba(241,145,57,.25); border-radius: 50%; background: rgba(255,220,139,.1); }
+  .order-mood-backdrop--fruit .order-mood-particle::after { inset: 2px; border-radius: 50%; background: conic-gradient(from 0deg, transparent 0 22%, rgba(241,145,57,.18) 23% 26%, transparent 27% 48%, rgba(241,145,57,.18) 49% 52%, transparent 53% 74%, rgba(241,145,57,.18) 75% 78%, transparent 79%); }
+  .order-mood-backdrop--bakery::before { background: radial-gradient(circle at 84% 16%, rgba(210,161,81,.16), transparent 36%), radial-gradient(circle at 8% 66%, rgba(180,127,65,.1), transparent 30%); }
+  .order-mood-backdrop--bakery .order-mood-particle { width: 6px; height: 17px; border-radius: 70% 15% 70% 15%; background: rgba(193,142,67,.25); box-shadow: 6px 3px 0 -1px rgba(218,174,102,.2), -6px 6px 0 -1px rgba(174,119,54,.15); }
+  .order-mood-backdrop--sparkle::before { background: radial-gradient(circle at 82% 12%, rgba(0,163,224,.16), transparent 35%), radial-gradient(circle at 8% 64%, rgba(116,209,238,.14), transparent 30%); }
+  .order-mood-backdrop--sparkle .order-mood-particle { width: 7px; height: 7px; border-radius: 50%; background: rgba(0,163,224,.22); box-shadow: 0 0 9px rgba(0,163,224,.18); }
+  @keyframes orderMoodFloat { 0% { opacity: 0; transform: translate3d(0,0,0) rotate(var(--mood-rotate)) scale(var(--mood-scale)); } 12% { opacity: .7; } 78% { opacity: .45; } 100% { opacity: 0; transform: translate3d(var(--mood-drift),-1200px,0) rotate(calc(var(--mood-rotate) + 180deg)) scale(var(--mood-scale)); } }
   .customer-cart-bar {
     background: rgba(255,255,255,.96) !important; border-color: rgba(0,163,224,.24) !important;
     color: #003B5C !important; box-shadow: 0 14px 38px rgba(0,91,133,.18), inset 0 1px 0 #FFFFFF !important;
@@ -816,6 +894,7 @@ const GLOBAL_CSS = `
   html[data-theme="dark"] .corder .customer-checkout-section__icon { background: rgba(0,163,224,.20) !important; color: #74D1EE !important; }
   html[data-theme="dark"] .corder .customer-checkout-section__summary { color: #B7D2DF !important; }
   html[data-theme="dark"] .corder .customer-checkout-actions { background: rgba(15,24,36,.94) !important; border-color: rgba(0,163,224,.32) !important; }
+  html[data-theme="dark"] .corder .order-mood-backdrop { opacity: .52; }
   .closed-order-page {
     min-height: 100vh; min-height: 100dvh; position: relative; isolation: isolate; overflow: hidden;
     display: grid; place-items: center; padding: 28px 18px; color: #FFFFFF;
@@ -909,6 +988,7 @@ const GLOBAL_CSS = `
   }
   @media (prefers-reduced-motion: reduce) {
     .customer-checkout-section, .customer-checkout-section__body, .customer-checkout-section__chevron { transition: none !important; }
+    .order-mood-particle { display: none !important; }
     .banner-slide { transition-duration: 0ms; }
     .zone2-splash *, .zone2-splash *::before, .zone2-splash *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
     .coffee-pass-buy-border::before { animation: none; }
@@ -1679,6 +1759,7 @@ export default function CustomerOrder({ shopUid }) {
     (menus || []).forEach((x) => { m[x.id] = x; });
     return m;
   }, [menus]);
+  const orderMood = useMemo(() => dominantOrderMood(cart, menusById), [cart, menusById]);
 
   const coffeePassEligibleMenus = useMemo(() => (menus || []).filter((menu) =>
     productTypeOf(menu) === "drink" &&
@@ -2833,7 +2914,8 @@ export default function CustomerOrder({ shopUid }) {
       <div className="corder" style={centerWrap}>
         <style>{GLOBAL_CSS}</style>
         <GlassBackdrop seasonalEffect={activeSeasonalEffect} />
-        <div style={centerCard}>
+        <div className="customer-order-summary-card" style={centerCard}>
+          <OrderMoodBackdrop mood={orderMood} />
           <p style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: COLORS.sageDark, fontWeight: 500, margin: 0 }}>{shopName}</p>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "4px 0 14px" }}>
             <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, margin: 0 }}>สรุปออเดอร์</h1>
