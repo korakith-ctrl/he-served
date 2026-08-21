@@ -16,6 +16,11 @@
         "popupAds": {
           ".read": "auth != null"
         },
+        "eventLinks": {
+          "$eventId": {
+            ".read": "auth != null"
+          }
+        },
         "settings": {
           "shopName": { ".read": "auth != null" },
           "promptpayId": { ".read": "auth != null" },
@@ -39,9 +44,10 @@
         ".read": "auth != null && auth.uid === $uid",
         "$orderId": {
           ".read": "auth != null && (auth.uid === $uid || data.child('customerUid').val() === auth.uid)",
-          ".write": "auth != null && (auth.uid === $uid || (!data.exists() && root.child('shops/' + $uid + '/settings/acceptingOrders').val() !== false && newData.child('customerUid').val() === auth.uid && newData.child('customerName').isString() && newData.child('customerName').val().length > 0 && newData.child('customerPhone').isString() && newData.child('paymentMethod').isString() && newData.child('createdAt').isString() && newData.child('items').hasChildren() && newData.child('total').isNumber() && newData.child('total').val() >= 0 && newData.child('status').val() === 'pending' && !newData.hasChild('paymentVerified') && !newData.hasChild('paymentVerifiedBy') && !newData.hasChild('paymentVerifiedAt') && !newData.hasChild('slipRef') && !newData.hasChild('saleRecorded') && !newData.hasChild('source') && !newData.hasChild('redeemedBeans') && !newData.hasChild('beansUsed') && !newData.hasChild('redemptionAttemptId') && !newData.hasChild('coffeePassPurchase') && !newData.hasChild('coffeePassServerCreated') && !newData.hasChild('passRedemption')))",
+          ".write": "auth != null && (auth.uid === $uid || (!data.exists() && root.child('shops/' + $uid + '/settings/acceptingOrders').val() !== false && ((!newData.hasChild('eventId') && !newData.hasChild('eventName')) || (newData.child('eventId').isString() && newData.child('eventName').isString() && root.child('shops/' + $uid + '/eventLinks/' + newData.child('eventId').val() + '/active').val() === true && root.child('shops/' + $uid + '/eventLinks/' + newData.child('eventId').val() + '/expiresAt').val() > now && root.child('shops/' + $uid + '/eventLinks/' + newData.child('eventId').val() + '/name').val() === newData.child('eventName').val() && root.child('shops/' + $uid + '/eventLinks/' + newData.child('eventId').val() + '/paymentMethods/' + newData.child('paymentMethod').val()).val() === true)) && newData.child('customerUid').val() === auth.uid && newData.child('customerName').isString() && newData.child('customerName').val().length > 0 && newData.child('customerPhone').isString() && newData.child('paymentMethod').isString() && newData.child('createdAt').isString() && newData.child('items').hasChildren() && newData.child('total').isNumber() && newData.child('total').val() >= 0 && newData.child('status').val() === 'pending' && !newData.hasChild('paymentVerified') && !newData.hasChild('paymentVerifiedBy') && !newData.hasChild('paymentVerifiedAt') && !newData.hasChild('slipRef') && !newData.hasChild('saleRecorded') && !newData.hasChild('source') && !newData.hasChild('redeemedBeans') && !newData.hasChild('beansUsed') && !newData.hasChild('redemptionAttemptId') && !newData.hasChild('coffeePassPurchase') && !newData.hasChild('coffeePassServerCreated') && !newData.hasChild('passRedemption')))",
           "items": {
             "$item": {
+              ".validate": "!newData.parent().parent().hasChild('eventId') || root.child('shops/' + $uid + '/eventLinks/' + newData.parent().parent().child('eventId').val() + '/menuIds/' + newData.child('menuId').val()).val() === true",
               "freeUnit": { ".validate": "auth.uid === $uid" }
             }
           }

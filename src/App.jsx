@@ -365,6 +365,7 @@ function defaultState() {
     menus,
     sales: [],
     purchases: [],
+    eventLinks: {},
     settings: { overheadPerCup: 3.1, shopName: "ร้านกาแฟของฉัน", platforms: seedPlatforms(), promptpayId: "", acceptingOrders: true, slipTestMode: false, bannerImageUrl: "", bannerImageUrls: [], bannerEnabledStates: [], bannerTransition: "slide", categoryOrder: [], defaultPackagingLines: [], loyaltyBeanGoal: 10, loyaltyRewardValue: 60, seasonalEffect: "auto", customerTheme: { ...DEFAULT_CUSTOMER_THEME }, coffeePass: { name: "Coffee Pass", enabled: false, uses: 5, price: 250, validityDays: 30, menuIds: [] } },
     optionGroups,
     promotions: [],
@@ -422,6 +423,15 @@ function normalizeData(raw) {
     // เพื่อไม่ต้องแก้ shape ของ data ทั้งระบบ ของจริงมาจาก dataForDisplay.sales ที่ override ทับอีกที
     sales: [],
     purchases: (Array.isArray(raw.purchases) ? raw.purchases : Object.values(raw.purchases || {})).filter(Boolean),
+    eventLinks: Object.fromEntries(Object.entries(raw.eventLinks || {}).filter(([, event]) => event && typeof event === "object").map(([id, event]) => [id, {
+      ...event,
+      id,
+      name: String(event.name || "Event Order"),
+      active: event.active !== false,
+      expiresAt: Number(event.expiresAt) || 0,
+      menuIds: event.menuIds || {},
+      paymentMethods: event.paymentMethods || {},
+    }])),
     settings: {
       overheadPerCup: raw.settings?.overheadPerCup ?? 3.1,
       shopName: raw.settings?.shopName ?? "ร้านกาแฟของฉัน",
@@ -766,6 +776,7 @@ const TABS = [
   { id: "menus", label: "เมนูและสูตร", icon: "cup" },
   { id: "promotions", label: "โปรโมชั่น", icon: "discount" },
   { id: "ads", label: "โฆษณา Popup", icon: "speakerphone" },
+  { id: "events", label: "ลิงก์อีเวนต์", icon: "calendar-event" },
   { id: "packages", label: "Coffee Pass", icon: "calendar-repeat" },
   { id: "loyalty", label: "ลูกค้าและเมล็ดสะสม", icon: "coffee" },
   { id: "options", label: "ตัวเลือกเสริม", icon: "list-details" },
@@ -1996,6 +2007,7 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
           {tab === "menus" && <MenusPanel data={dataForDisplay} ingredientsById={ingredientsById} updateData={updateData} showToast={showToast} />}
           {tab === "promotions" && <PromotionsPanel data={data} orders={orders} updateData={updateData} showToast={showToast} />}
           {tab === "ads" && <PopupAdsPanel data={data} updateData={updateData} showToast={showToast} />}
+          {tab === "events" && <EventLinksPanel data={data} updateData={updateData} showToast={showToast} uid={uid} />}
           {tab === "packages" && <CoffeePassPanel data={data} orders={orders} customers={customers} updateData={updateData} showToast={showToast} onCancelPass={cancelCustomerPass} />}
           {tab === "ingredients" && <IngredientsPanel uid={uid} data={data} updateData={updateData} showToast={showToast} onSaveAccounting={saveAccountingTransaction} isAccountingPeriodClosed={isAccountingPeriodClosed} />}
           {tab === "reports" && <ReportsPanel data={dataForDisplay} orders={orders} accountingTransactions={accountingTransactions} shopName={data.settings.shopName} showToast={showToast} />}
@@ -3571,14 +3583,19 @@ function formatPickupDateTH(dateStr) {
   return new Date(y, m - 1, d).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
 }
 
-function OrderMeta({ paymentMethod, pickupDate, paymentVerified, paymentVerifiedBy, compact, onEditPickupDate }) {
-  if (!paymentMethod && !pickupDate) return null;
+function OrderMeta({ paymentMethod, pickupDate, paymentVerified, paymentVerifiedBy, eventName, compact, onEditPickupDate }) {
+  if (!paymentMethod && !pickupDate && !eventName) return null;
   const isTestSlip = paymentVerifiedBy === "slipok-test-mode";
   return (
     <div style={{ display: "flex", gap: compact ? 4 : 6, flexWrap: "wrap", margin: compact ? "3px 0" : "6px 0" }}>
       {paymentMethod && (
         <span className="chpill" style={{ background: "var(--cream-2)", color: "var(--espresso-3)", fontWeight: 600, ...(compact ? { padding: "1px 6px", fontSize: 9.5 } : {}) }}>
           {CASH_LIKE_PAYMENT_METHODS.has(paymentMethod) ? <Icon name="cash" size={10} /> : <Icon name="qrcode" size={10} />} {PAYMENT_METHOD_LABEL[paymentMethod] || paymentMethod}
+        </span>
+      )}
+      {eventName && (
+        <span className="chpill" style={{ background:"var(--info-light)", color:"var(--primary-text)", fontWeight:700, ...(compact ? { padding:"1px 6px", fontSize:9.5 } : {}) }}>
+          <Icon name="calendar-event" size={10} /> {eventName}
         </span>
       )}
       {pickupDate && (
@@ -4245,7 +4262,7 @@ function OrdersPanel({ uid, orders, commitOnlineOrder, cancelOrder, awardLoyalty
                         {new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}
                       </div>
                     )}
-                    <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.coffeePassPurchase ? null : o.pickupDate} paymentVerified={o.paymentVerified} paymentVerifiedBy={o.paymentVerifiedBy} compact={compact} onEditPickupDate={o.coffeePass || o.coffeePassPurchase ? undefined : () => setEditingPickupDate(o)} />
+                    <OrderMeta paymentMethod={o.paymentMethod} pickupDate={o.coffeePassPurchase ? null : o.pickupDate} paymentVerified={o.paymentVerified} paymentVerifiedBy={o.paymentVerifiedBy} eventName={o.eventName} compact={compact} onEditPickupDate={o.eventId || o.coffeePass || o.coffeePassPurchase ? undefined : () => setEditingPickupDate(o)} />
                     {o.coffeePassPurchase && <div style={{ margin:compact ? "4px 0" : "7px 0", padding:compact ? 6 : 9, borderRadius:9, background:"var(--sage-light)", color:"var(--espresso-4)", fontSize:compact ? 9.5 : 11.5, fontWeight:700 }}>{o.coffeePassPurchase.uses} สิทธิ์ · อายุ {o.coffeePassPurchase.validityDays} วัน · ยืนยันแล้วสิทธิ์เข้าตามเบอร์โทร</div>}
                     {o.passRedemption && <div style={{ margin:compact ? "4px 0" : "7px 0", padding:compact ? 6 : 9, borderRadius:9, background:"var(--sage-light)", color:"var(--espresso-4)", fontSize:compact ? 9.5 : 11.5, fontWeight:700 }}>ใช้ {o.passRedemption.packageName || "Coffee Pass"} 1 สิทธิ์{Number(o.passRedemption.optionTotal) > 0 ? ` · ค่าส่วนเพิ่ม ฿${money(o.passRedemption.optionTotal)}` : ""}</div>}
                     <OrderItemLines
@@ -4804,10 +4821,13 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
         return { ...promotion, menuIds, active:menuIds.length < minimum ? false : promotion.active };
       });
       if (next.settings.coffeePass?.menuIds?.length) next.settings.coffeePass.menuIds = next.settings.coffeePass.menuIds.filter((menuId)=>menuId !== id);
+      for (const event of Object.values(next.eventLinks || {})) {
+        if (event?.menuIds && !Array.isArray(event.menuIds)) delete event.menuIds[id];
+      }
     });
     setConfirmDelete(null);
     setInspector(null);
-    showToast("ลบเมนูแล้ว และล้างการอ้างอิงจาก Promotion/Coffee Pass ให้แล้ว");
+    showToast("ลบเมนูแล้ว และล้างการอ้างอิงจาก Promotion/Coffee Pass/Event ให้แล้ว");
   }
 
   function duplicateMenu(menu) {
@@ -4867,7 +4887,13 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
     clearSelection();
   }
   function bulkDelete() {
-    updateData((next) => { next.menus = next.menus.filter((m) => !selectedIds.has(m.id)); });
+    updateData((next) => {
+      next.menus = next.menus.filter((m) => !selectedIds.has(m.id));
+      for (const event of Object.values(next.eventLinks || {})) {
+        if (!event?.menuIds || Array.isArray(event.menuIds)) continue;
+        for (const id of selectedIds) delete event.menuIds[id];
+      }
+    });
     showToast("ลบเมนูที่เลือกแล้ว");
     setConfirmBulkDelete(false);
     clearSelection();
@@ -9735,6 +9761,129 @@ function BannerCard({ url, index, enabled, editing, onEdit, onChange, onDelete, 
   );
 }
 
+const EVENT_PAYMENT_OPTIONS = [
+  { id: "promptpay", label: "PromptPay", icon: "qrcode" },
+  { id: "cash", label: "เงินสด", icon: "cash" },
+  { id: "thaihelpthai", label: "ไทยช่วยไทย", icon: "wallet" },
+];
+
+function enabledEventKeys(value) {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  return Object.entries(value || {}).filter(([, enabled]) => enabled === true).map(([id]) => id);
+}
+
+function eventDateTimeInputValue(timestamp) {
+  const date = new Date(Number(timestamp) || Date.now());
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
+function defaultEventExpiry() {
+  const date = new Date();
+  date.setDate(date.getDate() + 1);
+  date.setHours(23, 59, 0, 0);
+  return eventDateTimeInputValue(date.getTime());
+}
+
+function EventLinksPanel({ data, updateData, showToast, uid }) {
+  const events = Object.values(data.eventLinks || {}).sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+  const [form, setForm] = useState(null);
+  const [menuSearch, setMenuSearch] = useState("");
+  const [saving, setSaving] = useState(false);
+  const query = menuSearch.trim().toLowerCase();
+  const visibleMenus = data.menus.filter((menu) => !query || `${menu.name} ${menu.category}`.toLowerCase().includes(query));
+
+  function beginCreate() {
+    setMenuSearch("");
+    setForm({ id:genId("event"), name:"", active:true, expiresAt:defaultEventExpiry(), menuIds:[], paymentMethods:[data.settings.promptpayId ? "promptpay" : "cash"], createdAt:Date.now() });
+  }
+
+  function beginEdit(event) {
+    setMenuSearch("");
+    setForm({ ...event, expiresAt:eventDateTimeInputValue(event.expiresAt), menuIds:enabledEventKeys(event.menuIds), paymentMethods:enabledEventKeys(event.paymentMethods) });
+  }
+
+  function toggleList(key, id) {
+    setForm((current) => {
+      const values = current[key] || [];
+      return { ...current, [key]:values.includes(id) ? values.filter((value) => value !== id) : [...values, id] };
+    });
+  }
+
+  async function saveEvent() {
+    if (!form.name.trim()) { showToast("กรุณาตั้งชื่ออีเวนต์"); return; }
+    if (form.menuIds.length === 0) { showToast("กรุณาเลือกเมนูอย่างน้อย 1 รายการ"); return; }
+    if (form.paymentMethods.length === 0) { showToast("กรุณาเลือกวิธีชำระเงินอย่างน้อย 1 วิธี"); return; }
+    const expiresAt = new Date(form.expiresAt).getTime();
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) { showToast("กรุณาตั้งเวลาหมดอายุในอนาคต"); return; }
+    if (form.paymentMethods.includes("promptpay") && !data.settings.promptpayId) { showToast("กรุณาตั้งค่า PromptPay ก่อนเปิดใช้กับอีเวนต์"); return; }
+    setSaving(true);
+    try {
+      const record = {
+        id:form.id, name:form.name.trim(), active:form.active !== false, expiresAt,
+        menuIds:Object.fromEntries(form.menuIds.map((id) => [id, true])),
+        paymentMethods:Object.fromEntries(form.paymentMethods.map((id) => [id, true])),
+        createdAt:Number(form.createdAt) || Date.now(), updatedAt:Date.now(),
+      };
+      await updateData((next) => { next.eventLinks[record.id] = record; });
+      setForm(null);
+      showToast("บันทึกลิงก์อีเวนต์แล้ว");
+    } finally { setSaving(false); }
+  }
+
+  async function toggleEvent(event) {
+    await updateData((next) => { next.eventLinks[event.id].active = event.active === false; next.eventLinks[event.id].updatedAt = Date.now(); });
+    showToast(event.active === false ? "เปิดใช้งานลิงก์แล้ว" : "ปิดใช้งานลิงก์แล้ว");
+  }
+
+  async function deleteEvent(event) {
+    if (!window.confirm(`ลบลิงก์ “${event.name}” หรือไม่?`)) return;
+    await updateData((next) => { delete next.eventLinks[event.id]; });
+    if (form?.id === event.id) setForm(null);
+    showToast("ลบลิงก์อีเวนต์แล้ว");
+  }
+
+  const eventUrl = (eventId) => `${window.location.origin}/order/${uid}?event=${encodeURIComponent(eventId)}`;
+
+  async function copyEventLink(event) {
+    await navigator.clipboard.writeText(eventUrl(event.id));
+    showToast("คัดลอกลิงก์อีเวนต์แล้ว");
+  }
+
+  return (
+    <div className="event-admin-wrap">
+      <style>{`
+        .event-admin-wrap{max-width:1080px}.event-admin-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:18px}.event-admin-card{padding:16px;border:1px solid var(--line);border-radius:15px;background:var(--surface);box-shadow:0 2px 10px rgba(0,0,0,.03)}.event-admin-list{display:grid;gap:10px}.event-admin-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center}.event-admin-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.event-admin-status{display:inline-flex;align-items:center;gap:5px;margin-top:6px;padding:4px 8px;border-radius:999px;font-size:10.5px;font-weight:700}.event-admin-status.live{color:var(--success-dark);background:var(--success-light)}.event-admin-status.off{color:var(--espresso-2);background:var(--cream-2)}.event-admin-form{margin-bottom:16px;padding:18px;border:1px solid var(--sage);border-radius:16px;background:var(--surface);box-shadow:0 8px 26px rgba(0,91,133,.08)}.event-admin-grid{display:grid;grid-template-columns:1.2fr 1fr;gap:12px}.event-menu-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:7px;max-height:310px;overflow:auto;padding:2px}.event-check{display:flex;align-items:center;gap:8px;min-height:42px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface);font-size:12px;cursor:pointer}.event-check.selected{border-color:var(--sage);background:var(--sage-light)}.event-payment-grid{display:flex;gap:7px;flex-wrap:wrap}@media(max-width:680px){.event-admin-head,.event-admin-row{display:flex;flex-direction:column;align-items:stretch}.event-admin-actions{justify-content:flex-start}.event-admin-grid{grid-template-columns:1fr}.event-menu-grid{grid-template-columns:1fr}}
+      `}</style>
+      <div className="event-admin-head">
+        <div><p style={{margin:0,color:"var(--espresso-2)",fontSize:11.5,fontWeight:600}}>{data.settings.shopName}</p><h1 style={{margin:"2px 0 4px",color:"var(--espresso-5)",fontFamily:"var(--f-display)",fontSize:22}}>ลิงก์สั่งซื้อสำหรับอีเวนต์</h1><p style={{margin:0,color:"var(--espresso-2)",fontSize:13}}>สร้างหน้าสั่งซื้อชั่วคราวที่ขายเฉพาะเมนูและรับเฉพาะวิธีจ่ายที่กำหนด</p></div>
+        <button className="cbtn cbtn-accent" onClick={beginCreate}><Icon name="plus" size={14}/> สร้างลิงก์ใหม่</button>
+      </div>
+
+      {form && <section className="event-admin-form">
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:14}}><div><strong style={{color:"var(--espresso-5)",fontSize:16}}>{data.eventLinks?.[form.id] ? "แก้ไขลิงก์อีเวนต์" : "สร้างลิงก์อีเวนต์"}</strong><div style={{marginTop:2,color:"var(--espresso-2)",fontSize:11}}>ลิงก์จะหยุดรับออเดอร์อัตโนมัติเมื่อหมดเวลา</div></div><button className="cbtn" onClick={() => setForm(null)}>ยกเลิก</button></div>
+        <div className="event-admin-grid">
+          <label style={{color:"var(--espresso-3)",fontSize:12}}>ชื่ออีเวนต์<input className="cfield" style={{marginTop:5}} value={form.name} onChange={(event) => setForm((current) => ({...current,name:event.target.value}))} placeholder="เช่น Coffee Booth · Design Week"/></label>
+          <label style={{color:"var(--espresso-3)",fontSize:12}}>ปิดรับออเดอร์เมื่อ<input className="cfield" style={{marginTop:5}} type="datetime-local" value={form.expiresAt} onChange={(event) => setForm((current) => ({...current,expiresAt:event.target.value}))}/></label>
+        </div>
+        <div style={{marginTop:16}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:8}}><strong style={{color:"var(--espresso-4)",fontSize:13}}>เมนูที่ขาย ({form.menuIds.length})</strong><button className="cbtn" onClick={() => setForm((current) => ({...current,menuIds:data.menus.filter((menu) => menu.available !== false).map((menu) => menu.id)}))}>เลือกเมนูที่เปิดขายทั้งหมด</button></div>
+          <input className="cfield" style={{marginBottom:8}} value={menuSearch} onChange={(event) => setMenuSearch(event.target.value)} placeholder="ค้นหาชื่อหรือหมวดหมู่เมนู"/>
+          <div className="event-menu-grid">{visibleMenus.map((menu) => { const selected=form.menuIds.includes(menu.id); return <label key={menu.id} className={`event-check${selected?" selected":""}`}><input type="checkbox" checked={selected} onChange={() => toggleList("menuIds",menu.id)}/><span style={{minWidth:0}}><strong style={{display:"block",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{menu.name}</strong><small style={{color:"var(--espresso-2)"}}>{menu.category}{menu.available===false?" · ปิดขายอยู่":""}</small></span></label>; })}</div>
+        </div>
+        <div style={{marginTop:16}}><strong style={{display:"block",marginBottom:8,color:"var(--espresso-4)",fontSize:13}}>วิธีชำระเงิน</strong><div className="event-payment-grid">{EVENT_PAYMENT_OPTIONS.map((method) => { const selected=form.paymentMethods.includes(method.id); return <label key={method.id} className={`event-check${selected?" selected":""}`} style={{minWidth:145}}><input type="checkbox" checked={selected} onChange={() => toggleList("paymentMethods",method.id)}/><Icon name={method.icon} size={15}/> {method.label}</label>; })}</div>{!data.settings.promptpayId&&form.paymentMethods.includes("promptpay")&&<div style={{marginTop:7,color:"var(--danger)",fontSize:11.5}}>ยังไม่ได้ตั้งค่าเลข PromptPay ในหน้าตั้งค่าร้าน</div>}</div>
+        <label className="event-check" style={{width:"fit-content",marginTop:16}}><input type="checkbox" checked={form.active!==false} onChange={(event) => setForm((current) => ({...current,active:event.target.checked}))}/> เปิดใช้งานทันทีหลังบันทึก</label>
+        <div style={{display:"flex",justifyContent:"flex-end",marginTop:16}}><button className="cbtn cbtn-accent" disabled={saving} onClick={saveEvent}><Icon name="device-floppy" size={14}/> {saving?"กำลังบันทึก...":"บันทึกและสร้างลิงก์"}</button></div>
+      </section>}
+
+      <div className="event-admin-list">
+        {events.length===0&&!form&&<div className="event-admin-card" style={{padding:32,textAlign:"center",color:"var(--espresso-2)"}}><Icon name="calendar-event" size={28}/><div style={{marginTop:8,fontSize:13}}>ยังไม่มีลิงก์อีเวนต์</div></div>}
+        {events.map((event) => { const expired=Number(event.expiresAt)<=Date.now(); const live=event.active!==false&&!expired; const menuCount=enabledEventKeys(event.menuIds).length; const paymentLabels=enabledEventKeys(event.paymentMethods).map((id)=>EVENT_PAYMENT_OPTIONS.find((item)=>item.id===id)?.label||id).join(" · "); return <section key={event.id} className="event-admin-card event-admin-row"><div style={{minWidth:0}}><strong style={{display:"block",color:"var(--espresso-5)",fontSize:14.5}}>{event.name}</strong><div style={{marginTop:4,color:"var(--espresso-2)",fontSize:11.5}}>{menuCount} เมนู · {paymentLabels||"ยังไม่กำหนดวิธีจ่าย"} · หมดอายุ {new Date(Number(event.expiresAt)).toLocaleString("th-TH",{dateStyle:"medium",timeStyle:"short"})}</div><span className={`event-admin-status ${live?"live":"off"}`}><Icon name={live?"circle-check":"circle-x"} size={12}/> {expired?"หมดอายุแล้ว":live?"กำลังใช้งาน":"ปิดใช้งาน"}</span></div><div className="event-admin-actions"><button className="cbtn" onClick={() => copyEventLink(event)}><Icon name="copy" size={13}/> คัดลอก</button><a className="cbtn" href={eventUrl(event.id)} target="_blank" rel="noreferrer" style={{textDecoration:"none"}}><Icon name="external-link" size={13}/> เปิด</a><button className="cbtn" disabled={expired} onClick={() => toggleEvent(event)}><Icon name={event.active===false?"player-play":"player-pause"} size={13}/> {event.active===false?"เปิด":"ปิด"}</button><button className="cbtn" onClick={() => beginEdit(event)}><Icon name="edit" size={13}/> แก้ไข</button><button className="cbtn cbtn-danger" onClick={() => deleteEvent(event)} aria-label={`ลบ ${event.name}`}><Icon name="trash" size={13}/></button></div></section>; })}
+      </div>
+    </div>
+  );
+}
+
 function OrderLinkCard({ uid }) {
   const [dataUrl, setDataUrl] = useState(null);
   const [copied, setCopied] = useState(false);
@@ -10443,6 +10592,7 @@ export default function App() {
     return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   });
   const orderShopUid = window.location.pathname.match(/^\/order\/([^/]+)/)?.[1] || null;
+  const eventId = orderShopUid ? new URLSearchParams(window.location.search).get("event") : null;
 
   useEffect(() => {
     if (orderShopUid) return undefined;
@@ -10464,7 +10614,7 @@ export default function App() {
   }, []);
 
   if (orderShopUid) {
-    return <CustomerOrder shopUid={orderShopUid} />;
+    return <CustomerOrder shopUid={orderShopUid} eventId={eventId} />;
   }
 
   if (user === undefined) {

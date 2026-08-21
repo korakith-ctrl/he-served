@@ -495,15 +495,16 @@ function genLineId() {
 }
 
 const CUSTOMER_CART_TTL_MS = 6 * 60 * 60 * 1000;
-function customerCartStorageKey(shopUid) {
-  return `customerCart_${shopUid}`;
+function customerCartStorageKey(shopUid, eventId) {
+  return `customerCart_${shopUid}${eventId ? `_event_${eventId}` : ""}`;
 }
-function loadSavedCustomerCart(shopUid) {
+function loadSavedCustomerCart(shopUid, eventId) {
   if (!shopUid) return [];
   try {
-    const saved = JSON.parse(localStorage.getItem(customerCartStorageKey(shopUid)) || "null");
+    const key = customerCartStorageKey(shopUid, eventId);
+    const saved = JSON.parse(localStorage.getItem(key) || "null");
     if (!saved || Date.now() - Number(saved.savedAt || 0) > CUSTOMER_CART_TTL_MS || !Array.isArray(saved.items)) {
-      localStorage.removeItem(customerCartStorageKey(shopUid));
+      localStorage.removeItem(key);
       return [];
     }
     return saved.items
@@ -513,11 +514,12 @@ function loadSavedCustomerCart(shopUid) {
     return [];
   }
 }
-function saveCustomerCart(shopUid, items) {
+function saveCustomerCart(shopUid, eventId, items) {
   if (!shopUid) return;
   try {
-    if (!items.length) localStorage.removeItem(customerCartStorageKey(shopUid));
-    else localStorage.setItem(customerCartStorageKey(shopUid), JSON.stringify({ savedAt: Date.now(), items }));
+    const key = customerCartStorageKey(shopUid, eventId);
+    if (!items.length) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), items }));
   } catch {
     // Storage can be unavailable in private/in-app browsers; ordering still works in memory.
   }
@@ -1619,10 +1621,25 @@ function ClosedOrderScreen({ shopName, hasOrders, onOpenOrders, seasonalEffect }
   );
 }
 
-export default function CustomerOrder({ shopUid }) {
+function EventUnavailableScreen({ shopName, eventName, expired }) {
+  return (
+    <main className="corder" style={{ minHeight:"100vh", display:"grid", placeItems:"center", padding:20, background:"linear-gradient(145deg,#E8F7FC,#F7FBFD)", fontFamily:"'Inter',sans-serif" }}>
+      <style>{GLOBAL_CSS}</style>
+      <section style={{ width:"min(420px,100%)", padding:"28px 22px", border:"1px solid rgba(0,163,224,.18)", borderRadius:22, background:"rgba(255,255,255,.9)", boxShadow:"0 18px 50px rgba(0,91,133,.14)", textAlign:"center" }}>
+        <span style={{ width:58, height:58, margin:"0 auto 14px", display:"grid", placeItems:"center", borderRadius:18, color:COLORS.sageDark, background:COLORS.sageLight }}><i className={`ti ti-${expired ? "calendar-off" : "link-off"}`} style={{ fontSize:28 }} aria-hidden="true" /></span>
+        <small style={{ color:COLORS.espresso2, fontWeight:700 }}>{shopName || "ZONE 2"}</small>
+        <h1 style={{ margin:"7px 0 8px", color:COLORS.espresso5, fontFamily:"'Space Grotesk',sans-serif", fontSize:23 }}>{eventName || "Event Order"}</h1>
+        <p style={{ margin:0, color:COLORS.espresso2, fontSize:13, lineHeight:1.65 }}>{expired ? "อีเวนต์นี้ปิดรับออเดอร์แล้ว ขอบคุณที่แวะมาหาเรา" : "ลิงก์นี้ยังไม่เปิดใช้งานหรือถูกปิดชั่วคราว กรุณาติดต่อทีมงานภายในงาน"}</p>
+      </section>
+    </main>
+  );
+}
+
+export default function CustomerOrder({ shopUid, eventId = null }) {
   const [authUid, setAuthUid] = useState(null);
   const [shopName, setShopName] = useState("");
-  const [menus, setMenus] = useState(null);
+  const [allMenus, setAllMenus] = useState(null);
+  const [eventConfig, setEventConfig] = useState(eventId ? undefined : null);
   const [optionGroups, setOptionGroups] = useState([]);
   const [promotions, setPromotions] = useState([]);
   const [popupAds, setPopupAds] = useState([]);
@@ -1654,7 +1671,7 @@ export default function CustomerOrder({ shopUid }) {
   const rewardVerificationIdRef = useRef("");
   const rewardRecaptchaRef = useRef(null);
   const [showRewardTerms, setShowRewardTerms] = useState(false);
-  const [cart, setCart] = useState(() => loadSavedCustomerCart(shopUid));
+  const [cart, setCart] = useState(() => loadSavedCustomerCart(shopUid, eventId));
   const [cartBump, setCartBump] = useState(false);
   const menuThumbRefs = useRef({});
   const pickerThumbRef = useRef(null);
@@ -1710,9 +1727,28 @@ export default function CustomerOrder({ shopUid }) {
   const offerInteractionAtRef = useRef(0);
   const [offerRippleId, setOfferRippleId] = useState(null);
 
+  const eventMenuIds = useMemo(() => {
+    if (!eventConfig?.menuIds) return [];
+    if (Array.isArray(eventConfig.menuIds)) return eventConfig.menuIds.filter(Boolean);
+    return Object.entries(eventConfig.menuIds).filter(([, enabled]) => enabled === true).map(([id]) => id);
+  }, [eventConfig]);
+  const menus = useMemo(() => {
+    if (!allMenus) return allMenus;
+    if (!eventId) return allMenus;
+    const allowed = new Set(eventMenuIds);
+    return allMenus.filter((menu) => allowed.has(menu.id));
+  }, [allMenus, eventId, eventMenuIds]);
+  const eventPaymentMethods = useMemo(() => {
+    if (!eventId || !eventConfig?.paymentMethods) return ["promptpay", "cash", "thaihelpthai"];
+    if (Array.isArray(eventConfig.paymentMethods)) return eventConfig.paymentMethods.filter(Boolean);
+    return Object.entries(eventConfig.paymentMethods).filter(([, enabled]) => enabled === true).map(([id]) => id);
+  }, [eventId, eventConfig]);
+  const eventExpired = Boolean(eventId && eventConfig && Number(eventConfig.expiresAt) <= Date.now());
+  const eventAvailable = Boolean(!eventId || (eventConfig && eventConfig.active !== false && !eventExpired));
+
   useEffect(() => {
-    saveCustomerCart(shopUid, cart);
-  }, [shopUid, cart]);
+    saveCustomerCart(shopUid, eventId, cart);
+  }, [shopUid, eventId, cart]);
 
   useEffect(() => {
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1722,11 +1758,11 @@ export default function CustomerOrder({ shopUid }) {
   }, []);
 
   useEffect(() => {
-    if (!splashMinimumElapsed || !authUid || menus === null) return undefined;
+    if (!splashMinimumElapsed || !authUid || menus === null || (eventId && eventConfig === undefined)) return undefined;
     setSplashLeaving(true);
     const t = setTimeout(() => setSplashDone(true), LANDING_SCREEN_EXIT_MS);
     return () => clearTimeout(t);
-  }, [splashMinimumElapsed, authUid, menus]);
+  }, [splashMinimumElapsed, authUid, menus, eventId, eventConfig]);
 
   useLayoutEffect(() => {
     const applyTheme = () => {
@@ -1763,7 +1799,7 @@ export default function CustomerOrder({ shopUid }) {
 
   useEffect(() => {
     if (!authUid) return;
-    const unsub1 = onValue(ref(db, `shops/${shopUid}/menus`), (snap) => setMenus(snap.val() || []));
+    const unsub1 = onValue(ref(db, `shops/${shopUid}/menus`), (snap) => setAllMenus(snap.val() || []));
     const unsub2 = onValue(ref(db, `shops/${shopUid}/settings/shopName`), (snap) => setShopName(snap.val() || "ร้านกาแฟ"));
     const unsub3 = onValue(ref(db, `shops/${shopUid}/settings/promptpayId`), (snap) => setPromptpayId(snap.val() || ""));
     const unsub4 = onValue(ref(db, `shops/${shopUid}/optionGroups`), (snap) => setOptionGroups(snap.val() || []));
@@ -1838,8 +1874,22 @@ export default function CustomerOrder({ shopUid }) {
       },
       (err) => console.error("อ่านโฆษณา Popup ไม่ได้ (เช็คว่า deploy database.rules.json ล่าสุดหรือยัง):", err.message),
     );
-    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); unsub7(); unsub7b(); unsub7c(); unsub7d(); unsub8(); unsub9(); unsub10(); unsub10b(); unsub11(); unsub12(); unsub13(); unsub14(); };
-  }, [authUid, shopUid]);
+    const unsub15 = eventId
+      ? onValue(ref(db, `shops/${shopUid}/eventLinks/${eventId}`), (snap) => setEventConfig(snap.exists() ? { id:eventId, ...snap.val() } : null), () => setEventConfig(null))
+      : () => {};
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); unsub7(); unsub7b(); unsub7c(); unsub7d(); unsub8(); unsub9(); unsub10(); unsub10b(); unsub11(); unsub12(); unsub13(); unsub14(); unsub15(); };
+  }, [authUid, shopUid, eventId]);
+
+  useEffect(() => {
+    if (!eventId || !eventConfig) return;
+    const allowedMenus = new Set(eventMenuIds);
+    setCart((current) => current.filter((line) => allowedMenus.has(line.menuId)));
+    const preferred = eventPaymentMethods.includes("promptpay") ? "promptpay" : eventPaymentMethods[0];
+    if (preferred) {
+      setPaymentMethod((current) => eventPaymentMethods.includes(current) ? current : preferred);
+      setPassExtraPaymentMethod((current) => eventPaymentMethods.includes(current) ? current : preferred);
+    }
+  }, [eventId, eventConfig, eventMenuIds, eventPaymentMethods]);
 
   // เมนูผูกกลุ่ม/ตัวเลือกด้วย id จึงใช้ชื่อจากต้นทางล่าสุดเสมอ แม้ลูกค้าจะใส่เมนู
   // ลงตะกร้าไว้ก่อนที่แอดมินจะเปลี่ยนชื่อ (ราคาในตะกร้ายังคงเป็น snapshot เดิมตามตอนเลือก)
@@ -1949,11 +1999,11 @@ export default function CustomerOrder({ shopUid }) {
   }, [menus]);
   const orderMood = useMemo(() => dominantOrderMood(cart, menusById), [cart, menusById]);
 
-  const coffeePassEligibleMenus = useMemo(() => (menus || []).filter((menu) =>
+  const coffeePassEligibleMenus = useMemo(() => eventId ? [] : (menus || []).filter((menu) =>
     productTypeOf(menu) === "drink" &&
     menu.available !== false &&
     ((coffeePass.menuIds || []).length === 0 || coffeePass.menuIds.includes(menu.id))
-  ), [menus, coffeePass.menuIds]);
+  ), [eventId, menus, coffeePass.menuIds]);
 
   const coffeePassBenefit = useMemo(() => {
     const uses = Math.max(1, Number(coffeePass.uses) || 1);
@@ -2007,6 +2057,7 @@ export default function CustomerOrder({ shopUid }) {
 
   useEffect(() => {
     if (!splashDone || !acceptingOrders || step !== "menu") return;
+    if (eventId) return;
     const now = Date.now();
     const featuredAd = popupAds.find((ad) => ad.active !== false
       && (!ad.startAt || now >= Number(ad.startAt))
@@ -2024,7 +2075,7 @@ export default function CustomerOrder({ shopUid }) {
       // เปิดต่อได้แม้ browser จำกัด sessionStorage เช่น private/in-app browser บางรุ่น
     }
     setTakeoverContent(featured);
-  }, [splashDone, acceptingOrders, step, activePromotions, popupAds, popupScheduleTick, shopUid]);
+  }, [splashDone, acceptingOrders, step, activePromotions, popupAds, popupScheduleTick, shopUid, eventId]);
 
   const baseCategories = useMemo(() => {
     if (!menus) return [];
@@ -2737,7 +2788,7 @@ export default function CustomerOrder({ shopUid }) {
     let message = "";
     if (key === "name" && !name.trim()) message = "กรุณากรอกชื่อที่ร้านใช้เรียกตอนรับออเดอร์";
     if (key === "phone") message = checkoutPhoneError(phone);
-    if (key === "pickupDate" && !coffeePassPurchaseLine && (pickupDate < addDays(1) || pickupDate > addDays(7))) {
+    if (key === "pickupDate" && !eventId && !coffeePassPurchaseLine && (pickupDate < addDays(1) || pickupDate > addDays(7))) {
       message = pickupDate < addDays(1) ? "กรุณาเลือกวันรับตั้งแต่วันพรุ่งนี้เป็นต้นไป" : "สามารถเลือกรับล่วงหน้าได้ไม่เกิน 7 วัน";
     }
     setFieldErrors((current) => {
@@ -2752,11 +2803,17 @@ export default function CustomerOrder({ shopUid }) {
   async function checkout() {
     setError("");
     if (cart.length === 0) { setError("กรุณาเลือกเมนูอย่างน้อย 1 รายการ"); return; }
+    if (eventId) {
+      const allowedMenus = new Set(eventMenuIds);
+      if (!eventConfig || eventConfig.active === false || Number(eventConfig.expiresAt) <= Date.now()) { setError("ลิงก์อีเวนต์นี้ปิดรับออเดอร์แล้ว"); return; }
+      if (cart.some((line) => !allowedMenus.has(line.menuId))) { setError("มีเมนูที่ไม่อยู่ในรายการของอีเวนต์ กรุณาเลือกใหม่"); return; }
+      if (!eventPaymentMethods.includes(paymentMethod)) { setError("วิธีชำระเงินนี้ไม่ได้เปิดใช้สำหรับอีเวนต์"); return; }
+    }
     const nextFieldErrors = {};
     if (!name.trim()) nextFieldErrors.name = "กรุณากรอกชื่อที่ร้านใช้เรียกตอนรับออเดอร์";
     const phoneError = checkoutPhoneError(phone);
     if (phoneError) nextFieldErrors.phone = phoneError;
-    if (!coffeePassPurchaseLine && (pickupDate < addDays(1) || pickupDate > addDays(7))) {
+    if (!eventId && !coffeePassPurchaseLine && (pickupDate < addDays(1) || pickupDate > addDays(7))) {
       nextFieldErrors.pickupDate = pickupDate < addDays(1) ? "กรุณาเลือกวันรับตั้งแต่วันพรุ่งนี้เป็นต้นไป" : "สามารถเลือกรับล่วงหน้าได้ไม่เกิน 7 วัน";
     }
     if (coffeePassPurchaseLine && !/^\d{6}$/.test(passPurchaseCode)) {
@@ -2807,7 +2864,8 @@ export default function CustomerOrder({ shopUid }) {
         customerPhone: phone.trim(),
         note: note.trim(),
         paymentMethod: usingCoffeePass ? "coffee-pass" : paymentMethod,
-        pickupDate,
+        pickupDate: eventId ? localDateStr(new Date()) : pickupDate,
+        ...(eventId ? { eventId, eventName:String(eventConfig?.name || "Event Order") } : {}),
       };
       let orderId;
       let orderData;
@@ -3014,6 +3072,10 @@ export default function CustomerOrder({ shopUid }) {
     if (CUSTOMER_SPLASH_VARIANT === "legacy") return <LegacyLandingScreen seasonalEffect={activeSeasonalEffect} />;
     if (CUSTOMER_SPLASH_VARIANT === "zone2-dark") return <DarkLandingScreen leaving={splashLeaving} />;
     return <LandingScreen leaving={splashLeaving} />;
+  }
+
+  if (eventId && !eventAvailable) {
+    return <EventUnavailableScreen shopName={shopName} eventName={eventConfig?.name} expired={eventExpired} />;
   }
 
   if (step === "myorders") {
@@ -3288,7 +3350,7 @@ export default function CustomerOrder({ shopUid }) {
           </div>
           <InlineFieldError id="checkout-phone-error" message={fieldErrors.phone} />
 
-          {!coffeePassPurchaseLine && (
+          {!eventId && !coffeePassPurchaseLine && (
             <>
               <LoyaltyCard
                 phone={phone}
@@ -3371,15 +3433,15 @@ export default function CustomerOrder({ shopUid }) {
             open={checkoutSection === "payment"}
             onToggle={() => setCheckoutSection((current) => current === "payment" ? null : "payment")}
           >
-          {!coffeePassPurchaseLine && passCartLine && loyaltyStatus === "loading" && (
+          {!eventId && !coffeePassPurchaseLine && passCartLine && loyaltyStatus === "loading" && (
             <div style={{ marginTop:12, color:COLORS.espresso2, fontSize:11 }}>กำลังตรวจสอบ Coffee Pass ของเบอร์นี้...</div>
           )}
-          {!coffeePassPurchaseLine && passCartLine && loyaltyStatus === "loaded" && activeCustomerPasses.length > 0 && compatibleCustomerPasses.length === 0 && (
+          {!eventId && !coffeePassPurchaseLine && passCartLine && loyaltyStatus === "loaded" && activeCustomerPasses.length > 0 && compatibleCustomerPasses.length === 0 && (
             <div style={{ marginTop:12, padding:"9px 11px", border:`1px solid ${COLORS.line}`, borderRadius:10, background:COLORS.sageLight, color:COLORS.espresso4, fontSize:11 }}>
               พบ Coffee Pass แต่ Pass ที่มีอยู่ใช้กับเมนูนี้ไม่ได้
             </div>
           )}
-          {!coffeePassPurchaseLine && activeCustomerPasses.length > 0 && !passCartLine && (
+          {!eventId && !coffeePassPurchaseLine && activeCustomerPasses.length > 0 && !passCartLine && (
             <div style={{ marginTop:12, padding:"9px 11px", border:`1px solid ${COLORS.line}`, borderRadius:10, background:COLORS.sageLight, color:COLORS.espresso4, fontSize:11 }}>
               Coffee Pass ใช้ได้ครั้งละ 1 แก้ว กรุณาแยกเครื่องดื่มที่ต้องการใช้ Pass เป็นออเดอร์เดี่ยว
             </div>
@@ -3394,8 +3456,8 @@ export default function CustomerOrder({ shopUid }) {
             <label style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>วิธีชำระเงิน</label>
             <div style={{ display: "flex", flexWrap:"wrap", gap: 8, marginTop: 4 }}>
             {[
-              ...(!coffeePassPurchaseLine && compatibleCustomerPasses.length > 0 ? ["coffee-pass"] : []),
-              "promptpay", "cash", "thaihelpthai",
+              ...(!eventId && !coffeePassPurchaseLine && compatibleCustomerPasses.length > 0 ? ["coffee-pass"] : []),
+              ...eventPaymentMethods,
             ].map((method) => (
               <PaymentMethodButton
                 key={method}
@@ -3482,12 +3544,12 @@ export default function CustomerOrder({ shopUid }) {
 
           <CheckoutSection
             title="วันรับและรายละเอียด"
-            summary={coffeePassPurchaseLine ? "เริ่มหลังร้านยืนยันการชำระเงิน" : formatPickupDate(pickupDate)}
+            summary={eventId ? "รับที่จุดจัดงาน" : coffeePassPurchaseLine ? "เริ่มหลังร้านยืนยันการชำระเงิน" : formatPickupDate(pickupDate)}
             icon="calendar-event"
             open={checkoutSection === "pickup"}
             onToggle={() => setCheckoutSection((current) => current === "pickup" ? null : "pickup")}
           >
-          {!coffeePassPurchaseLine && <>
+          {!eventId && !coffeePassPurchaseLine && <>
           <label htmlFor="checkout-pickup-date" style={{ fontSize: 12, color: COLORS.espresso2, display: "block", marginTop: 12 }}>วันที่รับ (ล่วงหน้า 1-7 วัน) <span style={{ color: COLORS.danger }}>*</span></label>
           <input
             id="checkout-pickup-date"
@@ -3624,7 +3686,14 @@ export default function CustomerOrder({ shopUid }) {
         ? (bannerEnabledStates === null ? [] : bannerImageUrls.filter((_, index) => bannerEnabledStates[index] !== false))
         : (bannerImageUrl ? [bannerImageUrl] : [])} />
 
-      {repeatableOrder && cartCount === 0 && (
+      {eventId && eventConfig && (
+        <section style={{ margin:"10px 16px 0", padding:"10px 12px", display:"flex", alignItems:"center", gap:10, border:"1px solid rgba(0,163,224,.24)", borderRadius:14, color:COLORS.espresso5, background:"linear-gradient(135deg,rgba(217,243,252,.9),rgba(255,255,255,.88))", boxShadow:"0 6px 18px rgba(0,91,133,.08)" }}>
+          <span style={{ width:34, height:34, flex:"0 0 34px", display:"grid", placeItems:"center", borderRadius:11, color:"#fff", background:COLORS.sage }}><i className="ti ti-calendar-event" aria-hidden="true" /></span>
+          <span style={{ minWidth:0 }}><small style={{ display:"block", color:COLORS.espresso2, fontSize:9.5, fontWeight:800, letterSpacing:".08em" }}>EVENT ORDER</small><strong style={{ display:"block", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", fontSize:13 }}>{eventConfig.name}</strong></span>
+        </section>
+      )}
+
+      {!eventId && repeatableOrder && cartCount === 0 && (
         <section className="customer-quick-reorder" aria-label="สั่งออเดอร์เดิมอีกครั้ง">
           <span className="customer-quick-reorder__icon" aria-hidden="true"><i className="ti ti-history" style={{ fontSize: 19 }} /></span>
           <span className="customer-quick-reorder__copy">
