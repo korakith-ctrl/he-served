@@ -1123,3 +1123,38 @@ input:focus, textarea:focus, select:focus { border-color: #168f81; box-shadow: 0
 .aurora-app .debt-portfolio-head > div strong,
 .aurora-app .liability-title > div:last-child strong { font-weight:750; }
 .aurora-app .money-input.no-prefix input { padding-left:14px; }
+
+/* High-contrast, easy-to-scan financial figures. */
+.aurora-app .personal-dashboard .amount-highlight,
+.aurora-app .personal-dashboard .personal-kpis article > div > strong,
+.aurora-app .personal-dashboard .flow-visual > div > strong,
+.aurora-app .personal-dashboard .debt-portfolio-head dd,
+.aurora-app .personal-dashboard .personal-schedule > div > b,
+.aurora-app .personal-dashboard .personal-entry-row > b,
+.aurora-app .personal-dashboard .calendar-list strong {
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  letter-spacing: 0;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+.aurora-app .personal-hero-copy > .amount-highlight { margin:10px 0 8px; color:#fff; font-size:clamp(36px,4.5vw,52px); font-weight:850; line-height:1; text-shadow:0 2px 18px rgba(0,0,0,.18); }
+.aurora-app .personal-kpis article > div > strong { color:#162f3b; font-size:clamp(20px,2.2vw,25px); font-weight:800; }
+.aurora-app .flow-visual > div > strong { padding:5px 8px; color:#fff; border-radius:8px; background:rgba(7,34,44,.22); font-size:12px; font-weight:800; }
+.aurora-app .debt-portfolio-head > div > .amount-highlight { margin-top:8px; color:#fff; font-size:clamp(32px,4vw,43px); font-weight:850; line-height:1; text-shadow:0 2px 16px rgba(0,0,0,.16); }
+.aurora-app .debt-portfolio-head dd { color:#fff; font-size:14px; font-weight:800; }
+.aurora-app .liability-title > div:last-child > .amount-highlight { color:#183340; font-size:21px; font-weight:850; }
+.aurora-app .personal-schedule > div > b,
+.aurora-app .personal-entry-row > b,
+.aurora-app .calendar-list strong { color:#253e49; font-size:11px; font-weight:800; }
+.aurora-app .personal-schedule .in > b,
+.aurora-app .calendar-list .in strong { color:#08776a; }
+.aurora-app .personal-schedule .debt > b,
+.aurora-app .calendar-list .debt strong { color:#a74740; }
+
+@media (max-width:680px) {
+  .aurora-app .personal-hero-copy > .amount-highlight { font-size:clamp(34px,11vw,44px); }
+  .aurora-app .debt-portfolio-head > div > .amount-highlight { font-size:clamp(30px,10vw,39px); }
+  .aurora-app .personal-kpis article > div > strong { font-size:19px; }
+  .aurora-app .flow-visual > div > strong { padding:4px 6px; font-size:10px; }
+}

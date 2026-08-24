@@ -433,7 +433,7 @@ export default function PersonalFinance({ user, onToast }) {
 
     {section === "overview" && <>
       <section className={`personal-hero ${remaining < 0 ? "negative" : ""}`}>
-        <div className="personal-hero-copy"><span>เงินเหลือใช้ตามแผนเดือนนี้</span><strong>{remaining < 0 ? "−" : ""}{money(Math.abs(remaining), 2)}</strong><p>{remaining >= 0 ? `เฉลี่ยใช้ได้วันละ ${money(dailyBudget)}` : "ควรปรับรายจ่ายหรือยอดชำระให้สมดุล"}</p></div>
+        <div className="personal-hero-copy"><span>เงินเหลือใช้ตามแผนเดือนนี้</span><strong className="amount-highlight">{remaining < 0 ? "−" : ""}{money(Math.abs(remaining))}</strong><p>{remaining >= 0 ? `เฉลี่ยใช้ได้วันละ ${money(dailyBudget)}` : "ควรปรับรายจ่ายหรือยอดชำระให้สมดุล"}</p></div>
         <div className="flow-visual" aria-label="สัดส่วนกระแสเงินสด">
           <div><span>รายรับ</span><i><b style={{ width: `${incomeTotal / maxFlow * 100}%` }} /></i><strong>{money(incomeTotal)}</strong></div>
           <div><span>ค่าใช้จ่าย</span><i><b className="expense" style={{ width: `${expenseTotal / maxFlow * 100}%` }} /></i><strong>{money(expenseTotal)}</strong></div>
@@ -463,7 +463,7 @@ export default function PersonalFinance({ user, onToast }) {
     </>}
 
     {section === "debts" && <>
-      <section className="debt-portfolio-head"><div><span>หนี้คงเหลือทั้งหมด</span><strong>{money(totalOutstanding, 2)}</strong></div><dl><div><dt>ชำระตามแผน/เดือน</dt><dd>{money(plannedDebtTotal)}</dd></div><div><dt>จ่ายจริงเดือนนี้</dt><dd>{money(actualDebtTotal)}</dd></div><div><dt>DTI</dt><dd>{dti.toFixed(1)}%</dd></div></dl><button className="primary" onClick={() => setModal({ type: "liability" })}>+ เพิ่มหนี้</button></section>
+      <section className="debt-portfolio-head"><div><span>หนี้คงเหลือทั้งหมด</span><strong className="amount-highlight">{money(totalOutstanding)}</strong></div><dl><div><dt>ชำระตามแผน/เดือน</dt><dd>{money(plannedDebtTotal)}</dd></div><div><dt>จ่ายจริงเดือนนี้</dt><dd>{money(actualDebtTotal)}</dd></div><div><dt>DTI</dt><dd>{dti.toFixed(1)}%</dd></div></dl><button className="primary" onClick={() => setModal({ type: "liability" })}>+ เพิ่มหนี้</button></section>
       {debtStrategies.length > 1 && <section className="strategy-note"><span>↗</span><div><strong>ถ้าต้องการลดดอกเบี้ยรวม ให้เริ่มจาก {debtStrategies[0]?.title}</strong><p>อัตราดอกเบี้ย {money(debtStrategies[0]?.annualRate)}% ต่อปี สูงสุดในรายการของคุณ โดยยังคงจ่ายขั้นต่ำบัญชีอื่นให้ครบ</p></div></section>}
       <section className="liability-list">
         {liabilities.length ? liabilities.map((item) => {
@@ -475,7 +475,7 @@ export default function PersonalFinance({ user, onToast }) {
           const utilization = Number(item.creditLimit) ? Number(item.outstanding) / Number(item.creditLimit) * 100 : 0;
           return <article className={`liability-card ${item.active === false ? "inactive" : ""}`} key={item.id}>
             <div className={`liability-icon ${item.type}`}>{type.icon}</div>
-            <div className="liability-main"><div className="liability-title"><div><span>{type.label}{fullBalance ? " · จ่ายเต็มทุกเดือน" : ""}</span><h3>{item.title}</h3></div><div><strong>{money(fullBalance ? statement?.amount : item.outstanding, 2)}</strong><span>{fullBalance ? `ยอดรอบบิล ${monthLabel(selectedMonth)}` : "ยอดคงเหลือ"}</span></div></div>
+            <div className="liability-main"><div className="liability-title"><div><span>{type.label}{fullBalance ? " · จ่ายเต็มทุกเดือน" : ""}</span><h3>{item.title}</h3></div><div><strong className="amount-highlight">{money(fullBalance ? statement?.amount : item.outstanding)}</strong><span>{fullBalance ? `ยอดรอบบิล ${monthLabel(selectedMonth)}` : "ยอดคงเหลือ"}</span></div></div>
               <div className="liability-progress"><i><b style={{ width: `${Math.min(100, paidPercent)}%` }} /></i><span>{fullBalance ? !statement ? "ยังไม่ใส่ยอดรอบบิล" : statementRemaining <= 0 ? "จ่ายครบแล้ว" : `เหลือจ่าย ${money(statementRemaining)}` : item.type === "credit_card" && item.creditLimit ? `ใช้วงเงิน ${utilization.toFixed(0)}%` : `ชำระแล้ว ${Math.min(100, paidPercent).toFixed(0)}%`}</span></div>
               <div className="liability-facts">{fullBalance ? <><span>ยอดเรียกเก็บ <strong>{statement ? `${money(statement.amount)}` : "ยังไม่มี"}</strong></span><span>ครบกำหนด <strong>{statement ? shortDate(statement.dueDate) : `วันที่ ${item.dueDay}`}</strong></span></> : <><span>จ่ายเดือนละ <strong>{money(item.monthlyPayment)}</strong></span><span>ครบกำหนดวันที่ <strong>{item.dueDay}</strong></span></>}{Number(item.annualRate) > 0 && <span>ดอกเบี้ย <strong>{money(item.annualRate)}%</strong></span>}{Number(item.totalInstallments) > 0 && <span>เหลือ <strong>{Math.max(0, Number(item.totalInstallments) - Number(item.paidInstallments))} งวด</strong></span>}</div>
             </div>
