@@ -50,6 +50,26 @@ function isFullBalanceCard(item) {
   return item?.type === "credit_card" && item?.cardPaymentMode === "full_balance";
 }
 
+function linkedReceivablesForMonth(debts, selectedMonth) {
+  const result = [];
+  debts.forEach((debt) => {
+    if (debt.outstandingStatus === "unconfirmed" || Number(debt.outstandingAmount || 0) <= 0) return;
+    const installments = Object.values(debt.installments || {}).filter((item) => item.status !== "paid" && item.dueDate).sort((a, b) => Number(a.sequence) - Number(b.sequence));
+    if (installments.length) {
+      let remainingDebt = Number(debt.outstandingAmount || 0);
+      installments.forEach((installment) => {
+        const installmentRemaining = Math.max(0, Number(installment.amount || 0) - Number(installment.paidAmount || 0));
+        const amount = Math.min(installmentRemaining, remainingDebt);
+        if (amount > 0 && String(installment.dueDate).startsWith(selectedMonth)) result.push({ id: `${debt.id}-${installment.sequence}`, debtId: debt.id, name: debt.title, counterpartyName: debt.debtorName || "ลูกหนี้", date: installment.dueDate, amount, installmentSequence: installment.sequence });
+        remainingDebt = Math.max(0, remainingDebt - amount);
+      });
+      return;
+    }
+    if (debt.dueDateMode !== "none" && String(debt.dueDate || "").startsWith(selectedMonth)) result.push({ id: debt.id, debtId: debt.id, name: debt.title, counterpartyName: debt.debtorName || "ลูกหนี้", date: debt.dueDate, amount: Number(debt.outstandingAmount || 0) });
+  });
+  return result.sort((a, b) => a.date.localeCompare(b.date));
+}
+
 function occursInMonth(item, selectedMonth) {
   if (item.active === false) return false;
   if (item.frequency === "once") return String(item.date || "").startsWith(selectedMonth);
@@ -252,7 +272,7 @@ function EmptyPanel({ title, body, action, onAction }) {
   return <div className="personal-empty"><span>◎</span><h3>{title}</h3><p>{body}</p><button className="secondary" onClick={onAction}>+ {action}</button></div>;
 }
 
-export default function PersonalFinance({ user, onToast }) {
+export default function PersonalFinance({ user, onToast, sharedReceivables = [], onOpenSharedDebt }) {
   const [data, setData] = useState({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -277,20 +297,25 @@ export default function PersonalFinance({ user, onToast }) {
   const monthIncomes = incomes.filter((item) => occursInMonth(item, selectedMonth));
   const monthExpenses = expenses.filter((item) => occursInMonth(item, selectedMonth));
   const monthPayments = payments.filter((item) => String(item.date || "").startsWith(selectedMonth));
+  const linkedReceivables = useMemo(() => linkedReceivablesForMonth(sharedReceivables, selectedMonth), [sharedReceivables, selectedMonth]);
   const activeLiabilities = liabilities.filter((item) => item.active !== false && (isFullBalanceCard(item) || Number(item.outstanding) > 0));
-  const incomeTotal = monthIncomes.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const personalIncomeTotal = monthIncomes.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const linkedReceivableTotal = linkedReceivables.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const sharedReceivableOutstanding = sharedReceivables.reduce((sum, item) => sum + (item.outstandingStatus === "unconfirmed" ? 0 : Number(item.outstandingAmount || 0)), 0);
+  const incomeTotal = personalIncomeTotal + linkedReceivableTotal;
   const expenseTotal = monthExpenses.reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const plannedAmount = (item) => isFullBalanceCard(item) ? Number(cardStatements[item.id]?.[selectedMonth]?.amount || 0) : Math.min(Number(item.monthlyPayment || 0), Number(item.outstanding || 0));
   const plannedDebtTotal = activeLiabilities.reduce((sum, item) => sum + plannedAmount(item), 0);
   const actualDebtTotal = monthPayments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const remaining = incomeTotal - expenseTotal - plannedDebtTotal;
-  const dti = incomeTotal > 0 ? (plannedDebtTotal / incomeTotal) * 100 : 0;
+  const dti = personalIncomeTotal > 0 ? (plannedDebtTotal / personalIncomeTotal) * 100 : 0;
   const totalOutstanding = liabilities.reduce((sum, item) => sum + Number(item.outstanding || 0), 0);
   const today = todayKey();
 
   const schedule = useMemo(() => {
     const result = [];
     monthIncomes.forEach((item) => result.push({ id: `income-${item.id}`, date: item.frequency === "once" ? item.date : monthDate(selectedMonth, item.dayOfMonth), name: item.name, amount: Number(item.amount), direction: "in", type: "รายรับ" }));
+    linkedReceivables.forEach((item) => result.push({ id: `linked-${item.id}`, date: item.date, name: item.name, amount: item.amount, direction: "in", type: `รับจาก ${item.counterpartyName} · เคลียร์กัน`, debtId: item.debtId, linked: true }));
     monthExpenses.forEach((item) => result.push({ id: `expense-${item.id}`, date: item.frequency === "once" ? item.date : monthDate(selectedMonth, item.dayOfMonth), name: item.name, amount: Number(item.amount), direction: "out", type: item.category }));
     activeLiabilities.forEach((item) => {
       const statement = cardStatements[item.id]?.[selectedMonth];
@@ -299,7 +324,7 @@ export default function PersonalFinance({ user, onToast }) {
       result.push({ id: `debt-${item.id}`, date: statement?.dueDate || monthDate(selectedMonth, item.dueDay), name: item.title, amount, direction: "debt", type: isFullBalanceCard(item) ? `บัตรเครดิต · ${statement?.status === "paid" ? "จ่ายแล้ว" : "จ่ายเต็ม"}` : LIABILITY_TYPES[item.type]?.label || "หนี้", liabilityId: item.id });
     });
     return result.sort((a, b) => a.date.localeCompare(b.date));
-  }, [monthIncomes, monthExpenses, activeLiabilities, selectedMonth, cardStatements]);
+  }, [monthIncomes, monthExpenses, linkedReceivables, activeLiabilities, selectedMonth, cardStatements]);
 
   const warnings = useMemo(() => {
     const result = [];
@@ -442,7 +467,7 @@ export default function PersonalFinance({ user, onToast }) {
       </section>
 
       <section className="personal-kpis">
-        <article><span className="kpi-icon income">↓</span><div><small>รายรับทั้งหมด</small><strong>{money(incomeTotal)}</strong><p>{monthIncomes.length} แหล่งรายรับ</p></div></article>
+        <article><span className="kpi-icon income">↓</span><div><small>รายรับทั้งหมด</small><strong>{money(incomeTotal)}</strong><p>{monthIncomes.length} รายรับส่วนตัว{linkedReceivables.length ? ` · เชื่อมแล้ว ${linkedReceivables.length}` : ""}</p></div></article>
         <article><span className="kpi-icon expense">↑</span><div><small>ค่าใช้จ่ายทั่วไป</small><strong>{money(expenseTotal)}</strong><p>{monthExpenses.length} รายการ</p></div></article>
         <article><span className="kpi-icon debt">%</span><div><small>ภาระหนี้ต่อรายรับ</small><strong>{dti.toFixed(1)}%</strong><p>ต้องจ่าย {money(plannedDebtTotal)}</p></div></article>
         <article><span className="kpi-icon balance">◎</span><div><small>หนี้คงเหลือทั้งหมด</small><strong>{money(totalOutstanding)}</strong><p>{activeLiabilities.length} บัญชีที่กำลังชำระ</p></div></article>
@@ -451,7 +476,7 @@ export default function PersonalFinance({ user, onToast }) {
       <div className="personal-overview-grid">
         <section className="personal-card schedule-card">
           <div className="personal-section-head"><div><p className="eyebrow">รอบบิลของเดือน</p><h2>เงินเข้าและกำหนดจ่าย</h2></div><button className="text-button" onClick={() => setSection("cashflow")}>ดูทั้งหมด →</button></div>
-          {schedule.length ? <div className="personal-schedule">{schedule.slice(0, 7).map((item) => <div key={item.id} className={`${item.direction} ${item.date < today && selectedMonth === monthKey() ? "past" : ""}`}><time><strong>{String(Number(item.date.slice(-2))).padStart(2, "0")}</strong><span>{new Intl.DateTimeFormat("th-TH", { month: "short" }).format(new Date(`${item.date}T12:00:00`))}</span></time><i /><div><strong>{item.name}</strong><span>{item.type}</span></div><b>{item.direction === "in" ? "+" : "−"}{money(item.amount)}</b></div>)}</div> : <EmptyPanel title="ยังไม่มีรอบบิล" body="เพิ่มรายรับ รายจ่าย หรือหนี้ เพื่อสร้างปฏิทินอัตโนมัติ" action="เพิ่มรายรับ" onAction={() => setModal({ type: "income" })} />}
+          {schedule.length ? <div className="personal-schedule">{schedule.slice(0, 7).map((item) => <div key={item.id} className={`${item.direction} ${item.linked ? "linked" : ""} ${item.date < today && selectedMonth === monthKey() ? "past" : ""}`}><time><strong>{String(Number(item.date.slice(-2))).padStart(2, "0")}</strong><span>{new Intl.DateTimeFormat("th-TH", { month: "short" }).format(new Date(`${item.date}T12:00:00`))}</span></time><i /><div><strong>{item.name}</strong><span>{item.type}</span></div><b>{item.direction === "in" ? "+" : "−"}{money(item.amount)}</b></div>)}</div> : <EmptyPanel title="ยังไม่มีรอบบิล" body="เพิ่มรายรับ รายจ่าย หรือหนี้ เพื่อสร้างปฏิทินอัตโนมัติ" action="เพิ่มรายรับ" onAction={() => setModal({ type: "income" })} />}
         </section>
         <aside className="personal-card insight-card">
           <div className="personal-section-head"><div><p className="eyebrow">สิ่งที่ควรรู้</p><h2>สัญญาณเดือนนี้</h2></div></div>
@@ -489,7 +514,8 @@ export default function PersonalFinance({ user, onToast }) {
     {section === "cashflow" && <div className="cashflow-manage-grid">
       <section className="personal-card manage-card"><div className="personal-section-head"><div><p className="eyebrow">เงินเข้า</p><h2>รายรับ</h2></div><button className="secondary mini" onClick={() => setModal({ type: "income" })}>+ เพิ่ม</button></div>{incomes.length ? incomes.map((item) => <div className={`personal-entry-row ${item.active === false ? "inactive" : ""}`} key={item.id}><span className="entry-badge income">↓</span><div><strong>{item.name}</strong><small>{item.category} · {item.frequency === "monthly" ? `ทุกวันที่ ${item.dayOfMonth}` : shortDate(item.date)}</small></div><b>+{money(item.amount)}</b><button className="edit-link" onClick={() => setModal({ type: "income", item })}>แก้ไข</button><button className="icon-delete" onClick={() => deleteItem(`incomes/${item.id}`, "รายรับ")}>×</button></div>) : <EmptyPanel title="ยังไม่มีรายรับ" body="เริ่มจากเงินเดือนสุทธิที่ได้รับจริง" action="เพิ่มรายรับ" onAction={() => setModal({ type: "income" })} />}</section>
       <section className="personal-card manage-card"><div className="personal-section-head"><div><p className="eyebrow">เงินออกทั่วไป</p><h2>รายจ่าย</h2></div><button className="secondary mini" onClick={() => setModal({ type: "expense" })}>+ เพิ่ม</button></div>{expenses.length ? expenses.map((item) => <div className={`personal-entry-row ${item.active === false ? "inactive" : ""}`} key={item.id}><span className="entry-badge expense">↑</span><div><strong>{item.name}</strong><small>{item.category} · {item.frequency === "monthly" ? `ทุกวันที่ ${item.dayOfMonth}` : shortDate(item.date)}</small></div><b>−{money(item.amount)}</b><button className="edit-link" onClick={() => setModal({ type: "expense", item })}>แก้ไข</button><button className="icon-delete" onClick={() => deleteItem(`expenses/${item.id}`, "รายจ่าย")}>×</button></div>) : <EmptyPanel title="ยังไม่มีรายจ่ายทั่วไป" body="แยกรายจ่ายประจำออกจากยอดชำระหนี้เพื่อไม่ให้นับซ้ำ" action="เพิ่มรายจ่าย" onAction={() => setModal({ type: "expense" })} />}</section>
-      <section className="personal-card full-width month-calendar"><div className="personal-section-head"><div><p className="eyebrow">ตามลำดับเวลา</p><h2>ปฏิทินกระแสเงินสด · {monthLabel(selectedMonth)}</h2></div></div>{schedule.length ? <div className="calendar-list">{schedule.map((item) => <div key={item.id} className={item.direction}><time>{shortDate(item.date)}</time><span>{item.name}<small>{item.type}</small></span><strong>{item.direction === "in" ? "+" : "−"}{money(item.amount)}</strong></div>)}</div> : <p className="muted center">ยังไม่มีรายการในเดือนนี้</p>}</section>
+      <section className="personal-card full-width linked-receivable-card"><div className="personal-section-head"><div><p className="eyebrow">เชื่อมอัตโนมัติจากเคลียร์กับคนอื่น</p><h2>หนี้ที่จะได้รับ</h2></div><div className="linked-total"><small>ยอดคงเหลือทั้งหมด</small><strong>{money(sharedReceivableOutstanding)}</strong></div></div>{linkedReceivables.length ? <div className="linked-receivable-list">{linkedReceivables.map((item) => <div key={item.id}><span className="entry-badge linked">⇄</span><div><strong>{item.name}</strong><small>จาก {item.counterpartyName}{item.installmentSequence ? ` · งวดที่ ${item.installmentSequence}` : ""} · ครบกำหนด {shortDate(item.date)}</small></div><b>+{money(item.amount)}</b><button className="secondary mini" onClick={() => onOpenSharedDebt?.(item.debtId)}>ดูรายการ</button></div>)}</div> : <div className="linked-empty"><span>✓</span><div><strong>{sharedReceivables.length ? `เดือน ${monthLabel(selectedMonth)} ไม่มีเงินที่ถึงกำหนดรับ` : "ยังไม่มีหนี้ที่ต้องได้รับ"}</strong><p>{sharedReceivables.length ? "ลองเปลี่ยนเดือนเพื่อดูงวดอื่น รายการจะเชื่อมให้อัตโนมัติ" : "เมื่อมีข้อตกลงที่ยืนยันแล้ว ระบบจะแสดงรายรับที่นี่"}</p></div></div>}</section>
+      <section className="personal-card full-width month-calendar"><div className="personal-section-head"><div><p className="eyebrow">ตามลำดับเวลา</p><h2>ปฏิทินกระแสเงินสด · {monthLabel(selectedMonth)}</h2></div></div>{schedule.length ? <div className="calendar-list">{schedule.map((item) => <div key={item.id} className={`${item.direction} ${item.linked ? "linked" : ""}`}><time>{shortDate(item.date)}</time><span>{item.name}<small>{item.type}</small></span><strong>{item.direction === "in" ? "+" : "−"}{money(item.amount)}</strong></div>)}</div> : <p className="muted center">ยังไม่มีรายการในเดือนนี้</p>}</section>
     </div>}
 
     {modal?.type === "income" && <Modal title={modal.item ? "แก้ไขรายรับ" : "เพิ่มรายรับ"} eyebrow="กระแสเงินสด" onClose={() => setModal(null)}><EntryForm kind="income" initial={modal.item} selectedMonth={selectedMonth} onClose={() => setModal(null)} onSave={(item) => saveEntry("income", item, modal.item)} /></Modal>}
