@@ -13,6 +13,7 @@ import { firebaseConfig } from "./firebase";
 import LoyaltyCard from "./components/loyalty/LoyaltyCard.jsx";
 import RewardOtpModal from "./components/loyalty/RewardOtpModal.jsx";
 import PromotionTakeover from "./components/promotions/PromotionTakeover.jsx";
+import OrderPreparationExperience from "./components/orders/OrderPreparationExperience.jsx";
 import LandingScreen, { LANDING_SCREEN_EXIT_MS, LANDING_SCREEN_MINIMUM_MS } from "./LandingScreen.jsx";
 
 // Isolated secondary app so an anonymous customer session never shares
@@ -1703,7 +1704,6 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
   const [fieldErrors, setFieldErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [order, setOrder] = useState(null);
-  const [successCountdown, setSuccessCountdown] = useState(5);
   const [qrDataUrl, setQrDataUrl] = useState(null);
   const [myOrders, setMyOrders] = useState([]);
   const [activeCategory, setActiveCategory] = useState(null);
@@ -1945,23 +1945,6 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
     return () => unsub();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order?.id]);
-
-  useEffect(() => {
-    if (step !== "success") return;
-    setSuccessCountdown(5);
-    const interval = setInterval(() => {
-      setSuccessCountdown((c) => (c <= 1 ? 0 : c - 1));
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [step]);
-
-  useEffect(() => {
-    if (step === "success" && successCountdown === 0) {
-      resetOrderFlow();
-      openMyOrders();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, successCountdown]);
 
   function resetOrderFlow() {
     setCart([]);
@@ -3118,16 +3101,6 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
         <style>{GLOBAL_CSS}</style>
         <GlassBackdrop seasonalEffect={activeSeasonalEffect} />
         <div style={{ ...centerCard, textAlign: "center" }}>
-          <div style={{ animation: "successPop .5s cubic-bezier(.34,1.56,.64,1)", margin: "10px auto 4px", width: 84, height: 84 }}>
-            <svg viewBox="0 0 52 52" width={84} height={84}>
-              <circle cx="26" cy="26" r="24" fill="none" stroke={COLORS.success} strokeWidth="3" />
-              <path
-                d="M15 27 L23 35 L38 18" fill="none" stroke={COLORS.success} strokeWidth="4"
-                strokeLinecap="round" strokeLinejoin="round"
-                style={{ strokeDasharray: 48, strokeDashoffset: 48, animation: "checkDraw .5s .35s ease forwards" }}
-              />
-            </svg>
-          </div>
           <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, margin: "6px 0 4px", color: COLORS.successDark }}>
             ส่งคำสั่งซื้อแล้ว
           </h1>
@@ -3135,15 +3108,14 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
           <p style={{ fontSize: 24, fontWeight: 700, fontFamily: "'Space Grotesk', sans-serif", letterSpacing: ".04em", margin: "0 0 18px", color: COLORS.espresso5 }}>
             #{shortCode}
           </p>
+          <OrderPreparationExperience order={order} shopName={shopName} />
           <OrderStatusTimeline status={order.status} />
-          <p style={{ fontSize: 12, color: COLORS.espresso2, margin: 0 }}>
-            กลับไปหน้าออเดอร์ของฉันใน {successCountdown} วินาที...
-          </p>
+          <p style={{ fontSize: 12, color: COLORS.espresso2, margin: 0 }}>หน้านี้จะเปลี่ยนตามสถานะจริงจากร้านโดยอัตโนมัติ</p>
           <button
             style={{ ...btn, marginTop: 14, width: "100%" }}
             onClick={() => { resetOrderFlow(); openMyOrders(); }}
           >
-            ไปที่ออเดอร์ของฉันตอนนี้
+            ดูออเดอร์ของฉัน
           </button>
         </div>
       </div>
@@ -3170,7 +3142,7 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
           {isPending ? (
             isCash ? (
               <div style={{ padding: "10px 0" }}>
-                <p style={{ fontSize: 40, margin: 0 }}>{noPaymentRequired ? "🎁" : "💵"}</p>
+                <OrderPreparationExperience order={order} shopName={shopName} compact />
                 <p style={{ fontSize: 22, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif", margin: "10px 0 4px" }}>{money(order.total)}</p>
                 <p style={{ fontSize: 12, color: COLORS.espresso2, margin: "0 0 14px" }}>{payAtStoreText.instruction}</p>
               </div>
@@ -3212,11 +3184,7 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
               </>
             )
           ) : (
-            <div style={{ padding: "10px 0 20px", display: "flex", flexDirection: "column", alignItems: "center" }}>
-              <OrderStatusIcon status={order.status} size={38} />
-              <p style={{ fontSize: 16, fontWeight: 600, margin: "12px 0 4px" }}>{STATUS_TEXT[order.status] || order.status}</p>
-              <p style={{ fontSize: 12, color: COLORS.espresso2, margin: 0 }}>{STATUS_DESCRIPTION[order.status] || "หน้านี้จะอัปเดตอัตโนมัติ"}</p>
-            </div>
+            <OrderPreparationExperience order={order} shopName={shopName} compact />
           )}
           {order.pickupDate && !order.coffeePassPurchase && (
             <p style={{ fontSize: 12.5, color: COLORS.espresso5, fontWeight: 600, margin: "0 0 10px" }}>
