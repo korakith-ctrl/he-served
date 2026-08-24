@@ -1105,3 +1105,21 @@ input:focus, textarea:focus, select:focus { border-color: #168f81; box-shadow: 0
   .personal-hero { grid-template-columns:1fr; gap:22px; min-height:0; padding:27px 20px; border-radius:22px; }.flow-visual { padding:15px; }.flow-visual > div { grid-template-columns:61px 1fr 70px; }.personal-kpis { grid-template-columns:1fr 1fr; gap:8px; }.personal-kpis article { align-items:flex-start; gap:8px; padding:13px 11px; }.personal-kpis .kpi-icon { width:30px; height:30px; }.personal-kpis strong { font-size:15px; }.personal-card { padding:17px 14px; border-radius:18px; }.quick-actions { grid-template-columns:1fr; }.debt-portfolio-head { grid-template-columns:1fr; gap:18px; padding:23px 20px; }.debt-portfolio-head dl { grid-column:1; grid-row:auto; gap:14px; justify-content:space-between; }.debt-portfolio-head .primary { width:100%; }.liability-card { grid-template-columns:auto minmax(0,1fr); align-items:start; gap:11px; padding:15px 12px; }.liability-title { flex-direction:column; gap:6px; }.liability-title > div:last-child { text-align:left; }.liability-actions { grid-column:1/-1; display:grid; grid-template-columns:1fr 1fr auto; }.liability-actions .primary,.liability-actions .secondary { width:100%; }.liability-actions.card-actions { grid-template-columns:1fr 1fr auto; }.liability-actions.card-actions .statement-button { grid-column:1/-1; }.calendar-list { grid-template-columns:1fr; }.personal-entry-row { grid-template-columns:auto minmax(0,1fr) auto auto; }.personal-entry-row .edit-link { grid-column:2; justify-self:start; padding:0; }.personal-entry-row .icon-delete { grid-column:4; grid-row:1/3; }.liability-type-grid { grid-template-columns:1fr 1fr; }.personal-modal .form-grid { grid-template-columns:1fr; }.personal-modal .form-grid .wide { grid-column:auto; }.card-payment-mode > div { grid-template-columns:1fr; }
 }
 @media (max-width:390px) { .personal-kpis { grid-template-columns:1fr; }.workspace-switch > button > span { display:none; }.liability-type-grid { grid-template-columns:1fr; } }
+
+/* Keep personal finance typography consistent with the shared-debt workspace. */
+.aurora-app .personal-dashboard h1,
+.aurora-app .personal-dashboard h2,
+.aurora-app .personal-dashboard h3,
+.aurora-app .personal-dashboard strong,
+.aurora-app .personal-dashboard time strong,
+.aurora-app .personal-modal h2,
+.aurora-app .personal-modal h3,
+.aurora-app .personal-modal strong { font-family:inherit; }
+.aurora-app .personal-head h1 { font-weight:750; line-height:1.28; }
+.aurora-app .personal-section-head h2,
+.aurora-app .personal-load-error h2 { font-weight:750; }
+.aurora-app .personal-hero-copy > strong,
+.aurora-app .personal-kpis strong,
+.aurora-app .debt-portfolio-head > div strong,
+.aurora-app .liability-title > div:last-child strong { font-weight:750; }
+.aurora-app .money-input.no-prefix input { padding-left:14px; }
