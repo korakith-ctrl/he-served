@@ -1,0 +1,18 @@
+{
+  "name": "ZONE 2 - RESERVE BAR",
+  "short_name": "ZONE 2",
+  "description": "ZONE 2 Reserve Bar coffee ordering",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F4F6F4",
+  "theme_color": "#0B446F",
+  "icons": [
+    {
+      "src": "/logo-zone2.png",
+      "sizes": "2048x2048",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
