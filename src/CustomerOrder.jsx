@@ -812,6 +812,7 @@ const centerWrap = {
 };
 const centerCard = {
   ...GLASS_PANEL, borderRadius: 20, padding: 20, width: "100%", maxWidth: 420, height: "fit-content",
+  boxSizing: "border-box",
 };
 
 const GLOBAL_CSS = `
@@ -3095,20 +3096,12 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
   }
 
   if (step === "success" && order) {
-    const shortCode = order.id.slice(-6).toUpperCase();
     return (
       <div className="corder" style={centerWrap}>
         <style>{GLOBAL_CSS}</style>
         <GlassBackdrop seasonalEffect={activeSeasonalEffect} />
         <div style={{ ...centerCard, textAlign: "center" }}>
-          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, margin: "6px 0 4px", color: COLORS.successDark }}>
-            ส่งคำสั่งซื้อแล้ว
-          </h1>
-          <p style={{ fontSize: 12, color: COLORS.espresso2, margin: "0 0 4px" }}>เลขที่อ้างอิงออเดอร์</p>
-          <p style={{ fontSize: 24, fontWeight: 700, fontFamily: "'Space Grotesk', sans-serif", letterSpacing: ".04em", margin: "0 0 18px", color: COLORS.espresso5 }}>
-            #{shortCode}
-          </p>
-          <OrderPreparationExperience order={order} shopName={shopName} />
+          <OrderPreparationExperience order={order} shopName={shopName} intro />
           <OrderStatusTimeline status={order.status} />
           <p style={{ fontSize: 12, color: COLORS.espresso2, margin: 0 }}>หน้านี้จะเปลี่ยนตามสถานะจริงจากร้านโดยอัตโนมัติ</p>
           <button
