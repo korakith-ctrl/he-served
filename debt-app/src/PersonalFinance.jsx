@@ -341,6 +341,16 @@ function EmptyPanel({ title, body, action, onAction }) {
   return <div className="personal-empty"><span>◎</span><h3>{title}</h3><p>{body}</p><button className="secondary" onClick={onAction}>+ {action}</button></div>;
 }
 
+function FinanceSkeleton() {
+  return <main className="dashboard personal-dashboard finance-skeleton" aria-busy="true" aria-label="กำลังเปิดข้อมูลการเงิน">
+    <div className="skeleton-head"><div><i /><b /><span /></div><em /></div>
+    <div className="skeleton-tabs"><i /><i /><i /></div>
+    <section className="skeleton-hero"><div><i /><b /><span /></div><div className="skeleton-flow"><i /><i /><i /></div></section>
+    <section className="skeleton-kpis">{[0, 1, 2, 3].map((item) => <article key={item}><i /><div><span /><b /><small /></div></article>)}</section>
+    <div className="skeleton-loading-label"><span><i /><i /><i /></span><strong>กำลังจัดเตรียมภาพรวมการเงิน</strong><small>เชื่อมรายรับ รายจ่าย และกำหนดชำระของคุณ</small></div>
+  </main>;
+}
+
 export default function PersonalFinance({ user, onToast, sharedReceivables = [], sharedPayables = [], onOpenSharedDebt }) {
   const [data, setData] = useState({});
   const [loading, setLoading] = useState(true);
@@ -564,7 +574,7 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
   const debtCoverage = personalIncomeTotal > 0 ? (plannedDebtTotal / personalIncomeTotal) * 100 : 0;
   const afterDebt = personalIncomeTotal - plannedDebtTotal;
 
-  if (loading) return <main className="dashboard personal-dashboard"><div className="personal-loading"><div className="loader" /><span>กำลังเปิดข้อมูลส่วนตัว…</span></div></main>;
+  if (loading) return <FinanceSkeleton />;
   if (loadError) return <main className="dashboard personal-dashboard"><div className="personal-load-error"><span>!</span><h2>เปิดข้อมูลการเงินส่วนตัวไม่ได้</h2><p>{loadError}</p><small>ตรวจสอบว่าได้ deploy Realtime Database Rules เวอร์ชันล่าสุดแล้ว</small></div></main>;
 
   return <main className="dashboard personal-dashboard">
