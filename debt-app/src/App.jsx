@@ -1286,7 +1286,17 @@ export default function App() {
     };
   }, [overlayOpen]);
 
-  if (user === undefined) return <div className="app-loading"><div className="loader" /><span>กำลังเปิดเคลียร์กัน…</span></div>;
+  if (user === undefined) return <div className="app-loading" role="status" aria-live="polite" aria-label="กำลังเปิดเคลียร์กัน">
+    <div className="splash-ambient splash-ambient-one" aria-hidden="true" />
+    <div className="splash-ambient splash-ambient-two" aria-hidden="true" />
+    <main className="splash-stage">
+      <div className="splash-logo-scene" aria-hidden="true"><i /><i /><BrandMark className="splash-mark" /></div>
+      <div className="splash-wordmark"><strong>เคลียร์กัน</strong><span>จัดการเรื่องเงินให้ชัดเจนระหว่างกัน</span></div>
+      <div className="splash-progress" role="progressbar" aria-label="กำลังโหลด"><i /></div>
+      <p>กำลังเตรียมพื้นที่ของคุณ</p>
+    </main>
+    <div className="splash-trust"><UiIcon name="status" /><span>ข้อมูลส่วนตัวของคุณได้รับการปกป้อง</span></div>
+  </div>;
   if (!user) return <AuthScreen hasInvite={Boolean(inviteCode)} />;
 
   function showToast(message) {
