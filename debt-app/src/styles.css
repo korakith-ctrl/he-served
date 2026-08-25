@@ -1379,3 +1379,42 @@ input:focus, textarea:focus, select:focus { border-color: #168f81; box-shadow: 0
 @media (max-width:680px) {
   .personal-tab-viewport { margin-inline:-6px; padding-inline:6px; }
 }
+
+/* Compact information architecture: keep summaries above the fold. */
+.aurora-dashboard-hero { min-height:282px; padding:36px 44px; }
+.hero-copy h1 { font-size:clamp(36px,4.5vw,52px); }.hero-copy > p:not(.eyebrow) { margin:13px 0 19px; }
+.net-spotlight { padding:25px; }
+.summary-dock { margin-top:-24px; margin-bottom:26px; }.summary-chip { min-height:88px; padding:14px 17px; }
+.cashflow-hub { margin-top:30px; overflow:hidden; }
+.cashflow-hub-head { display:flex; align-items:end; justify-content:space-between; gap:20px; }
+.cashflow-hub-head h2 { margin:0; color:var(--aurora-ink); font-size:24px; letter-spacing:-.03em; }
+.cashflow-hub-head > nav { display:grid; grid-template-columns:1fr 1fr; gap:4px; padding:4px; border:1px solid var(--aurora-line); border-radius:14px; background:rgba(255,255,255,.7); }
+.cashflow-hub-head > nav button { display:flex; align-items:center; justify-content:center; gap:6px; min-height:38px; padding:7px 13px; color:#69778c; border:0; border-radius:10px; background:transparent; font-size:11px; font-weight:750; }
+.cashflow-hub-head > nav button.active { color:#fff; background:#087f72; box-shadow:0 5px 13px rgba(8,127,114,.18); }.cashflow-hub-head > nav button:disabled { opacity:.42; }
+.cashflow-hub-head > nav .ui-icon { width:15px; }.cashflow-hub-head > nav i { display:grid; place-items:center; min-width:19px; height:19px; padding:0 4px; color:inherit; border-radius:999px; background:rgba(111,127,148,.12); font-size:8px; font-style:normal; }.cashflow-hub-head > nav button.active i { background:rgba(255,255,255,.17); }
+.cashflow-hub .cashflow-section { margin-top:14px; }.cashflow-hub .cashflow-heading .eyebrow { display:none; }.cashflow-hub .cashflow-heading h2 { font-size:18px; }
+.list-section { margin-top:40px; }
+.debt-list-more { display:flex; align-items:center; justify-content:center; gap:10px; width:100%; min-height:48px; margin-top:13px; color:#176d66; border-style:dashed; background:rgba(255,255,255,.55); font-size:11px; }.debt-list-more span { color:#7b8798; font-size:9px; font-weight:600; }
+
+.cashflow-subtabs { display:grid; grid-template-columns:repeat(3,1fr); gap:5px; margin-bottom:15px; padding:5px; border:1px solid var(--finance-line); border-radius:15px; background:#edf2f1; }
+.cashflow-subtabs button { display:flex; align-items:center; justify-content:center; gap:7px; min-height:42px; padding:8px 12px; color:#657780; border:0; border-radius:10px; background:transparent; font-size:11px; font-weight:750; }
+.cashflow-subtabs button.active { color:#155f59; background:#fff; box-shadow:0 3px 11px rgba(26,55,65,.08); }.cashflow-subtabs button > i { display:grid; place-items:center; min-width:20px; height:20px; padding:0 4px; color:#fff; border-radius:999px; background:#70828a; font-size:8px; font-style:normal; }.cashflow-subtabs button.active > i { background:#238176; }
+.cashflow-subpanel { min-width:0; }
+
+@media (max-width:760px) {
+  .aurora-dashboard-hero { gap:18px; padding:24px 20px 42px; }.hero-copy h1 { font-size:32px; }.hero-copy > p:not(.eyebrow) { margin:9px 0 15px; }.hero-copy .create-button { min-height:46px; }.net-spotlight { padding:17px 18px; }.net-spotlight strong { font-size:29px; }
+  .summary-dock { display:flex; grid-template-columns:none; gap:9px; width:calc(100% - 14px); margin-top:-27px; margin-bottom:22px; padding:2px 1px 8px; overflow-x:auto; scroll-snap-type:x mandatory; scrollbar-width:none; }.summary-dock::-webkit-scrollbar { display:none; }.summary-chip,.summary-chip.active-count { grid-column:auto; min-width:205px; min-height:80px; flex:0 0 205px; padding:12px 13px; scroll-snap-align:start; }.summary-chip strong { font-size:19px; }
+  .cashflow-hub { margin-top:25px; }.cashflow-hub-head { align-items:stretch; flex-direction:column; gap:11px; }.cashflow-hub-head h2 { font-size:20px; }.cashflow-hub-head > nav { width:100%; }.cashflow-hub .cashflow-section { margin-top:12px; }.cashflow-hub .cashflow-heading { margin-bottom:10px; }.cashflow-hub .cashflow-heading h2 { font-size:16px; }
+  .cashflow-hub .cashflow-card.cashflow-primary { padding:16px 15px; }.cashflow-hub .cashflow-total { padding-top:11px; }.cashflow-hub .cashflow-total > strong { font-size:27px; }
+  .list-section { margin-top:32px; }.list-heading { gap:11px; margin-bottom:12px; }.list-heading h2 { font-size:25px; }
+}
+@media (max-width:680px) {
+  .aurora-app .personal-hero { gap:18px; padding:20px 18px; }.aurora-app .finance-status { margin-bottom:12px; padding:6px 9px; }.aurora-app .personal-hero-copy > .amount-highlight { margin:7px 0; font-size:38px; }.aurora-app .personal-hero-copy p { line-height:1.4; }.aurora-app .flow-visual { gap:10px; padding:14px; }.flow-visual > header { padding-bottom:9px; }.aurora-app .flow-visual > div { min-height:25px; }
+  .aurora-app .personal-kpis { margin:11px 0; }.aurora-app .personal-kpis article { min-height:94px; padding:13px 12px; }.aurora-app .personal-kpis .kpi-icon { width:32px; height:32px; }.aurora-app .personal-kpis article > div > strong { font-size:17px; }
+  .personal-schedule > div:nth-child(n+5) { display:none; }
+  .aurora-app .quick-actions { grid-template-columns:repeat(3,1fr); gap:7px; margin-top:11px; }.aurora-app .quick-actions button { display:flex; align-items:center; justify-content:center; gap:6px; min-height:58px; padding:8px 5px; text-align:center; }.aurora-app .quick-actions span { grid-row:auto; width:29px; height:29px; flex:0 0 auto; }.aurora-app .quick-actions strong { font-size:9px; }.aurora-app .quick-actions small { display:none; }
+  .cashflow-subtabs { gap:3px; padding:4px; }.cashflow-subtabs button { gap:5px; min-width:0; padding:7px 5px; font-size:9px; }.cashflow-subtabs button svg { width:14px; }.cashflow-subtabs button > i { min-width:18px; height:18px; font-size:7px; }
+}
+@media (max-width:390px) {
+  .cashflow-subtabs button svg { display:none; }
+}

@@ -1160,6 +1160,8 @@ export default function App() {
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [expandedCashflow, setExpandedCashflow] = useState("");
+  const [cashflowView, setCashflowView] = useState("receivable");
+  const [visibleDebtLimit, setVisibleDebtLimit] = useState(6);
   const [selectedCashflowKey, setSelectedCashflowKey] = useState(null);
   const initializationAttemptedRef = useRef("");
   const remindersAttemptedRef = useRef("");
@@ -1260,9 +1262,16 @@ export default function App() {
     if (archived) return false;
     return tab === "all" || (tab === "receivable" ? debt.creditorUid === user?.uid : debt.debtorUid === user?.uid);
   });
+  const displayedDebts = visibleDebts.slice(0, visibleDebtLimit);
   const selectedDebt = debtsById[selectedId];
   const activeDebtCount = debts.filter((debt) => !archives[debt.id] && !["paid", "cancelled", "declined"].includes(debt.status)).length;
   const overlayOpen = Boolean(showCreate || createdInvite || inviteCode || selectedCashflow || selectedDebt || showNotifications);
+
+  useEffect(() => setVisibleDebtLimit(6), [tab]);
+  useEffect(() => {
+    if (cashflowView === "receivable" && !receivableSchedule.length && payableSchedule.length) setCashflowView("payable");
+    if (cashflowView === "payable" && !payableSchedule.length && receivableSchedule.length) setCashflowView("receivable");
+  }, [cashflowView, receivableSchedule.length, payableSchedule.length]);
 
   useEffect(() => {
     if (!overlayOpen) return undefined;
@@ -1349,12 +1358,15 @@ export default function App() {
           <m.article className="summary-chip active-count" variants={{ hidden: { opacity: 0, y: 16 }, show: { opacity: 1, y: 0 } }}><span className="summary-icon"><UiIcon name="history" /></span><div><small>กำลังติดตาม</small><strong>{activeDebtCount}</strong><p>รายการที่ยังต้องดำเนินการ</p></div></m.article>
         </m.section>
 
-        <CashflowScheduleSection direction="receivable" schedule={receivableSchedule} expanded={expandedCashflow === "receivable"} onToggle={() => setExpandedCashflow((value) => value === "receivable" ? "" : "receivable")} onSelect={(dueDate) => setSelectedCashflowKey({ direction: "receivable", dueDate })} />
-        <CashflowScheduleSection direction="payable" schedule={payableSchedule} expanded={expandedCashflow === "payable"} onToggle={() => setExpandedCashflow((value) => value === "payable" ? "" : "payable")} onSelect={(dueDate) => setSelectedCashflowKey({ direction: "payable", dueDate })} />
+        {(receivableSchedule.length > 0 || payableSchedule.length > 0) && <section className="cashflow-hub">
+          <div className="cashflow-hub-head"><div><p className="eyebrow">กำหนดการใกล้ที่สุด</p><h2>เงินเข้า–ออกที่ต้องติดตาม</h2></div><nav aria-label="เลือกกระแสเงินสด"><button className={cashflowView === "receivable" ? "active" : ""} disabled={!receivableSchedule.length} onClick={() => { setCashflowView("receivable"); setExpandedCashflow(""); }}><UiIcon name="incoming" />ต้องรับ <i>{receivableSchedule.length}</i></button><button className={cashflowView === "payable" ? "active" : ""} disabled={!payableSchedule.length} onClick={() => { setCashflowView("payable"); setExpandedCashflow(""); }}><UiIcon name="outgoing" />ต้องจ่าย <i>{payableSchedule.length}</i></button></nav></div>
+          <AnimatePresence mode="wait" initial={false}>{cashflowView === "receivable" ? <m.div key="receivable" initial={{ opacity: 0, x: -22 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 18 }}><CashflowScheduleSection direction="receivable" schedule={receivableSchedule} expanded={expandedCashflow === "receivable"} onToggle={() => setExpandedCashflow((value) => value === "receivable" ? "" : "receivable")} onSelect={(dueDate) => setSelectedCashflowKey({ direction: "receivable", dueDate })} /></m.div> : <m.div key="payable" initial={{ opacity: 0, x: 22 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -18 }}><CashflowScheduleSection direction="payable" schedule={payableSchedule} expanded={expandedCashflow === "payable"} onToggle={() => setExpandedCashflow((value) => value === "payable" ? "" : "payable")} onSelect={(dueDate) => setSelectedCashflowKey({ direction: "payable", dueDate })} /></m.div>}</AnimatePresence>
+        </section>}
 
         <m.section className="list-section" initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
           <div className="list-heading"><div><p className="eyebrow">รายการของฉัน</p><h2>{tab === "archived" ? "คลังรายการ" : "รายการทั้งหมด"}</h2></div><div className="tabs"><button className={tab === "all" ? "active" : ""} onClick={() => setTab("all")}>ทั้งหมด</button><button className={tab === "receivable" ? "active" : ""} onClick={() => setTab("receivable")}>ต้องรับ</button><button className={tab === "payable" ? "active" : ""} onClick={() => setTab("payable")}>ต้องจ่าย</button><button className={tab === "archived" ? "active" : ""} onClick={() => setTab("archived")}>คลัง</button></div></div>
-          <div className="debt-list">{visibleDebts.length ? visibleDebts.map((debt) => <DebtCard key={debt.id} debt={debt} user={user} onOpen={(item) => setSelectedId(item.id)} />) : <EmptyState tab={tab} onCreate={() => setShowCreate(true)} />}</div>
+          <div className="debt-list">{visibleDebts.length ? displayedDebts.map((debt) => <DebtCard key={debt.id} debt={debt} user={user} onOpen={(item) => setSelectedId(item.id)} />) : <EmptyState tab={tab} onCreate={() => setShowCreate(true)} />}</div>
+          {visibleDebts.length > displayedDebts.length && <button className="secondary debt-list-more" onClick={() => setVisibleDebtLimit((value) => value + 6)}>ดูเพิ่มอีก {Math.min(6, visibleDebts.length - displayedDebts.length)} รายการ <span>แสดงแล้ว {displayedDebts.length}/{visibleDebts.length}</span></button>}
         </m.section>
       </main> : <PersonalFinance user={user} onToast={showToast} sharedReceivables={receivableDebts} sharedPayables={payableDebts} onOpenSharedDebt={openSharedDebtFromFinance} />}
 
