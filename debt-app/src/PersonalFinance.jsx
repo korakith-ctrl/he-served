@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { onValue, push, ref, remove, set, update } from "firebase/database";
-import { CalendarDays, CarFront, ChartNoAxesColumnIncreasing, CheckCircle2, ChevronDown, CircleDollarSign, CreditCard, HandCoins, House, Pencil, Plus, ReceiptText, ShoppingBag, Trash2, TrendingDown, WalletCards } from "lucide-react";
+import { CalendarDays, CarFront, ChartNoAxesColumnIncreasing, CheckCircle2, ChevronDown, CircleDollarSign, CreditCard, ExternalLink, HandCoins, Handshake, House, Pencil, Plus, ReceiptText, ShoppingBag, Trash2, TrendingDown, WalletCards } from "lucide-react";
 import { db } from "./firebase";
 
 const LIABILITY_TYPES = {
@@ -117,7 +117,7 @@ function isFullBalanceCard(item) {
   return item?.type === "credit_card" && item?.cardPaymentMode === "full_balance";
 }
 
-function linkedReceivablesForCycle(debts, start, end) {
+function linkedDebtsForCycle(debts, start, end, direction) {
   const result = [];
   debts.forEach((debt) => {
     if (debt.outstandingStatus === "unconfirmed" || Number(debt.outstandingAmount || 0) <= 0) return;
@@ -127,12 +127,12 @@ function linkedReceivablesForCycle(debts, start, end) {
       installments.forEach((installment) => {
         const installmentRemaining = Math.max(0, Number(installment.amount || 0) - Number(installment.paidAmount || 0));
         const amount = Math.min(installmentRemaining, remainingDebt);
-        if (amount > 0 && dateInRange(installment.dueDate, start, end)) result.push({ id: `${debt.id}-${installment.sequence}`, debtId: debt.id, name: debt.title, counterpartyName: debt.debtorName || "ลูกหนี้", date: installment.dueDate, amount, installmentSequence: installment.sequence });
+        if (amount > 0 && dateInRange(installment.dueDate, start, end)) result.push({ id: `${debt.id}-${installment.sequence}`, debtId: debt.id, name: debt.title, counterpartyName: direction === "payable" ? debt.creditorName || "เจ้าหนี้" : debt.debtorName || "ลูกหนี้", date: installment.dueDate, amount, installmentSequence: installment.sequence });
         remainingDebt = Math.max(0, remainingDebt - amount);
       });
       return;
     }
-    if (debt.dueDateMode !== "none" && dateInRange(debt.dueDate, start, end)) result.push({ id: debt.id, debtId: debt.id, name: debt.title, counterpartyName: debt.debtorName || "ลูกหนี้", date: debt.dueDate, amount: Number(debt.outstandingAmount || 0) });
+    if (debt.dueDateMode !== "none" && dateInRange(debt.dueDate, start, end)) result.push({ id: debt.id, debtId: debt.id, name: debt.title, counterpartyName: direction === "payable" ? debt.creditorName || "เจ้าหนี้" : debt.debtorName || "ลูกหนี้", date: debt.dueDate, amount: Number(debt.outstandingAmount || 0) });
   });
   return result.sort((a, b) => a.date.localeCompare(b.date));
 }
@@ -341,7 +341,7 @@ function EmptyPanel({ title, body, action, onAction }) {
   return <div className="personal-empty"><span>◎</span><h3>{title}</h3><p>{body}</p><button className="secondary" onClick={onAction}>+ {action}</button></div>;
 }
 
-export default function PersonalFinance({ user, onToast, sharedReceivables = [], onOpenSharedDebt }) {
+export default function PersonalFinance({ user, onToast, sharedReceivables = [], sharedPayables = [], onOpenSharedDebt }) {
   const [data, setData] = useState({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -371,26 +371,31 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
   const cycleIncomes = incomes.map((item) => cycleEntry(item, selectedMonth, payday, cycle.start, cycle.end)).filter(Boolean);
   const cycleExpenses = expenses.map((item) => cycleEntry(item, selectedMonth, payday, cycle.start, cycle.end)).filter(Boolean);
   const cyclePayments = payments.filter((item) => dateInRange(item.date, cycle.start, cycle.end));
-  const linkedReceivables = useMemo(() => linkedReceivablesForCycle(sharedReceivables, cycle.start, cycle.end), [sharedReceivables, cycle.start, cycle.end]);
+  const linkedReceivables = useMemo(() => linkedDebtsForCycle(sharedReceivables, cycle.start, cycle.end, "receivable"), [sharedReceivables, cycle.start, cycle.end]);
+  const linkedPayables = useMemo(() => linkedDebtsForCycle(sharedPayables, cycle.start, cycle.end, "payable"), [sharedPayables, cycle.start, cycle.end]);
   const activeLiabilities = liabilities.filter((item) => item.active !== false && (isFullBalanceCard(item) || Number(item.outstanding) > 0));
+  const activeSharedPayables = sharedPayables.filter((item) => item.outstandingStatus !== "unconfirmed" && Number(item.outstandingAmount || 0) > 0 && !["paid", "cancelled", "declined", "invite_revoked"].includes(item.status));
   const cycleStatements = useMemo(() => Object.fromEntries(activeLiabilities.filter(isFullBalanceCard).map((item) => [item.id, statementsForCycle(cardStatements, item.id, cycle.start, cycle.end)])), [activeLiabilities, cardStatements, cycle.start, cycle.end]);
   const personalIncomeTotal = cycleIncomes.reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const linkedReceivableTotal = linkedReceivables.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const linkedPayableTotal = linkedPayables.reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const sharedReceivableOutstanding = sharedReceivables.reduce((sum, item) => sum + (item.outstandingStatus === "unconfirmed" ? 0 : Number(item.outstandingAmount || 0)), 0);
+  const sharedPayableOutstanding = activeSharedPayables.reduce((sum, item) => sum + Number(item.outstandingAmount || 0), 0);
   const incomeTotal = personalIncomeTotal + linkedReceivableTotal;
   const expenseTotal = cycleExpenses.reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const plannedAmount = (item) => isFullBalanceCard(item) ? (cycleStatements[item.id] || []).reduce((sum, statement) => sum + Number(statement.amount || 0), 0) : Math.min(Number(item.monthlyPayment || 0), Number(item.outstanding || 0));
-  const plannedDebtTotal = activeLiabilities.reduce((sum, item) => sum + plannedAmount(item), 0);
+  const plannedDebtTotal = activeLiabilities.reduce((sum, item) => sum + plannedAmount(item), 0) + linkedPayableTotal;
   const actualDebtTotal = cyclePayments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const remaining = incomeTotal - expenseTotal - plannedDebtTotal;
   const dti = personalIncomeTotal > 0 ? (plannedDebtTotal / personalIncomeTotal) * 100 : 0;
-  const totalOutstanding = liabilities.reduce((sum, item) => sum + Number(item.outstanding || 0), 0);
+  const totalOutstanding = liabilities.reduce((sum, item) => sum + Number(item.outstanding || 0), 0) + sharedPayableOutstanding;
   const today = todayKey();
 
   const schedule = useMemo(() => {
     const result = [];
     cycleIncomes.forEach((item) => result.push({ id: `income-${item.id}`, date: item.cycleDate, name: item.name, amount: Number(item.amount), direction: "in", type: "รายรับ" }));
     linkedReceivables.forEach((item) => result.push({ id: `linked-${item.id}`, date: item.date, name: item.name, amount: item.amount, direction: "in", type: `รับจาก ${item.counterpartyName} · เคลียร์กัน`, debtId: item.debtId, linked: true }));
+    linkedPayables.forEach((item) => result.push({ id: `linked-payable-${item.id}`, date: item.date, name: item.name, amount: item.amount, direction: "debt", type: `จ่ายให้ ${item.counterpartyName} · เคลียร์กัน`, debtId: item.debtId, linked: true }));
     cycleExpenses.forEach((item) => result.push({ id: `expense-${item.id}`, date: item.cycleDate, name: item.name, amount: Number(item.amount), direction: "out", type: item.category }));
     activeLiabilities.forEach((item) => {
       if (isFullBalanceCard(item)) {
@@ -405,7 +410,7 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
       result.push({ id: `debt-${item.id}`, date: dateForSalaryCycle(selectedMonth, item.dueDay, payday), name: item.title, amount, direction: "debt", type: LIABILITY_TYPES[item.type]?.label || "หนี้", liabilityId: item.id });
     });
     return result.sort((a, b) => a.date.localeCompare(b.date));
-  }, [cycleIncomes, cycleExpenses, linkedReceivables, activeLiabilities, cycleStatements, selectedMonth, payday]);
+  }, [cycleIncomes, cycleExpenses, linkedReceivables, linkedPayables, activeLiabilities, cycleStatements, selectedMonth, payday]);
 
   const warnings = useMemo(() => {
     const result = [];
@@ -521,7 +526,7 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
   const maxFlow = Math.max(incomeTotal, expenseTotal + plannedDebtTotal, 1);
   const dailyBudget = remaining > 0 ? remaining / cycleDayCount(cycle.start, cycle.nextStart) : 0;
   const debtStrategies = activeLiabilities.filter((item) => Number(item.outstanding) > 0 || plannedAmount(item) > 0).sort((a, b) => Number(b.annualRate || 0) - Number(a.annualRate || 0));
-  const debtGroups = Object.entries(LIABILITY_TYPES).map(([typeKey, type]) => {
+  const personalDebtGroups = Object.entries(LIABILITY_TYPES).map(([typeKey, type]) => {
     const items = liabilities.filter((item) => item.type === typeKey).map((item) => {
       const fullBalance = isFullBalanceCard(item);
       const statement = cycleStatements[item.id]?.[0] || null;
@@ -530,7 +535,16 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
       return { item, fullBalance, statement, statementMonth, dueDate, planned: item.active === false ? 0 : plannedAmount(item) };
     }).sort((a, b) => Number(a.item.active === false) - Number(b.item.active === false) || a.dueDate.localeCompare(b.dueDate) || a.item.title.localeCompare(b.item.title, "th"));
     return { typeKey, ...type, items, total: items.reduce((sum, entry) => sum + entry.planned, 0), nextDue: items[0]?.dueDate || "9999-12-31" };
-  }).filter((group) => group.items.length).sort((a, b) => a.nextDue.localeCompare(b.nextDue));
+  }).filter((group) => group.items.length);
+  const sharedPayableItems = activeSharedPayables.map((debt) => {
+    const nextInstallment = Object.values(debt.installments || {}).filter((item) => item.status !== "paid" && item.dueDate).sort((a, b) => Number(a.sequence) - Number(b.sequence))[0];
+    const dueDate = nextInstallment?.dueDate || (debt.dueDateMode === "none" ? "" : debt.dueDate || "");
+    const installmentRemaining = nextInstallment ? Math.max(0, Number(nextInstallment.amount || 0) - Number(nextInstallment.paidAmount || 0)) : Number(debt.outstandingAmount || 0);
+    const dueAmount = Math.min(installmentRemaining, Number(debt.outstandingAmount || installmentRemaining));
+    const planned = linkedPayables.filter((item) => item.debtId === debt.id).reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    return { item: debt, shared: true, fullBalance: false, statement: null, statementMonth: "", dueDate, planned, dueAmount };
+  }).sort((a, b) => (a.dueDate || "9999-12-31").localeCompare(b.dueDate || "9999-12-31") || a.item.title.localeCompare(b.item.title, "th"));
+  const debtGroups = [...personalDebtGroups, ...(sharedPayableItems.length ? [{ typeKey: "shared", label: "หนี้ที่เคลียร์กับคนอื่น", icon: Handshake, items: sharedPayableItems, total: linkedPayableTotal, nextDue: sharedPayableItems[0]?.dueDate || "" }] : [])].sort((a, b) => (a.nextDue || "9999-12-31").localeCompare(b.nextDue || "9999-12-31"));
   const dueChart = Object.values(schedule.filter((item) => item.direction === "debt").reduce((groups, item) => {
     if (!groups[item.date]) groups[item.date] = { date: item.date, amount: 0, count: 0 };
     groups[item.date].amount += Number(item.amount || 0);
@@ -552,7 +566,7 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
 
     <nav className="personal-tabs" aria-label="ส่วนการเงินส่วนตัว">
       <button className={section === "overview" ? "active" : ""} onClick={() => setSection("overview")}>ภาพรวม</button>
-      <button className={section === "debts" ? "active" : ""} onClick={() => setSection("debts")}>หนี้ของฉัน <i>{activeLiabilities.length}</i></button>
+      <button className={section === "debts" ? "active" : ""} onClick={() => setSection("debts")}>หนี้ของฉัน <i>{activeLiabilities.length + activeSharedPayables.length}</i></button>
       <button className={section === "cashflow" ? "active" : ""} onClick={() => setSection("cashflow")}>รายรับ–รายจ่าย</button>
     </nav>
 
@@ -570,7 +584,7 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
         <article><span className="kpi-icon income">↓</span><div><small>รายรับในรอบ</small><strong>{money(incomeTotal)}</strong><p>{cycleIncomes.length} รายรับส่วนตัว{linkedReceivables.length ? ` · เชื่อมแล้ว ${linkedReceivables.length}` : ""}</p></div></article>
         <article><span className="kpi-icon expense">↑</span><div><small>ค่าใช้จ่ายในรอบ</small><strong>{money(expenseTotal)}</strong><p>{cycleExpenses.length} รายการ</p></div></article>
         <article><span className="kpi-icon debt">%</span><div><small>ภาระหนี้ต่อรายรับ</small><strong>{dti.toFixed(1)}%</strong><p>ต้องจ่าย {money(plannedDebtTotal)}</p></div></article>
-        <article><span className="kpi-icon balance">◎</span><div><small>หนี้คงเหลือทั้งหมด</small><strong>{money(totalOutstanding)}</strong><p>{activeLiabilities.length} บัญชีที่กำลังชำระ</p></div></article>
+        <article><span className="kpi-icon balance">◎</span><div><small>หนี้คงเหลือทั้งหมด</small><strong>{money(totalOutstanding)}</strong><p>{activeLiabilities.length + activeSharedPayables.length} บัญชีที่กำลังชำระ</p></div></article>
       </section>
 
       <div className="personal-overview-grid">
@@ -600,20 +614,20 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
         </article>
       </section>
       {debtStrategies.length > 1 && <section className="strategy-note"><span><TrendingDown size={18} /></span><div><strong>ถ้าต้องการลดดอกเบี้ยรวม ให้เริ่มจาก {debtStrategies[0]?.title}</strong><p>อัตราดอกเบี้ย {money(debtStrategies[0]?.annualRate)}% ต่อปี สูงสุดในรายการของคุณ โดยยังคงจ่ายขั้นต่ำบัญชีอื่นให้ครบ</p></div></section>}
-      {liabilities.length ? <section className="debt-category-list" aria-label="หนี้แยกตามหมวด">
+      {liabilities.length || activeSharedPayables.length ? <section className="debt-category-list" aria-label="หนี้แยกตามหมวด">
         {debtGroups.map((group) => {
           const GroupIcon = group.icon;
           const open = openDebtGroup === group.typeKey;
           return <article className={`debt-category ${open ? "open" : ""}`} key={group.typeKey}>
-            <button className="debt-category-head" type="button" aria-expanded={open} onClick={() => { setOpenDebtGroup(open ? "" : group.typeKey); setExpandedDebt(""); }}><span className={`liability-icon ${group.typeKey}`}><GroupIcon size={22} strokeWidth={1.8} /></span><div><strong>{group.label}</strong><small>{group.items.length} บัญชี · ครบกำหนดถัดไป {shortDate(group.nextDue)}</small></div><div><span>ต้องจ่ายในรอบ</span><strong>{money(group.total)}</strong></div><ChevronDown className="category-chevron" size={19} /></button>
-            {open && <div className="debt-category-items">{group.items.map(({ item, fullBalance, statement, statementMonth, dueDate, planned }) => {
+            <button className="debt-category-head" type="button" aria-expanded={open} onClick={() => { setOpenDebtGroup(open ? "" : group.typeKey); setExpandedDebt(""); }}><span className={`liability-icon ${group.typeKey}`}><GroupIcon size={22} strokeWidth={1.8} /></span><div><strong>{group.label}</strong><small>{group.items.length} บัญชี · {group.nextDue ? `ครบกำหนดถัดไป ${shortDate(group.nextDue)}` : "ไม่มีกำหนดชำระ"}</small></div><div><span>ต้องจ่ายในรอบ</span><strong>{money(group.total)}</strong></div><ChevronDown className="category-chevron" size={19} /></button>
+            {open && <div className="debt-category-items">{group.items.map(({ item, shared, fullBalance, statement, statementMonth, dueDate, planned, dueAmount }) => {
               const statementRemaining = statement ? Math.max(0, Number(statement.amount) - Number(statement.paidAmount || 0)) : 0;
               const paidPercent = fullBalance ? (Number(statement?.amount) ? Number(statement?.paidAmount || 0) / Number(statement.amount) * 100 : 0) : item.type === "credit_card" ? (Number(item.creditLimit) ? Math.max(0, 100 - Number(item.outstanding) / Number(item.creditLimit) * 100) : 0) : (Number(item.originalBalance) ? Math.max(0, 100 - Number(item.outstanding) / Number(item.originalBalance) * 100) : Number(item.totalInstallments) ? Number(item.paidInstallments) / Number(item.totalInstallments) * 100 : 0);
               const utilization = Number(item.creditLimit) ? Number(item.outstanding) / Number(item.creditLimit) * 100 : 0;
               const expanded = expandedDebt === item.id;
               return <article className={`debt-compact-item ${expanded ? "expanded" : ""} ${item.active === false ? "inactive" : ""}`} key={item.id}>
-                <button className="debt-row-trigger" type="button" aria-expanded={expanded} onClick={() => setExpandedDebt(expanded ? "" : item.id)}><span className="debt-row-date"><CalendarDays size={15} /><b>{shortDate(dueDate)}</b></span><div><strong>{item.title}</strong><small>{fullBalance ? (statement ? `ยอดรอบบิล ${monthLabel(statementMonth)}` : "ยังไม่ใส่ยอดรอบบิล") : `ยอดคงเหลือ ${money(item.outstanding)}`}</small></div><strong className="debt-row-amount">{money(planned)}</strong><ChevronDown className="row-chevron" size={17} /></button>
-                {expanded && <div className="debt-row-detail"><div className="liability-progress"><i><b style={{ width: `${Math.min(100, paidPercent)}%` }} /></i><span>{fullBalance ? !statement ? "ยังไม่ใส่ยอดรอบบิล" : statementRemaining <= 0 ? "จ่ายครบแล้ว" : `เหลือจ่าย ${money(statementRemaining)}` : item.type === "credit_card" && item.creditLimit ? `ใช้วงเงิน ${utilization.toFixed(0)}%` : `ชำระแล้ว ${Math.min(100, paidPercent).toFixed(0)}%`}</span></div><div className="liability-facts">{fullBalance ? <><span>ยอดเรียกเก็บ <strong>{statement ? money(statement.amount) : "ยังไม่มี"}</strong></span><span>ครบกำหนด <strong>{shortDate(dueDate)}</strong></span></> : <><span>จ่ายเดือนละ <strong>{money(item.monthlyPayment)}</strong></span><span>ครบกำหนด <strong>{shortDate(dueDate)}</strong></span></>}{Number(item.annualRate) > 0 && <span>ดอกเบี้ย <strong>{money(item.annualRate)}%</strong></span>}{Number(item.totalInstallments) > 0 && <span>เหลือ <strong>{Math.max(0, Number(item.totalInstallments) - Number(item.paidInstallments))} งวด</strong></span>}</div><div className={`liability-actions ${fullBalance ? "card-actions" : ""}`}>{fullBalance && <button className="secondary statement-button" onClick={() => setModal({ type: "statement", item, statement, statementMonth })}><ReceiptText size={14} />{statement ? "แก้ยอดรอบบิล" : "ใส่ยอดรอบบิล"}</button>}<button className="primary" disabled={item.active === false || (fullBalance ? !statement || statementRemaining <= 0 : Number(item.outstanding) <= 0)} onClick={() => setModal({ type: "payment", item, statement, statementMonth, defaultDate: dueDate })}><CheckCircle2 size={14} />{fullBalance && statementRemaining <= 0 && statement ? "จ่ายครบแล้ว" : "บันทึกจ่าย"}</button><button className="secondary" onClick={() => setModal({ type: "liability", item })}><Pencil size={14} />แก้ไข</button><button className="icon-delete" aria-label={`ลบ ${item.title}`} onClick={() => deleteLiability(item)}><Trash2 size={14} /></button></div></div>}
+                <button className="debt-row-trigger" type="button" aria-expanded={expanded} onClick={() => setExpandedDebt(expanded ? "" : item.id)}><span className="debt-row-date"><CalendarDays size={15} /><b>{dueDate ? shortDate(dueDate) : "ไม่มีกำหนด"}</b></span><div><strong>{item.title}</strong><small>{shared ? `เจ้าหนี้ ${item.creditorName || "เจ้าหนี้"} · คงเหลือ ${money(item.outstandingAmount)}` : fullBalance ? (statement ? `ยอดรอบบิล ${monthLabel(statementMonth)}` : "ยังไม่ใส่ยอดรอบบิล") : `ยอดคงเหลือ ${money(item.outstanding)}`}</small></div><strong className="debt-row-amount">{money(shared ? (planned || dueAmount) : planned)}</strong><ChevronDown className="row-chevron" size={17} /></button>
+                {expanded && (shared ? <div className="debt-row-detail shared-debt-detail"><div className="liability-facts"><span>ยอดคงเหลือ <strong>{money(item.outstandingAmount)}</strong></span><span>งวดถัดไป <strong>{dueDate ? shortDate(dueDate) : "ไม่มีกำหนด"}</strong></span><span>เจ้าหนี้ <strong>{item.creditorName || "เจ้าหนี้"}</strong></span></div><div className="liability-actions"><button className="primary" onClick={() => onOpenSharedDebt?.(item.id)}><ExternalLink size={14} />เปิดรายการและชำระ</button></div></div> : <div className="debt-row-detail"><div className="liability-progress"><i><b style={{ width: `${Math.min(100, paidPercent)}%` }} /></i><span>{fullBalance ? !statement ? "ยังไม่ใส่ยอดรอบบิล" : statementRemaining <= 0 ? "จ่ายครบแล้ว" : `เหลือจ่าย ${money(statementRemaining)}` : item.type === "credit_card" && item.creditLimit ? `ใช้วงเงิน ${utilization.toFixed(0)}%` : `ชำระแล้ว ${Math.min(100, paidPercent).toFixed(0)}%`}</span></div><div className="liability-facts">{fullBalance ? <><span>ยอดเรียกเก็บ <strong>{statement ? money(statement.amount) : "ยังไม่มี"}</strong></span><span>ครบกำหนด <strong>{shortDate(dueDate)}</strong></span></> : <><span>จ่ายเดือนละ <strong>{money(item.monthlyPayment)}</strong></span><span>ครบกำหนด <strong>{shortDate(dueDate)}</strong></span></>}{Number(item.annualRate) > 0 && <span>ดอกเบี้ย <strong>{money(item.annualRate)}%</strong></span>}{Number(item.totalInstallments) > 0 && <span>เหลือ <strong>{Math.max(0, Number(item.totalInstallments) - Number(item.paidInstallments))} งวด</strong></span>}</div><div className={`liability-actions ${fullBalance ? "card-actions" : ""}`}>{fullBalance && <button className="secondary statement-button" onClick={() => setModal({ type: "statement", item, statement, statementMonth })}><ReceiptText size={14} />{statement ? "แก้ยอดรอบบิล" : "ใส่ยอดรอบบิล"}</button>}<button className="primary" disabled={item.active === false || (fullBalance ? !statement || statementRemaining <= 0 : Number(item.outstanding) <= 0)} onClick={() => setModal({ type: "payment", item, statement, statementMonth, defaultDate: dueDate })}><CheckCircle2 size={14} />{fullBalance && statementRemaining <= 0 && statement ? "จ่ายครบแล้ว" : "บันทึกจ่าย"}</button><button className="secondary" onClick={() => setModal({ type: "liability", item })}><Pencil size={14} />แก้ไข</button><button className="icon-delete" aria-label={`ลบ ${item.title}`} onClick={() => deleteLiability(item)}><Trash2 size={14} /></button></div></div>)}
               </article>;
             })}</div>}
           </article>;
@@ -625,6 +639,7 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
     {section === "cashflow" && <div className="cashflow-manage-grid">
       <section className="personal-card manage-card"><div className="personal-section-head"><div><p className="eyebrow">เงินเข้า</p><h2>รายรับ</h2></div><button className="secondary mini" onClick={() => setModal({ type: "income" })}>+ เพิ่ม</button></div>{incomes.length ? incomes.map((item) => <div className={`personal-entry-row ${item.active === false ? "inactive" : ""}`} key={item.id}><span className="entry-badge income">↓</span><div><strong>{item.name}</strong><small>{item.category} · {item.frequency === "monthly" ? `ทุกวันที่ ${item.dayOfMonth}` : shortDate(item.date)}</small></div><b>+{money(item.amount)}</b><button className="edit-link" onClick={() => setModal({ type: "income", item })}>แก้ไข</button><button className="icon-delete" onClick={() => deleteItem(`incomes/${item.id}`, "รายรับ")}>×</button></div>) : <EmptyPanel title="ยังไม่มีรายรับ" body="เริ่มจากเงินเดือนสุทธิที่ได้รับจริง" action="เพิ่มรายรับ" onAction={() => setModal({ type: "income" })} />}</section>
       <section className="personal-card manage-card"><div className="personal-section-head"><div><p className="eyebrow">เงินออกทั่วไป</p><h2>รายจ่าย</h2></div><button className="secondary mini" onClick={() => setModal({ type: "expense" })}>+ เพิ่ม</button></div>{expenses.length ? expenses.map((item) => <div className={`personal-entry-row ${item.active === false ? "inactive" : ""}`} key={item.id}><span className="entry-badge expense">↑</span><div><strong>{item.name}</strong><small>{item.category} · {item.frequency === "monthly" ? `ทุกวันที่ ${item.dayOfMonth}` : shortDate(item.date)}</small></div><b>−{money(item.amount)}</b><button className="edit-link" onClick={() => setModal({ type: "expense", item })}>แก้ไข</button><button className="icon-delete" onClick={() => deleteItem(`expenses/${item.id}`, "รายจ่าย")}>×</button></div>) : <EmptyPanel title="ยังไม่มีรายจ่ายทั่วไป" body="แยกรายจ่ายประจำออกจากยอดชำระหนี้เพื่อไม่ให้นับซ้ำ" action="เพิ่มรายจ่าย" onAction={() => setModal({ type: "expense" })} />}</section>
+      <section className="personal-card full-width linked-receivable-card linked-payable-card"><div className="personal-section-head"><div><p className="eyebrow">เชื่อมอัตโนมัติจากเคลียร์กับคนอื่น</p><h2>หนี้ที่ต้องจ่าย</h2></div><div className="linked-total"><small>ยอดคงเหลือทั้งหมด</small><strong>{money(sharedPayableOutstanding)}</strong></div></div>{linkedPayables.length ? <div className="linked-receivable-list">{linkedPayables.map((item) => <div key={item.id}><span className="entry-badge payable"><Handshake size={15} /></span><div><strong>{item.name}</strong><small>จ่ายให้ {item.counterpartyName}{item.installmentSequence ? ` · งวดที่ ${item.installmentSequence}` : ""} · ครบกำหนด {shortDate(item.date)}</small></div><b>−{money(item.amount)}</b><button className="secondary mini" onClick={() => onOpenSharedDebt?.(item.debtId)}>ดูรายการ</button></div>)}</div> : <div className="linked-empty payable"><span><Handshake size={17} /></span><div><strong>{activeSharedPayables.length ? `รอบ ${shortDate(cycle.start)} – ${shortDate(cycle.end)} ไม่มีหนี้ร่วมที่ถึงกำหนด` : "ยังไม่มีหนี้ที่ต้องจ่ายให้คนอื่น"}</strong><p>{activeSharedPayables.length ? "หนี้ยังแสดงครบในแท็บหนี้ของฉัน หรือเปลี่ยนรอบเพื่อดูกำหนดจ่ายถัดไป" : "เมื่อยืนยันข้อตกลงในเคลียร์กับคนอื่น ระบบจะเชื่อมให้อัตโนมัติ"}</p></div></div>}</section>
       <section className="personal-card full-width linked-receivable-card"><div className="personal-section-head"><div><p className="eyebrow">เชื่อมอัตโนมัติจากเคลียร์กับคนอื่น</p><h2>หนี้ที่จะได้รับ</h2></div><div className="linked-total"><small>ยอดคงเหลือทั้งหมด</small><strong>{money(sharedReceivableOutstanding)}</strong></div></div>{linkedReceivables.length ? <div className="linked-receivable-list">{linkedReceivables.map((item) => <div key={item.id}><span className="entry-badge linked">⇄</span><div><strong>{item.name}</strong><small>จาก {item.counterpartyName}{item.installmentSequence ? ` · งวดที่ ${item.installmentSequence}` : ""} · ครบกำหนด {shortDate(item.date)}</small></div><b>+{money(item.amount)}</b><button className="secondary mini" onClick={() => onOpenSharedDebt?.(item.debtId)}>ดูรายการ</button></div>)}</div> : <div className="linked-empty"><span>✓</span><div><strong>{sharedReceivables.length ? `รอบ ${shortDate(cycle.start)} – ${shortDate(cycle.end)} ไม่มีเงินที่ถึงกำหนดรับ` : "ยังไม่มีหนี้ที่ต้องได้รับ"}</strong><p>{sharedReceivables.length ? "ลองเปลี่ยนรอบเงินเดือนเพื่อดูงวดอื่น รายการจะเชื่อมให้อัตโนมัติ" : "เมื่อมีข้อตกลงที่ยืนยันแล้ว ระบบจะแสดงรายรับที่นี่"}</p></div></div>}</section>
       <section className="personal-card full-width month-calendar"><div className="personal-section-head"><div><p className="eyebrow">ตามลำดับเวลา</p><h2>กระแสเงินสด · {shortDate(cycle.start)} – {shortDate(cycle.end)}</h2></div></div>{schedule.length ? <div className="calendar-list">{schedule.map((item) => <div key={item.id} className={`${item.direction} ${item.linked ? "linked" : ""}`}><time>{shortDate(item.date)}</time><span>{item.name}<small>{item.type}</small></span><strong>{item.direction === "in" ? "+" : "−"}{money(item.amount)}</strong></div>)}</div> : <p className="muted center">ยังไม่มีรายการในรอบนี้</p>}</section>
     </div>}
