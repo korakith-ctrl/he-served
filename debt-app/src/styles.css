@@ -1368,3 +1368,14 @@ input:focus, textarea:focus, select:focus { border-color: #168f81; box-shadow: 0
   .splash-stage,.splash-logo-scene > i,.app-loading .splash-mark,.splash-progress > i,.splash-ambient { animation:none!important; }
   .splash-progress > i { left:0; width:68%; }
 }
+
+/* Directional finance tab transitions. */
+.aurora-app .personal-tabs button { position:relative; isolation:isolate; overflow:hidden; }
+.aurora-app .personal-tabs button.active { background:transparent; box-shadow:none; }
+.personal-tab-active { position:absolute; z-index:0; inset:0; border-radius:11px; background:#fff; box-shadow:0 3px 12px rgba(26,55,65,.09); }
+.aurora-app .personal-tabs button > svg,.aurora-app .personal-tabs .personal-tab-label,.aurora-app .personal-tabs button > i { position:relative; z-index:1; }
+.personal-tab-viewport { margin:0 -12px -12px; padding:0 12px 12px; overflow-x:clip; }
+.personal-tab-panel { min-width:0; }
+@media (max-width:680px) {
+  .personal-tab-viewport { margin-inline:-6px; padding-inline:6px; }
+}

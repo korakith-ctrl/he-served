@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { onValue, push, ref, remove, set, update } from "firebase/database";
+import { AnimatePresence, m } from "motion/react";
 import { ArrowDown, ArrowRightLeft, ArrowUp, BadgeCheck, Banknote, CalendarDays, CalendarRange, CarFront, ChartNoAxesColumnIncreasing, CheckCircle2, ChevronDown, CircleAlert, CircleDollarSign, CreditCard, ExternalLink, HandCoins, Handshake, House, Info, LayoutDashboard, Lock, Minus, Pencil, Plus, ReceiptText, ShoppingBag, Trash2, TrendingDown, TriangleAlert, Wallet, WalletCards } from "lucide-react";
 import { db } from "./firebase";
 
@@ -13,6 +14,12 @@ const LIABILITY_TYPES = {
 };
 
 const EXPENSE_CATEGORIES = ["ที่อยู่อาศัย", "อาหาร", "เดินทาง", "สาธารณูปโภค", "ประกัน", "สมาชิก/แอป", "ครอบครัว", "สุขภาพ", "อื่นๆ"];
+const FINANCE_SECTIONS = ["overview", "debts", "cashflow"];
+const TAB_PANEL_VARIANTS = {
+  enter: (direction) => ({ opacity: 0, x: direction > 0 ? 38 : -38 }),
+  center: { opacity: 1, x: 0, transition: { duration: .3, ease: [.22, 1, .36, 1] } },
+  exit: (direction) => ({ opacity: 0, x: direction > 0 ? -28 : 28, transition: { duration: .2, ease: [.4, 0, 1, 1] } }),
+};
 
 function money(value, digits = 0) {
   return Number(value || 0).toLocaleString("th-TH", { minimumFractionDigits: digits, maximumFractionDigits: 2 });
@@ -357,9 +364,16 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
   const [loadError, setLoadError] = useState("");
   const [selectedMonth, setSelectedMonth] = useState(monthKey());
   const [section, setSection] = useState("overview");
+  const [tabDirection, setTabDirection] = useState(1);
   const [modal, setModal] = useState(null);
   const [openDebtGroup, setOpenDebtGroup] = useState("");
   const [expandedDebt, setExpandedDebt] = useState("");
+
+  function changeSection(nextSection) {
+    if (nextSection === section) return;
+    setTabDirection(FINANCE_SECTIONS.indexOf(nextSection) > FINANCE_SECTIONS.indexOf(section) ? 1 : -1);
+    setSection(nextSection);
+  }
 
   useEffect(() => onValue(ref(db, `personalFinance/${user.uid}`), (snapshot) => {
     setData(snapshot.val() || {});
@@ -584,12 +598,13 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
     </section>
 
     <nav className="personal-tabs" aria-label="ส่วนการเงินส่วนตัว">
-      <button className={section === "overview" ? "active" : ""} onClick={() => setSection("overview")}><LayoutDashboard size={16} />ภาพรวม</button>
-      <button className={section === "debts" ? "active" : ""} onClick={() => setSection("debts")}><WalletCards size={16} />หนี้ของฉัน <i>{activeLiabilities.length + activeSharedPayables.length}</i></button>
-      <button className={section === "cashflow" ? "active" : ""} onClick={() => setSection("cashflow")}><ArrowRightLeft size={16} />รายรับ–รายจ่าย</button>
+      <button className={section === "overview" ? "active" : ""} onClick={() => changeSection("overview")}>{section === "overview" && <m.span className="personal-tab-active" layoutId="finance-active-tab" transition={{ type: "spring", stiffness: 500, damping: 40 }} />}<LayoutDashboard size={16} /><span className="personal-tab-label">ภาพรวม</span></button>
+      <button className={section === "debts" ? "active" : ""} onClick={() => changeSection("debts")}>{section === "debts" && <m.span className="personal-tab-active" layoutId="finance-active-tab" transition={{ type: "spring", stiffness: 500, damping: 40 }} />}<WalletCards size={16} /><span className="personal-tab-label">หนี้ของฉัน</span><i>{activeLiabilities.length + activeSharedPayables.length}</i></button>
+      <button className={section === "cashflow" ? "active" : ""} onClick={() => changeSection("cashflow")}>{section === "cashflow" && <m.span className="personal-tab-active" layoutId="finance-active-tab" transition={{ type: "spring", stiffness: 500, damping: 40 }} />}<ArrowRightLeft size={16} /><span className="personal-tab-label">รายรับ–รายจ่าย</span></button>
     </nav>
 
-    {section === "overview" && <>
+    <div className="personal-tab-viewport"><AnimatePresence mode="wait" initial={false} custom={tabDirection}>
+    {section === "overview" && <m.div className="personal-tab-panel" key="overview" custom={tabDirection} variants={TAB_PANEL_VARIANTS} initial="enter" animate="center" exit="exit">
       <section className={`personal-hero ${remaining < 0 ? "negative" : ""}`}>
         <div className="personal-hero-copy"><div className={`finance-status ${financialStatus.tone}`}>{financialStatus.tone === "danger" ? <CircleAlert size={14} /> : financialStatus.tone === "watch" ? <TriangleAlert size={14} /> : financialStatus.tone === "neutral" ? <Info size={14} /> : <BadgeCheck size={14} />}<span><b>{financialStatus.label}</b><small>{financialStatus.detail}</small></span></div><span>เงินคงเหลือหลังหักภาระรอบนี้</span><AnimatedNumber className="amount-highlight" value={Math.abs(remaining)} prefix={remaining < 0 ? "−" : ""} /><p>{remaining >= 0 ? `ใช้ได้เฉลี่ยวันละ ${money(dailyBudget)} จนถึงรอบเงินเดือนถัดไป` : "รายจ่ายและยอดชำระสูงกว่ารายรับที่วางแผนไว้"}</p></div>
         <div className="flow-visual" aria-label="สัดส่วนกระแสเงินสด"><header><span>สรุปกระแสเงินสด</span><strong>{money(committedTotal)} ภาระรวม</strong></header>
@@ -608,7 +623,7 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
 
       <div className="personal-overview-grid">
         <section className="personal-card schedule-card">
-          <div className="personal-section-head"><div><p className="eyebrow">รอบเงินเดือน {shortDate(cycle.start)} – {shortDate(cycle.end)}</p><h2>เงินเข้าและกำหนดจ่าย</h2></div><button className="text-button" onClick={() => setSection("cashflow")}>ดูทั้งหมด →</button></div>
+          <div className="personal-section-head"><div><p className="eyebrow">รอบเงินเดือน {shortDate(cycle.start)} – {shortDate(cycle.end)}</p><h2>เงินเข้าและกำหนดจ่าย</h2></div><button className="text-button" onClick={() => changeSection("cashflow")}>ดูทั้งหมด →</button></div>
           {schedule.length ? <div className="personal-schedule">{schedule.slice(0, 7).map((item) => <div key={item.id} className={`${item.direction} ${item.linked ? "linked" : ""} ${item.date < today && dateInRange(today, cycle.start, cycle.end) ? "past" : ""}`}><time><strong>{String(Number(item.date.slice(-2))).padStart(2, "0")}</strong><span>{new Intl.DateTimeFormat("th-TH", { month: "short" }).format(new Date(`${item.date}T12:00:00`))}</span></time><i /><div><strong>{item.name}</strong><span>{item.type}</span></div><b>{item.direction === "in" ? "+" : "−"}{money(item.amount)}</b></div>)}</div> : <EmptyPanel title="ยังไม่มีรายการในรอบนี้" body="เพิ่มรายรับ รายจ่าย หรือหนี้ เพื่อสร้างแผนตามรอบเงินเดือน" action="เพิ่มรายรับ" onAction={() => setModal({ type: "income" })} />}
         </section>
         <aside className="personal-card insight-card">
@@ -618,9 +633,9 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
       </div>
 
       <section className="quick-actions"><button onClick={() => setModal({ type: "income" })}><span><Plus size={18} /></span><strong>เพิ่มรายรับ</strong><small>เงินเดือนหรือรายได้อื่น</small></button><button onClick={() => setModal({ type: "expense" })}><span><Minus size={18} /></span><strong>เพิ่มรายจ่าย</strong><small>ประจำหรือครั้งเดียว</small></button><button onClick={() => setModal({ type: "liability" })}><span><WalletCards size={18} /></span><strong>เพิ่มหนี้</strong><small>บัตร บ้าน รถ และอื่นๆ</small></button></section>
-    </>}
+    </m.div>}
 
-    {section === "debts" && <>
+    {section === "debts" && <m.div className="personal-tab-panel" key="debts" custom={tabDirection} variants={TAB_PANEL_VARIANTS} initial="enter" animate="center" exit="exit">
       <section className="debt-portfolio-head"><div><span>หนี้คงเหลือทั้งหมด</span><AnimatedNumber className="amount-highlight" value={totalOutstanding} /></div><dl><div><dt>ชำระในรอบนี้</dt><dd><AnimatedNumber as="span" value={plannedDebtTotal} /></dd></div><div><dt>จ่ายจริงในรอบ</dt><dd><AnimatedNumber as="span" value={actualDebtTotal} /></dd></div><div><dt>DTI</dt><dd><AnimatedNumber as="span" value={dti} digits={1} suffix="%" /></dd></div></dl><button className="primary" onClick={() => setModal({ type: "liability" })}><Plus size={16} />เพิ่มหนี้</button></section>
       <section className="debt-insights-grid">
         <article className="personal-card due-chart-card">
@@ -653,15 +668,16 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
         })}
       </section> : <EmptyPanel title="ยังไม่มีข้อมูลหนี้ส่วนตัว" body="เพิ่มบัตรเครดิต สินเชื่อบ้าน รถ หรือหนี้อื่น เพื่อดูภาระรวมตามรอบเงินเดือน" action="เพิ่มหนี้รายการแรก" onAction={() => setModal({ type: "liability" })} />}
       {cyclePayments.length > 0 && <section className="personal-card payment-history"><div className="personal-section-head"><div><p className="eyebrow">ประวัติรอบนี้</p><h2>การชำระล่าสุด</h2></div></div>{cyclePayments.map((item) => <div className="personal-entry-row" key={item.id}><span className="entry-badge debt"><CheckCircle2 size={15} /></span><div><strong>{item.liabilityTitle}</strong><small>{shortDate(item.date)}{item.statementMonth ? ` · รอบบิล ${monthLabel(item.statementMonth)}` : ` · เงินต้น ${money(item.principalAmount)}`}{Number(item.interestAmount) > 0 ? ` · ดอกเบี้ย ${money(item.interestAmount)}` : ""}</small></div><b>−{money(item.amount)}</b><button className="icon-delete" aria-label="ลบประวัติการชำระ" onClick={() => deletePayment(item)}><Trash2 size={13} /></button></div>)}</section>}
-    </>}
+    </m.div>}
 
-    {section === "cashflow" && <div className="cashflow-manage-grid">
+    {section === "cashflow" && <m.div className="personal-tab-panel cashflow-manage-grid" key="cashflow" custom={tabDirection} variants={TAB_PANEL_VARIANTS} initial="enter" animate="center" exit="exit">
       <section className="personal-card manage-card"><div className="personal-section-head"><div><p className="eyebrow">เงินเข้า</p><h2>รายรับ</h2></div><button className="secondary mini" onClick={() => setModal({ type: "income" })}>+ เพิ่ม</button></div>{incomes.length ? incomes.map((item) => <div className={`personal-entry-row ${item.active === false ? "inactive" : ""}`} key={item.id}><span className="entry-badge income">↓</span><div><strong>{item.name}</strong><small>{item.category} · {item.frequency === "monthly" ? `ทุกวันที่ ${item.dayOfMonth}` : shortDate(item.date)}</small></div><b>+{money(item.amount)}</b><button className="edit-link" onClick={() => setModal({ type: "income", item })}>แก้ไข</button><button className="icon-delete" onClick={() => deleteItem(`incomes/${item.id}`, "รายรับ")}>×</button></div>) : <EmptyPanel title="ยังไม่มีรายรับ" body="เริ่มจากเงินเดือนสุทธิที่ได้รับจริง" action="เพิ่มรายรับ" onAction={() => setModal({ type: "income" })} />}</section>
       <section className="personal-card manage-card"><div className="personal-section-head"><div><p className="eyebrow">เงินออกทั่วไป</p><h2>รายจ่าย</h2></div><button className="secondary mini" onClick={() => setModal({ type: "expense" })}>+ เพิ่ม</button></div>{expenses.length ? expenses.map((item) => <div className={`personal-entry-row ${item.active === false ? "inactive" : ""}`} key={item.id}><span className="entry-badge expense">↑</span><div><strong>{item.name}</strong><small>{item.category} · {item.frequency === "monthly" ? `ทุกวันที่ ${item.dayOfMonth}` : shortDate(item.date)}</small></div><b>−{money(item.amount)}</b><button className="edit-link" onClick={() => setModal({ type: "expense", item })}>แก้ไข</button><button className="icon-delete" onClick={() => deleteItem(`expenses/${item.id}`, "รายจ่าย")}>×</button></div>) : <EmptyPanel title="ยังไม่มีรายจ่ายทั่วไป" body="แยกรายจ่ายประจำออกจากยอดชำระหนี้เพื่อไม่ให้นับซ้ำ" action="เพิ่มรายจ่าย" onAction={() => setModal({ type: "expense" })} />}</section>
       <section className="personal-card full-width linked-receivable-card linked-payable-card"><div className="personal-section-head"><div><p className="eyebrow">เชื่อมอัตโนมัติจากเคลียร์กับคนอื่น</p><h2>หนี้ที่ต้องจ่าย</h2></div><div className="linked-total"><small>ยอดคงเหลือทั้งหมด</small><strong>{money(sharedPayableOutstanding)}</strong></div></div>{linkedPayables.length ? <div className="linked-receivable-list">{linkedPayables.map((item) => <div key={item.id}><span className="entry-badge payable"><Handshake size={15} /></span><div><strong>{item.name}</strong><small>จ่ายให้ {item.counterpartyName}{item.installmentSequence ? ` · งวดที่ ${item.installmentSequence}` : ""} · ครบกำหนด {shortDate(item.date)}</small></div><b>−{money(item.amount)}</b><button className="secondary mini" onClick={() => onOpenSharedDebt?.(item.debtId)}>ดูรายการ</button></div>)}</div> : <div className="linked-empty payable"><span><Handshake size={17} /></span><div><strong>{activeSharedPayables.length ? `รอบ ${shortDate(cycle.start)} – ${shortDate(cycle.end)} ไม่มีหนี้ร่วมที่ถึงกำหนด` : "ยังไม่มีหนี้ที่ต้องจ่ายให้คนอื่น"}</strong><p>{activeSharedPayables.length ? "หนี้ยังแสดงครบในแท็บหนี้ของฉัน หรือเปลี่ยนรอบเพื่อดูกำหนดจ่ายถัดไป" : "เมื่อยืนยันข้อตกลงในเคลียร์กับคนอื่น ระบบจะเชื่อมให้อัตโนมัติ"}</p></div></div>}</section>
       <section className="personal-card full-width linked-receivable-card"><div className="personal-section-head"><div><p className="eyebrow">เชื่อมอัตโนมัติจากเคลียร์กับคนอื่น</p><h2>หนี้ที่จะได้รับ</h2></div><div className="linked-total"><small>ยอดคงเหลือทั้งหมด</small><strong>{money(sharedReceivableOutstanding)}</strong></div></div>{linkedReceivables.length ? <div className="linked-receivable-list">{linkedReceivables.map((item) => <div key={item.id}><span className="entry-badge linked">⇄</span><div><strong>{item.name}</strong><small>จาก {item.counterpartyName}{item.installmentSequence ? ` · งวดที่ ${item.installmentSequence}` : ""} · ครบกำหนด {shortDate(item.date)}</small></div><b>+{money(item.amount)}</b><button className="secondary mini" onClick={() => onOpenSharedDebt?.(item.debtId)}>ดูรายการ</button></div>)}</div> : <div className="linked-empty"><span>✓</span><div><strong>{sharedReceivables.length ? `รอบ ${shortDate(cycle.start)} – ${shortDate(cycle.end)} ไม่มีเงินที่ถึงกำหนดรับ` : "ยังไม่มีหนี้ที่ต้องได้รับ"}</strong><p>{sharedReceivables.length ? "ลองเปลี่ยนรอบเงินเดือนเพื่อดูงวดอื่น รายการจะเชื่อมให้อัตโนมัติ" : "เมื่อมีข้อตกลงที่ยืนยันแล้ว ระบบจะแสดงรายรับที่นี่"}</p></div></div>}</section>
       <section className="personal-card full-width month-calendar"><div className="personal-section-head"><div><p className="eyebrow">ตามลำดับเวลา</p><h2>กระแสเงินสด · {shortDate(cycle.start)} – {shortDate(cycle.end)}</h2></div></div>{schedule.length ? <div className="calendar-list">{schedule.map((item) => <div key={item.id} className={`${item.direction} ${item.linked ? "linked" : ""}`}><time>{shortDate(item.date)}</time><span>{item.name}<small>{item.type}</small></span><strong>{item.direction === "in" ? "+" : "−"}{money(item.amount)}</strong></div>)}</div> : <p className="muted center">ยังไม่มีรายการในรอบนี้</p>}</section>
-    </div>}
+    </m.div>}
+    </AnimatePresence></div>
 
     {modal?.type === "income" && <Modal title={modal.item ? "แก้ไขรายรับ" : "เพิ่มรายรับ"} eyebrow="กระแสเงินสด" onClose={() => setModal(null)}><EntryForm kind="income" initial={modal.item} selectedMonth={selectedMonth} defaultDate={cycle.start} onClose={() => setModal(null)} onSave={(item) => saveEntry("income", item, modal.item)} /></Modal>}
     {modal?.type === "expense" && <Modal title={modal.item ? "แก้ไขรายจ่าย" : "เพิ่มรายจ่าย"} eyebrow="กระแสเงินสด" onClose={() => setModal(null)}><EntryForm kind="expense" initial={modal.item} selectedMonth={selectedMonth} defaultDate={cycle.start} onClose={() => setModal(null)} onSave={(item) => saveEntry("expense", item, modal.item)} /></Modal>}
