@@ -426,7 +426,6 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
   const [modal, setModal] = useState(null);
   const [openDebtGroup, setOpenDebtGroup] = useState("");
   const [expandedDebt, setExpandedDebt] = useState("");
-  const [chartLiabilityId, setChartLiabilityId] = useState("");
 
   function changeSection(nextSection) {
     if (nextSection === section) return;
@@ -453,7 +452,6 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
   const expenses = useMemo(() => rows(data.expenses), [data.expenses]);
   const liabilities = useMemo(() => rows(data.liabilities).sort((a, b) => Number(b.outstanding) - Number(a.outstanding)), [data.liabilities]);
   const payments = useMemo(() => rows(data.payments).sort((a, b) => String(b.date).localeCompare(String(a.date))), [data.payments]);
-  const chartLiability = liabilities.find((item) => item.id === chartLiabilityId) || liabilities[0] || null;
   const cardStatements = data.cardStatements || {};
   const salaryIncome = incomes.find((item) => item.active !== false && item.frequency === "monthly" && item.category === "เงินเดือน") || incomes.find((item) => item.active !== false && item.frequency === "monthly");
   const payday = Number(salaryIncome?.dayOfMonth || 1);
@@ -715,9 +713,15 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
           <div className="coverage-content"><div className="coverage-ring" role="img" aria-label={`หนี้คิดเป็น ${debtCoverage.toFixed(1)} เปอร์เซ็นต์ของเงินเดือน`} style={{ "--coverage": `${Math.min(100, debtCoverage)}%` }}><AnimatedNumber as="strong" value={debtCoverage} digits={1} suffix="%" /><span>ของเงินเดือน</span></div><div className="coverage-copy"><span>{afterDebt >= 0 ? "เหลือหลังหักหนี้" : "เงินเดือนยังขาด"}</span><AnimatedNumber value={Math.abs(afterDebt)} prefix={afterDebt < 0 ? "−" : ""} /><small>{afterDebt >= 0 ? "ยังไม่รวมค่าใช้จ่ายทั่วไป" : "ควรจัดลำดับยอดที่ต้องจ่ายก่อน"}</small></div></div>
         </article>
       </section>
-      {chartLiability && <section className="personal-card installment-overview-card">
-        <div className="personal-section-head"><div><p className="eyebrow">ประวัติหนี้ส่วนตัว</p><h2>ยอดที่จ่ายแต่ละงวด</h2></div><label className="installment-account-picker"><span>เลือกบัญชีหนี้</span><select value={chartLiability.id} onChange={(event) => setChartLiabilityId(event.target.value)}>{liabilities.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label></div>
-        <PersonalInstallmentChart liability={chartLiability} payments={payments.filter((payment) => payment.liabilityId === chartLiability.id)} statements={cardStatements[chartLiability.id]} />
+      {liabilities.length > 0 && <section className="installment-cards-section">
+        <div className="installment-cards-heading"><div><p className="eyebrow">ประวัติหนี้ส่วนตัว</p><h2>ยอดที่จ่ายแต่ละงวด</h2></div><span>{liabilities.length} บัญชี</span></div>
+        <div className="installment-account-grid">{liabilities.map((item) => {
+          const DebtIcon = LIABILITY_TYPES[item.type]?.icon || CircleDollarSign;
+          return <article className="personal-card installment-account-card" key={item.id}>
+            <header className="installment-account-head"><span className={`liability-icon ${item.type}`}><DebtIcon size={20} strokeWidth={1.8} /></span><div><small>{LIABILITY_TYPES[item.type]?.label || "หนี้ส่วนตัว"}</small><h3>{item.title}</h3></div><div><span>ยอดคงเหลือ</span><strong>{money(item.outstanding)}</strong></div></header>
+            <PersonalInstallmentChart liability={item} payments={payments.filter((payment) => payment.liabilityId === item.id)} statements={cardStatements[item.id]} />
+          </article>;
+        })}</div>
       </section>}
       {debtStrategies.length > 1 && <section className="strategy-note"><span><TrendingDown size={18} /></span><div><strong>ถ้าต้องการลดดอกเบี้ยรวม ให้เริ่มจาก {debtStrategies[0]?.title}</strong><p>อัตราดอกเบี้ย {money(debtStrategies[0]?.annualRate)}% ต่อปี สูงสุดในรายการของคุณ โดยยังคงจ่ายขั้นต่ำบัญชีอื่นให้ครบ</p></div></section>}
       {liabilities.length || activeSharedPayables.length ? <section className="debt-category-list" aria-label="หนี้แยกตามหมวด">
