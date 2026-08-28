@@ -1425,6 +1425,24 @@ input:focus, textarea:focus, select:focus { border-color: #168f81; box-shadow: 0
 .installment-cards-heading h2,.installment-cards-heading p { margin:0; }
 .installment-cards-heading h2 { color:#243c47; font-size:21px; letter-spacing:-.03em; }
 .installment-cards-heading > span { padding:5px 9px; color:#176f64; border-radius:999px; background:#dff1ec; font-size:8px; font-weight:800; }
+.installment-overall-card { display:grid; grid-template-columns:minmax(220px,.9fr) minmax(300px,1.1fr); align-items:center; gap:28px; margin-bottom:14px; padding:24px 26px; color:#fff; border:0; background:linear-gradient(135deg,#173b50,#126e69); box-shadow:0 16px 38px rgba(20,69,76,.16); }
+.installment-overall-main { display:grid; grid-template-columns:auto minmax(0,1fr); align-items:center; gap:11px; }
+.installment-overall-main > span { display:grid; place-items:center; width:42px; height:42px; color:#164c50; border-radius:13px; background:#cfece5; }
+.installment-overall-main .eyebrow,.installment-overall-main h3 { margin:0; }
+.installment-overall-main .eyebrow { color:#a9cfca; font-size:8px; }
+.installment-overall-main h3 { color:#fff; font-size:17px; }
+.installment-overall-main > strong,.installment-overall-main > small { grid-column:1 / -1; display:block; }
+.installment-overall-main > strong { margin-top:7px; font-family:Georgia,serif; font-size:34px; font-weight:500; font-variant-numeric:tabular-nums; }
+.installment-overall-main > small { margin-top:-7px; color:#b6d2cf; font-size:9px; }
+.installment-overall-progress > div:first-child { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.installment-overall-progress > div:first-child span { color:#bad5d2; font-size:9px; }
+.installment-overall-progress > div:first-child strong { color:#fff; font-size:21px; font-variant-numeric:tabular-nums; }
+.installment-overall-progress > i { display:block; height:11px; margin-top:8px; overflow:hidden; border-radius:999px; background:rgba(255,255,255,.16); }
+.installment-overall-progress > i > b { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,#76dbc8,#e2d29b); box-shadow:0 2px 8px rgba(116,219,200,.22); }
+.installment-overall-progress dl { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:15px 0 0; }
+.installment-overall-progress dl > div { padding:9px 10px; border:1px solid rgba(255,255,255,.11); border-radius:10px; background:rgba(255,255,255,.07); }
+.installment-overall-progress dt { color:#b5d0cd; font-size:7px; }
+.installment-overall-progress dd { margin:3px 0 0; color:#fff; font-size:14px; font-weight:800; }
 .installment-account-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
 .installment-account-card { min-width:0; padding:18px; }
 .installment-account-head { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:11px; }
@@ -1463,6 +1481,10 @@ input:focus, textarea:focus, select:focus { border-color: #168f81; box-shadow: 0
 .installment-account-card .personal-installment-chart-rows { max-height:330px; }
 
 @media (max-width:580px) {
+  .installment-overall-card { grid-template-columns:1fr; gap:21px; padding:20px 17px; }
+  .installment-overall-main > strong { font-size:30px; }
+  .installment-overall-progress dl { gap:5px; }
+  .installment-overall-progress dl > div { padding:8px 7px; }
   .installment-account-grid { grid-template-columns:1fr; }
   .installment-account-card { padding:15px 12px; }
   .installment-account-head { grid-template-columns:auto minmax(0,1fr); }

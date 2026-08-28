@@ -345,12 +345,9 @@ function PaymentForm({ liability, selectedMonth, statementMonth, statement, defa
   </form>;
 }
 
-function PersonalInstallmentChart({ liability, payments, statements }) {
-  const percentLabel = (value) => Number(value || 0).toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 1 });
-  let chartRows;
-
+function personalInstallmentRows(liability, payments, statements) {
   if (isFullBalanceCard(liability)) {
-    chartRows = Object.entries(statements || {}).sort(([monthA], [monthB]) => monthA.localeCompare(monthB)).map(([statementMonth, statement], index) => {
+    return Object.entries(statements || {}).sort(([monthA], [monthB]) => monthA.localeCompare(monthB)).map(([statementMonth, statement], index) => {
       const targetAmount = Math.max(0, Number(statement.amount || 0));
       return {
         key: statementMonth,
@@ -361,40 +358,66 @@ function PersonalInstallmentChart({ liability, payments, statements }) {
         paidAmount: Math.max(0, Number(statement.paidAmount || 0)),
       };
     }).filter((item) => item.targetAmount > 0);
-  } else {
-    const recordedPayments = [...payments].sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.createdAt).localeCompare(String(b.createdAt)));
-    const importedCount = Math.max(0, Number(liability.paidInstallments || 0) - recordedPayments.length);
-    const totalInstallments = Number(liability.totalInstallments || 0);
-    const targetFor = (sequence, payment) => {
-      if (Number(payment?.expectedInstallmentAmount) > 0) return Number(payment.expectedInstallmentAmount);
-      if (totalInstallments > 0 && sequence === totalInstallments && Number(liability.balloonPayment) > 0) return Number(liability.balloonPayment);
-      return Math.max(0, Number(liability.monthlyPayment || payment?.amount || 0));
-    };
-    const importedRows = Array.from({ length: importedCount }, (_, index) => {
-      const sequence = index + 1;
-      const targetAmount = targetFor(sequence);
-      return { key: `imported_${sequence}`, sequence, label: `งวดที่ ${sequence}`, meta: "ชำระแล้วก่อนเริ่มบันทึก", targetAmount, paidAmount: targetAmount, imported: true };
-    });
-    const paymentRows = recordedPayments.map((payment, index) => {
-      const sequence = Number(payment.installmentNumber || importedCount + index + 1);
-      return { key: payment.id, sequence, label: `งวดที่ ${sequence}`, meta: `จ่าย ${shortDate(payment.date)}`, targetAmount: targetFor(sequence, payment), paidAmount: Math.max(0, Number(payment.amount || 0)) };
-    });
-    chartRows = [...importedRows, ...paymentRows];
   }
+
+  const recordedPayments = [...payments].sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.createdAt).localeCompare(String(b.createdAt)));
+  const importedCount = Math.max(0, Number(liability.paidInstallments || 0) - recordedPayments.length);
+  const totalInstallments = Number(liability.totalInstallments || 0);
+  const targetFor = (sequence, payment) => {
+    if (Number(payment?.expectedInstallmentAmount) > 0) return Number(payment.expectedInstallmentAmount);
+    if (totalInstallments > 0 && sequence === totalInstallments && Number(liability.balloonPayment) > 0) return Number(liability.balloonPayment);
+    return Math.max(0, Number(liability.monthlyPayment || payment?.amount || 0));
+  };
+  const importedRows = Array.from({ length: importedCount }, (_, index) => {
+    const sequence = index + 1;
+    const targetAmount = targetFor(sequence);
+    return { key: `imported_${sequence}`, sequence, label: `งวดที่ ${sequence}`, meta: "ชำระแล้วก่อนเริ่มบันทึก", targetAmount, paidAmount: targetAmount, imported: true };
+  });
+  const paymentRows = recordedPayments.map((payment, index) => {
+    const sequence = Number(payment.installmentNumber || importedCount + index + 1);
+    return { key: payment.id, sequence, label: `งวดที่ ${sequence}`, meta: `จ่าย ${shortDate(payment.date)}`, targetAmount: targetFor(sequence, payment), paidAmount: Math.max(0, Number(payment.amount || 0)) };
+  });
+  return [...importedRows, ...paymentRows];
+}
+
+function installmentPercentLabel(value) {
+  return Number(value || 0).toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 1 });
+}
+
+function PersonalInstallmentOverviewCard({ liabilities, payments, cardStatements }) {
+  const accounts = liabilities.map((liability) => ({
+    liability,
+    rows: personalInstallmentRows(liability, payments.filter((payment) => payment.liabilityId === liability.id), cardStatements[liability.id]),
+  }));
+  const chartRows = accounts.flatMap((account) => account.rows);
+  const totalTarget = chartRows.reduce((sum, item) => sum + item.targetAmount, 0);
+  const totalPaid = chartRows.reduce((sum, item) => sum + item.paidAmount, 0);
+  const totalPercent = totalTarget > 0 ? totalPaid / totalTarget * 100 : 0;
+  const completedInstallments = chartRows.filter((item) => item.targetAmount > 0 && item.paidAmount >= item.targetAmount).length;
+  const accountsWithHistory = accounts.filter((account) => account.rows.length > 0).length;
+
+  return <article className="personal-card installment-overall-card">
+    <div className="installment-overall-main"><span><ChartNoAxesColumnIncreasing size={21} /></span><div><p className="eyebrow">ภาพรวมทุกบัญชี</p><h3>การจ่ายหนี้รายงวด</h3></div><strong>{money(totalPaid)}</strong><small>จ่ายสะสมจากยอดตามงวด {money(totalTarget)}</small></div>
+    <div className="installment-overall-progress"><div><span>ความคืบหน้ารวม</span><strong>{installmentPercentLabel(totalPercent)}%</strong></div><i role="progressbar" aria-label={`ความคืบหน้าการจ่ายหนี้รายงวด ${installmentPercentLabel(totalPercent)} เปอร์เซ็นต์`} aria-valuemin="0" aria-valuemax="100" aria-valuenow={Number(Math.min(100, totalPercent).toFixed(1))}><m.b initial={{ width: 0 }} animate={{ width: `${Math.min(100, totalPercent)}%` }} transition={{ duration: .75, ease: [.22, 1, .36, 1] }} /></i><dl><div><dt>งวดที่บันทึก</dt><dd>{chartRows.length}</dd></div><div><dt>จ่ายครบแล้ว</dt><dd>{completedInstallments}</dd></div><div><dt>บัญชีที่มีประวัติ</dt><dd>{accountsWithHistory}/{liabilities.length}</dd></div></dl></div>
+  </article>;
+}
+
+function PersonalInstallmentChart({ liability, payments, statements }) {
+  const chartRows = personalInstallmentRows(liability, payments, statements);
 
   const totalTarget = chartRows.reduce((sum, item) => sum + item.targetAmount, 0);
   const totalPaid = chartRows.reduce((sum, item) => sum + item.paidAmount, 0);
   const totalPercent = totalTarget > 0 ? totalPaid / totalTarget * 100 : 0;
 
   return <section className="personal-installment-chart" aria-label={`กราฟการจ่ายแต่ละงวดของ ${liability.title}`}>
-    <div className="personal-installment-chart-head"><div><span><ChartNoAxesColumnIncreasing size={16} /></span><div><strong>จ่ายแต่ละงวดไปเท่าไร</strong><small>{isFullBalanceCard(liability) ? "เทียบยอดที่จ่ายกับยอดเรียกเก็บแต่ละรอบบิล" : "เทียบยอดที่จ่ายจริงกับยอดที่ต้องจ่ายต่องวด"}</small></div></div>{chartRows.length > 0 && <div><strong>{money(totalPaid)}</strong><small>จาก {money(totalTarget)} · {percentLabel(totalPercent)}%</small></div>}</div>
+    <div className="personal-installment-chart-head"><div><span><ChartNoAxesColumnIncreasing size={16} /></span><div><strong>จ่ายแต่ละงวดไปเท่าไร</strong><small>{isFullBalanceCard(liability) ? "เทียบยอดที่จ่ายกับยอดเรียกเก็บแต่ละรอบบิล" : "เทียบยอดที่จ่ายจริงกับยอดที่ต้องจ่ายต่องวด"}</small></div></div>{chartRows.length > 0 && <div><strong>{money(totalPaid)}</strong><small>จาก {money(totalTarget)} · {installmentPercentLabel(totalPercent)}%</small></div>}</div>
     {chartRows.length > 0 ? <div className="personal-installment-chart-rows">{chartRows.map((row, index) => {
       const percent = row.targetAmount > 0 ? row.paidAmount / row.targetAmount * 100 : 0;
       const tone = percent >= 100 ? "paid" : percent > 0 ? "partial" : "unpaid";
       return <div className={`personal-installment-chart-row ${tone}`} key={row.key}>
         <div><strong>{row.label}</strong><small>{row.meta}</small></div>
-        <div className="personal-installment-track" role="progressbar" aria-label={`${row.label} จ่ายแล้ว ${percentLabel(percent)} เปอร์เซ็นต์`} aria-valuemin="0" aria-valuemax="100" aria-valuenow={Number(Math.min(100, percent).toFixed(1))}><m.i initial={{ width: 0 }} animate={{ width: `${Math.min(100, percent)}%` }} transition={{ duration: .6, delay: Math.min(index * .04, .32), ease: [.22, 1, .36, 1] }} /></div>
-        <div><strong>{money(row.paidAmount)}</strong><small>จาก {money(row.targetAmount)}</small></div><b>{percentLabel(percent)}%</b>
+        <div className="personal-installment-track" role="progressbar" aria-label={`${row.label} จ่ายแล้ว ${installmentPercentLabel(percent)} เปอร์เซ็นต์`} aria-valuemin="0" aria-valuemax="100" aria-valuenow={Number(Math.min(100, percent).toFixed(1))}><m.i initial={{ width: 0 }} animate={{ width: `${Math.min(100, percent)}%` }} transition={{ duration: .6, delay: Math.min(index * .04, .32), ease: [.22, 1, .36, 1] }} /></div>
+        <div><strong>{money(row.paidAmount)}</strong><small>จาก {money(row.targetAmount)}</small></div><b>{installmentPercentLabel(percent)}%</b>
       </div>;
     })}</div> : <p className="personal-installment-empty">ยังไม่มีงวดที่บันทึกการชำระ เมื่อกด “บันทึกจ่าย” กราฟจะแสดงที่นี่</p>}
   </section>;
@@ -700,6 +723,7 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
 
       {liabilities.length > 0 && <section className="installment-cards-section">
         <div className="installment-cards-heading"><div><p className="eyebrow">ประวัติหนี้ส่วนตัว</p><h2>ยอดที่จ่ายแต่ละงวด</h2></div><span>{liabilities.length} บัญชี</span></div>
+        <PersonalInstallmentOverviewCard liabilities={liabilities} payments={payments} cardStatements={cardStatements} />
         <div className="installment-account-grid">{liabilities.map((item) => {
           const DebtIcon = LIABILITY_TYPES[item.type]?.icon || CircleDollarSign;
           return <article className="personal-card installment-account-card" key={item.id}>
