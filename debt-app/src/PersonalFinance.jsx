@@ -345,6 +345,61 @@ function PaymentForm({ liability, selectedMonth, statementMonth, statement, defa
   </form>;
 }
 
+function PersonalInstallmentChart({ liability, payments, statements }) {
+  const percentLabel = (value) => Number(value || 0).toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 1 });
+  let chartRows;
+
+  if (isFullBalanceCard(liability)) {
+    chartRows = Object.entries(statements || {}).sort(([monthA], [monthB]) => monthA.localeCompare(monthB)).map(([statementMonth, statement], index) => {
+      const targetAmount = Math.max(0, Number(statement.amount || 0));
+      return {
+        key: statementMonth,
+        sequence: index + 1,
+        label: monthLabel(statementMonth),
+        meta: `ครบกำหนด ${shortDate(statement.dueDate)}`,
+        targetAmount,
+        paidAmount: Math.max(0, Number(statement.paidAmount || 0)),
+      };
+    }).filter((item) => item.targetAmount > 0);
+  } else {
+    const recordedPayments = [...payments].sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.createdAt).localeCompare(String(b.createdAt)));
+    const importedCount = Math.max(0, Number(liability.paidInstallments || 0) - recordedPayments.length);
+    const totalInstallments = Number(liability.totalInstallments || 0);
+    const targetFor = (sequence, payment) => {
+      if (Number(payment?.expectedInstallmentAmount) > 0) return Number(payment.expectedInstallmentAmount);
+      if (totalInstallments > 0 && sequence === totalInstallments && Number(liability.balloonPayment) > 0) return Number(liability.balloonPayment);
+      return Math.max(0, Number(liability.monthlyPayment || payment?.amount || 0));
+    };
+    const importedRows = Array.from({ length: importedCount }, (_, index) => {
+      const sequence = index + 1;
+      const targetAmount = targetFor(sequence);
+      return { key: `imported_${sequence}`, sequence, label: `งวดที่ ${sequence}`, meta: "ชำระแล้วก่อนเริ่มบันทึก", targetAmount, paidAmount: targetAmount, imported: true };
+    });
+    const paymentRows = recordedPayments.map((payment, index) => {
+      const sequence = Number(payment.installmentNumber || importedCount + index + 1);
+      return { key: payment.id, sequence, label: `งวดที่ ${sequence}`, meta: `จ่าย ${shortDate(payment.date)}`, targetAmount: targetFor(sequence, payment), paidAmount: Math.max(0, Number(payment.amount || 0)) };
+    });
+    chartRows = [...importedRows, ...paymentRows];
+  }
+
+  const totalTarget = chartRows.reduce((sum, item) => sum + item.targetAmount, 0);
+  const totalPaid = chartRows.reduce((sum, item) => sum + item.paidAmount, 0);
+  const totalPercent = totalTarget > 0 ? totalPaid / totalTarget * 100 : 0;
+
+  return <section className="personal-installment-chart" aria-label={`กราฟการจ่ายแต่ละงวดของ ${liability.title}`}>
+    <div className="personal-installment-chart-head"><div><span><ChartNoAxesColumnIncreasing size={16} /></span><div><strong>จ่ายแต่ละงวดไปเท่าไร</strong><small>{isFullBalanceCard(liability) ? "เทียบยอดที่จ่ายกับยอดเรียกเก็บแต่ละรอบบิล" : "เทียบยอดที่จ่ายจริงกับยอดที่ต้องจ่ายต่องวด"}</small></div></div>{chartRows.length > 0 && <div><strong>{money(totalPaid)}</strong><small>จาก {money(totalTarget)} · {percentLabel(totalPercent)}%</small></div>}</div>
+    {chartRows.length > 0 ? <div className="personal-installment-chart-rows">{chartRows.map((row, index) => {
+      const percent = row.targetAmount > 0 ? row.paidAmount / row.targetAmount * 100 : 0;
+      const tone = percent >= 100 ? "paid" : percent > 0 ? "partial" : "unpaid";
+      return <div className={`personal-installment-chart-row ${tone}`} key={row.key}>
+        <div><strong>{row.label}</strong><small>{row.meta}</small></div>
+        <div className="personal-installment-track" role="progressbar" aria-label={`${row.label} จ่ายแล้ว ${percentLabel(percent)} เปอร์เซ็นต์`} aria-valuemin="0" aria-valuemax="100" aria-valuenow={Number(Math.min(100, percent).toFixed(1))}><m.i initial={{ width: 0 }} animate={{ width: `${Math.min(100, percent)}%` }} transition={{ duration: .6, delay: Math.min(index * .04, .32), ease: [.22, 1, .36, 1] }} /></div>
+        <div><strong>{money(row.paidAmount)}</strong><small>จาก {money(row.targetAmount)}</small></div><b>{percentLabel(percent)}%</b>
+      </div>;
+    })}</div> : <p className="personal-installment-empty">ยังไม่มีงวดที่บันทึกการชำระ เมื่อกด “บันทึกจ่าย” กราฟจะแสดงที่นี่</p>}
+  </section>;
+}
+
 function EmptyPanel({ title, body, action, onAction }) {
   return <div className="personal-empty"><span>◎</span><h3>{title}</h3><p>{body}</p><button className="secondary" onClick={onAction}>+ {action}</button></div>;
 }
@@ -493,8 +548,10 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
     const statementPaid = Number(statement?.paidAmount || 0) + Number(payment.amount);
     const latestStatementMonth = Object.keys(cardStatements[liability.id] || {}).sort().at(-1);
     const nextOutstanding = fullBalanceCard ? (payment.statementMonth === latestStatementMonth ? Math.max(0, Number(statement?.amount || 0) - statementPaid) : Number(liability.outstanding || 0)) : Math.max(0, Number(liability.outstanding) - principal);
+    const installmentNumber = Number(liability.paidInstallments || 0) + 1;
+    const expectedInstallmentAmount = Number(liability.totalInstallments) === installmentNumber && Number(liability.balloonPayment) > 0 ? Number(liability.balloonPayment) : Number(liability.monthlyPayment || payment.amount);
     const changes = {
-      [`personalFinance/${user.uid}/payments/${target.key}`]: { ...payment, liabilityId: liability.id, liabilityTitle: liability.title, principalAmount: principal, createdAt: new Date().toISOString() },
+      [`personalFinance/${user.uid}/payments/${target.key}`]: { ...payment, liabilityId: liability.id, liabilityTitle: liability.title, principalAmount: principal, ...(!fullBalanceCard ? { installmentNumber, expectedInstallmentAmount } : {}), createdAt: new Date().toISOString() },
       [`personalFinance/${user.uid}/liabilities/${liability.id}/outstanding`]: nextOutstanding,
       [`personalFinance/${user.uid}/liabilities/${liability.id}/active`]: fullBalanceCard ? true : nextOutstanding > 0,
       [`personalFinance/${user.uid}/liabilities/${liability.id}/updatedAt`]: new Date().toISOString(),
@@ -670,7 +727,12 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
               const expanded = expandedDebt === item.id;
               return <article className={`debt-compact-item ${expanded ? "expanded" : ""} ${item.active === false ? "inactive" : ""}`} key={item.id}>
                 <button className="debt-row-trigger" type="button" aria-expanded={expanded} onClick={() => setExpandedDebt(expanded ? "" : item.id)}><span className="debt-row-date"><CalendarDays size={15} /><b>{dueDate ? shortDate(dueDate) : "ไม่มีกำหนด"}</b></span><div><strong>{item.title}</strong><small>{shared ? `เจ้าหนี้ ${item.creditorName || "เจ้าหนี้"} · คงเหลือ ${money(item.outstandingAmount)}` : fullBalance ? (statement ? `ยอดรอบบิล ${monthLabel(statementMonth)}` : "ยังไม่ใส่ยอดรอบบิล") : `ยอดคงเหลือ ${money(item.outstanding)}`}</small></div><strong className="debt-row-amount">{money(shared ? (planned || dueAmount) : planned)}</strong><ChevronDown className="row-chevron" size={17} /></button>
-                {expanded && (shared ? <div className="debt-row-detail shared-debt-detail"><div className="liability-facts"><span>ยอดคงเหลือ <strong>{money(item.outstandingAmount)}</strong></span><span>งวดถัดไป <strong>{dueDate ? shortDate(dueDate) : "ไม่มีกำหนด"}</strong></span><span>เจ้าหนี้ <strong>{item.creditorName || "เจ้าหนี้"}</strong></span></div><div className="liability-actions"><button className="primary" onClick={() => onOpenSharedDebt?.(item.id)}><ExternalLink size={14} />เปิดรายการและชำระ</button></div></div> : <div className="debt-row-detail"><div className="liability-progress"><i><b style={{ width: `${Math.min(100, paidPercent)}%` }} /></i><span>{fullBalance ? !statement ? "ยังไม่ใส่ยอดรอบบิล" : statementRemaining <= 0 ? "จ่ายครบแล้ว" : `เหลือจ่าย ${money(statementRemaining)}` : item.type === "credit_card" && item.creditLimit ? `ใช้วงเงิน ${utilization.toFixed(0)}%` : `ชำระแล้ว ${Math.min(100, paidPercent).toFixed(0)}%`}</span></div><div className="liability-facts">{fullBalance ? <><span>ยอดเรียกเก็บ <strong>{statement ? money(statement.amount) : "ยังไม่มี"}</strong></span><span>ครบกำหนด <strong>{shortDate(dueDate)}</strong></span></> : <><span>จ่ายเดือนละ <strong>{money(item.monthlyPayment)}</strong></span><span>ครบกำหนด <strong>{shortDate(dueDate)}</strong></span></>}{Number(item.annualRate) > 0 && <span>ดอกเบี้ย <strong>{money(item.annualRate)}%</strong></span>}{Number(item.totalInstallments) > 0 && <span>เหลือ <strong>{Math.max(0, Number(item.totalInstallments) - Number(item.paidInstallments))} งวด</strong></span>}</div><div className={`liability-actions ${fullBalance ? "card-actions" : ""}`}>{fullBalance && <button className="secondary statement-button" onClick={() => setModal({ type: "statement", item, statement, statementMonth })}><ReceiptText size={14} />{statement ? "แก้ยอดรอบบิล" : "ใส่ยอดรอบบิล"}</button>}<button className="primary" disabled={item.active === false || (fullBalance ? !statement || statementRemaining <= 0 : Number(item.outstanding) <= 0)} onClick={() => setModal({ type: "payment", item, statement, statementMonth, defaultDate: dueDate })}><CheckCircle2 size={14} />{fullBalance && statementRemaining <= 0 && statement ? "จ่ายครบแล้ว" : "บันทึกจ่าย"}</button><button className="secondary" onClick={() => setModal({ type: "liability", item })}><Pencil size={14} />แก้ไข</button><button className="icon-delete" aria-label={`ลบ ${item.title}`} onClick={() => deleteLiability(item)}><Trash2 size={14} /></button></div></div>)}
+                {expanded && (shared ? <div className="debt-row-detail shared-debt-detail"><div className="liability-facts"><span>ยอดคงเหลือ <strong>{money(item.outstandingAmount)}</strong></span><span>งวดถัดไป <strong>{dueDate ? shortDate(dueDate) : "ไม่มีกำหนด"}</strong></span><span>เจ้าหนี้ <strong>{item.creditorName || "เจ้าหนี้"}</strong></span></div><div className="liability-actions"><button className="primary" onClick={() => onOpenSharedDebt?.(item.id)}><ExternalLink size={14} />เปิดรายการและชำระ</button></div></div> : <div className="debt-row-detail">
+                  <div className="liability-progress"><i><b style={{ width: `${Math.min(100, paidPercent)}%` }} /></i><span>{fullBalance ? !statement ? "ยังไม่ใส่ยอดรอบบิล" : statementRemaining <= 0 ? "จ่ายครบแล้ว" : `เหลือจ่าย ${money(statementRemaining)}` : item.type === "credit_card" && item.creditLimit ? `ใช้วงเงิน ${utilization.toFixed(0)}%` : `ชำระแล้ว ${Math.min(100, paidPercent).toFixed(0)}%`}</span></div>
+                  <div className="liability-facts">{fullBalance ? <><span>ยอดเรียกเก็บ <strong>{statement ? money(statement.amount) : "ยังไม่มี"}</strong></span><span>ครบกำหนด <strong>{shortDate(dueDate)}</strong></span></> : <><span>จ่ายเดือนละ <strong>{money(item.monthlyPayment)}</strong></span><span>ครบกำหนด <strong>{shortDate(dueDate)}</strong></span></>}{Number(item.annualRate) > 0 && <span>ดอกเบี้ย <strong>{money(item.annualRate)}%</strong></span>}{Number(item.totalInstallments) > 0 && <span>เหลือ <strong>{Math.max(0, Number(item.totalInstallments) - Number(item.paidInstallments))} งวด</strong></span>}</div>
+                  <PersonalInstallmentChart liability={item} payments={payments.filter((payment) => payment.liabilityId === item.id)} statements={cardStatements[item.id]} />
+                  <div className={`liability-actions ${fullBalance ? "card-actions" : ""}`}>{fullBalance && <button className="secondary statement-button" onClick={() => setModal({ type: "statement", item, statement, statementMonth })}><ReceiptText size={14} />{statement ? "แก้ยอดรอบบิล" : "ใส่ยอดรอบบิล"}</button>}<button className="primary" disabled={item.active === false || (fullBalance ? !statement || statementRemaining <= 0 : Number(item.outstanding) <= 0)} onClick={() => setModal({ type: "payment", item, statement, statementMonth, defaultDate: dueDate })}><CheckCircle2 size={14} />{fullBalance && statementRemaining <= 0 && statement ? "จ่ายครบแล้ว" : "บันทึกจ่าย"}</button><button className="secondary" onClick={() => setModal({ type: "liability", item })}><Pencil size={14} />แก้ไข</button><button className="icon-delete" aria-label={`ลบ ${item.title}`} onClick={() => deleteLiability(item)}><Trash2 size={14} /></button></div>
+                </div>)}
               </article>;
             })}</div>}
           </article>;

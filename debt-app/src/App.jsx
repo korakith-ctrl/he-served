@@ -720,44 +720,6 @@ function NotificationsPanel({ notifications, onClose, onOpen }) {
   );
 }
 
-function InstallmentPaymentChart({ installments }) {
-  const chartRows = installments.map((installment) => {
-    const amount = Math.max(0, Number(installment.amount || 0));
-    const paidAmount = Math.max(0, Number(installment.paidAmount || 0));
-    const percent = amount > 0 ? Math.min(100, (paidAmount / amount) * 100) : 0;
-    return { ...installment, amount, paidAmount, percent };
-  });
-  const totalAmount = chartRows.reduce((sum, installment) => sum + installment.amount, 0);
-  const totalPaid = chartRows.reduce((sum, installment) => sum + Math.min(installment.paidAmount, installment.amount), 0);
-  const totalPercent = totalAmount > 0 ? Math.min(100, (totalPaid / totalAmount) * 100) : 0;
-  const percentLabel = (value) => value.toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 1 });
-
-  return (
-    <div className="installment-chart" aria-label="กราฟยอดชำระแยกตามงวด">
-      <div className="installment-chart-summary">
-        <div><span className="installment-chart-icon"><UiIcon name="installments" /></span><div><h4>กราฟการจ่ายแต่ละงวด</h4><p>ยอดที่ยืนยันแล้ว เทียบกับยอดเต็มของงวดนั้น</p></div></div>
-        <div><strong>฿{money(totalPaid)}</strong><span>จาก ฿{money(totalAmount)} · {percentLabel(totalPercent)}%</span></div>
-      </div>
-      <div className="installment-chart-legend" aria-hidden="true"><span><i />จ่ายแล้ว</span><span><i />ยอดที่เหลือ</span></div>
-      <div className="installment-chart-rows">
-        {chartRows.map((installment, index) => {
-          const tone = installment.percent >= 100 ? "paid" : installment.percent > 0 ? "partial" : "upcoming";
-          return (
-            <div className={`installment-chart-row ${tone}`} key={`chart_${installment.sequence}`}>
-              <div className="installment-chart-label"><strong>งวดที่ {installment.sequence}</strong><small>{shortDate(installment.dueDate)}</small></div>
-              <div className="installment-chart-track" role="progressbar" aria-label={`งวดที่ ${installment.sequence} จ่ายแล้ว ${percentLabel(installment.percent)} เปอร์เซ็นต์`} aria-valuemin="0" aria-valuemax="100" aria-valuenow={Number(installment.percent.toFixed(1))}>
-                <m.span initial={{ width: 0 }} animate={{ width: `${installment.percent}%` }} transition={{ duration: 0.65, delay: Math.min(index * 0.045, 0.35), ease: [0.22, 1, 0.36, 1] }} />
-              </div>
-              <div className="installment-chart-value"><strong>฿{money(installment.paidAmount)}</strong><small>จาก ฿{money(installment.amount)}</small></div>
-              <b>{percentLabel(installment.percent)}%</b>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function DebtDetailModal({ debt, user, onClose, onToast, onArchived, archived, onRestored }) {
   const [payments, setPayments] = useState([]);
   const [changeRequests, setChangeRequests] = useState([]);
@@ -1081,7 +1043,6 @@ function DebtDetailModal({ debt, user, onClose, onToast, onArchived, archived, o
         {installments.length > 0 && (
           <section className="installment-section">
             <div className="section-title-row"><h3>แผนผ่อนรายเดือน</h3><span>{debt.installmentPlan?.paidInstallments || 0}/{debt.installmentPlan?.totalInstallments || installments.length} งวด</span></div>
-            <InstallmentPaymentChart installments={installments} />
             <div className="installment-list">
               {installments.map((installment) => {
                 const remaining = Math.max(0, Number(installment.amount) - Number(installment.paidAmount || 0));
