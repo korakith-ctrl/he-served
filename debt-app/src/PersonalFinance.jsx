@@ -345,60 +345,13 @@ function PaymentForm({ liability, selectedMonth, statementMonth, statement, defa
   </form>;
 }
 
-function personalInstallmentRows(liability, payments, statements) {
-  if (isFullBalanceCard(liability)) {
-    return Object.entries(statements || {}).sort(([monthA], [monthB]) => monthA.localeCompare(monthB)).map(([statementMonth, statement], index) => {
-      const targetAmount = Math.max(0, Number(statement.amount || 0));
-      return {
-        key: statementMonth,
-        sequence: index + 1,
-        label: monthLabel(statementMonth),
-        meta: `ครบกำหนด ${shortDate(statement.dueDate)}`,
-        targetAmount,
-        paidAmount: Math.max(0, Number(statement.paidAmount || 0)),
-      };
-    }).filter((item) => item.targetAmount > 0);
-  }
-
-  const recordedPayments = [...payments].sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.createdAt).localeCompare(String(b.createdAt)));
-  const importedCount = Math.max(0, Number(liability.paidInstallments || 0) - recordedPayments.length);
-  const totalInstallments = Number(liability.totalInstallments || 0);
-  const targetFor = (sequence, payment) => {
-    if (Number(payment?.expectedInstallmentAmount) > 0) return Number(payment.expectedInstallmentAmount);
-    if (totalInstallments > 0 && sequence === totalInstallments && Number(liability.balloonPayment) > 0) return Number(liability.balloonPayment);
-    return Math.max(0, Number(liability.monthlyPayment || payment?.amount || 0));
-  };
-  const importedRows = Array.from({ length: importedCount }, (_, index) => {
-    const sequence = index + 1;
-    const targetAmount = targetFor(sequence);
-    return { key: `imported_${sequence}`, sequence, label: `งวดที่ ${sequence}`, meta: "ชำระแล้วก่อนเริ่มบันทึก", targetAmount, paidAmount: targetAmount, imported: true };
-  });
-  const paymentRows = recordedPayments.map((payment, index) => {
-    const sequence = Number(payment.installmentNumber || importedCount + index + 1);
-    return { key: payment.id, sequence, label: `งวดที่ ${sequence}`, meta: `จ่าย ${shortDate(payment.date)}`, targetAmount: targetFor(sequence, payment), paidAmount: Math.max(0, Number(payment.amount || 0)) };
-  });
-  return [...importedRows, ...paymentRows];
-}
-
-function installmentPercentLabel(value) {
-  return Number(value || 0).toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 1 });
-}
-
-function PersonalInstallmentCards({ liabilities, payments, cardStatements }) {
-  const cards = liabilities.flatMap((liability) => personalInstallmentRows(liability, payments.filter((payment) => payment.liabilityId === liability.id), cardStatements[liability.id]).map((row) => ({ liability, row })));
-
-  return <section className="installment-cards-section" aria-label="ภาพรวมการจ่ายหนี้แยกแต่ละงวด">
-    <div className="installment-cards-heading"><div><p className="eyebrow">ประวัติหนี้ส่วนตัว</p><h2>ภาพรวมแต่ละงวด</h2><small>หนึ่ง card ต่อหนึ่งงวด แสดงยอดจ่ายจริงเทียบกับยอดของงวดนั้น</small></div><span>{cards.length} งวด</span></div>
-    {cards.length > 0 ? <div className="installment-period-grid">{cards.map(({ liability, row }, index) => {
-      const DebtIcon = LIABILITY_TYPES[liability.type]?.icon || CircleDollarSign;
-      const percent = row.targetAmount > 0 ? row.paidAmount / row.targetAmount * 100 : 0;
-      const tone = percent >= 100 ? "paid" : percent > 0 ? "partial" : "unpaid";
-      return <article className={`personal-card installment-period-card ${tone}`} key={`${liability.id}_${row.key}`}>
-        <header><span className={`liability-icon ${liability.type}`}><DebtIcon size={18} strokeWidth={1.8} /></span><div><small>{liability.title}</small><strong>{row.label}</strong></div><b>{percent >= 100 ? "จ่ายครบ" : percent > 0 ? "จ่ายบางส่วน" : "ยังไม่จ่าย"}</b></header>
-        <div className="installment-period-amount"><span>จ่ายแล้ว</span><strong>{money(row.paidAmount)}</strong><small>จากยอดงวด {money(row.targetAmount)}</small></div>
-        <div className="installment-period-progress"><div><span>{row.meta}</span><strong>{installmentPercentLabel(percent)}%</strong></div><i role="progressbar" aria-label={`${liability.title} ${row.label} จ่ายแล้ว ${installmentPercentLabel(percent)} เปอร์เซ็นต์`} aria-valuemin="0" aria-valuemax="100" aria-valuenow={Number(Math.min(100, percent).toFixed(1))}><m.b initial={{ width: 0 }} animate={{ width: `${Math.min(100, percent)}%` }} transition={{ duration: .65, delay: Math.min(index * .035, .3), ease: [.22, 1, .36, 1] }} /></i></div>
-      </article>;
-    })}</div> : <div className="personal-card installment-period-empty"><ChartNoAxesColumnIncreasing size={22} /><div><strong>ยังไม่มีงวดที่บันทึกการชำระ</strong><p>เมื่อกด “บันทึกจ่าย” card ของงวดนั้นจะแสดงที่นี่</p></div></div>}
+function SalaryCycleDebtCard({ start, end, total, paid }) {
+  const remaining = Math.max(0, total - paid);
+  const percent = total > 0 ? paid / total * 100 : 0;
+  const displayPercent = Number(percent || 0).toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 1 });
+  return <section className={`personal-card salary-cycle-debt-card ${remaining <= 0 && total > 0 ? "complete" : ""}`} aria-label={`สรุปการจ่ายหนี้รอบเงินเดือน ${shortDate(start)} ถึง ${shortDate(end)}`}>
+    <div className="salary-cycle-debt-copy"><span className="salary-cycle-debt-icon"><WalletCards size={21} /></span><div><p className="eyebrow">รอบเงินเดือน {shortDate(start)} – {shortDate(end)}</p><h2>สรุปการจ่ายหนี้รอบนี้</h2></div><span>ยอดหนี้ที่ต้องจ่ายทั้งหมด</span><strong>{money(total)}</strong></div>
+    <div className="salary-cycle-debt-progress"><div><span>จ่ายแล้ว {money(paid)}</span><strong>{displayPercent}%</strong></div><i role="progressbar" aria-label={`จ่ายหนี้แล้ว ${displayPercent} เปอร์เซ็นต์`} aria-valuemin="0" aria-valuemax="100" aria-valuenow={Number(Math.min(100, percent).toFixed(1))}><m.b initial={{ width: 0 }} animate={{ width: `${Math.min(100, percent)}%` }} transition={{ duration: .75, ease: [.22, 1, .36, 1] }} /></i><div className="salary-cycle-debt-values"><div><span>จ่ายไปแล้ว</span><strong>{money(paid)}</strong></div><div><span>เหลือจ่าย</span><strong>{money(remaining)}</strong></div></div></div>
   </section>;
 }
 
@@ -476,6 +429,14 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
   const plannedAmount = (item) => isFullBalanceCard(item) ? (cycleStatements[item.id] || []).reduce((sum, statement) => sum + Number(statement.amount || 0), 0) : Math.min(Number(item.monthlyPayment || 0), Number(item.outstanding || 0));
   const plannedDebtTotal = activeLiabilities.reduce((sum, item) => sum + plannedAmount(item), 0) + linkedPayableTotal;
   const actualDebtTotal = cyclePayments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const cyclePersonalDebtTotal = liabilities.reduce((sum, liability) => {
+    const liabilityPayments = cyclePayments.filter((payment) => payment.liabilityId === liability.id);
+    if (isFullBalanceCard(liability)) return sum + statementsForCycle(cardStatements, liability.id, cycle.start, cycle.end).reduce((statementSum, statement) => statementSum + Number(statement.amount || 0), 0);
+    if (liability.active === false && liabilityPayments.length === 0) return sum;
+    const principalPaid = liabilityPayments.reduce((paymentSum, payment) => paymentSum + Number(payment.principalAmount || payment.amount || 0), 0);
+    const balanceBeforeCyclePayments = Number(liability.outstanding || 0) + principalPaid;
+    return sum + Math.min(Number(liability.monthlyPayment || 0), balanceBeforeCyclePayments);
+  }, 0);
   const remaining = incomeTotal - expenseTotal - plannedDebtTotal;
   const dti = personalIncomeTotal > 0 ? (plannedDebtTotal / personalIncomeTotal) * 100 : 0;
   const totalOutstanding = liabilities.reduce((sum, item) => sum + Number(item.outstanding || 0), 0) + sharedPayableOutstanding;
@@ -550,10 +511,8 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
     const statementPaid = Number(statement?.paidAmount || 0) + Number(payment.amount);
     const latestStatementMonth = Object.keys(cardStatements[liability.id] || {}).sort().at(-1);
     const nextOutstanding = fullBalanceCard ? (payment.statementMonth === latestStatementMonth ? Math.max(0, Number(statement?.amount || 0) - statementPaid) : Number(liability.outstanding || 0)) : Math.max(0, Number(liability.outstanding) - principal);
-    const installmentNumber = Number(liability.paidInstallments || 0) + 1;
-    const expectedInstallmentAmount = Number(liability.totalInstallments) === installmentNumber && Number(liability.balloonPayment) > 0 ? Number(liability.balloonPayment) : Number(liability.monthlyPayment || payment.amount);
     const changes = {
-      [`personalFinance/${user.uid}/payments/${target.key}`]: { ...payment, liabilityId: liability.id, liabilityTitle: liability.title, principalAmount: principal, ...(!fullBalanceCard ? { installmentNumber, expectedInstallmentAmount } : {}), createdAt: new Date().toISOString() },
+      [`personalFinance/${user.uid}/payments/${target.key}`]: { ...payment, liabilityId: liability.id, liabilityTitle: liability.title, principalAmount: principal, createdAt: new Date().toISOString() },
       [`personalFinance/${user.uid}/liabilities/${liability.id}/outstanding`]: nextOutstanding,
       [`personalFinance/${user.uid}/liabilities/${liability.id}/active`]: fullBalanceCard ? true : nextOutstanding > 0,
       [`personalFinance/${user.uid}/liabilities/${liability.id}/updatedAt`]: new Date().toISOString(),
@@ -700,7 +659,7 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
         </aside>
       </div>
 
-      {liabilities.length > 0 && <PersonalInstallmentCards liabilities={liabilities} payments={payments} cardStatements={cardStatements} />}
+      {liabilities.length > 0 && <SalaryCycleDebtCard start={cycle.start} end={cycle.end} total={cyclePersonalDebtTotal} paid={actualDebtTotal} />}
 
       <section className="quick-actions"><button onClick={() => setModal({ type: "income" })}><span><Plus size={18} /></span><strong>เพิ่มรายรับ</strong><small>เงินเดือนหรือรายได้อื่น</small></button><button onClick={() => setModal({ type: "expense" })}><span><Minus size={18} /></span><strong>เพิ่มรายจ่าย</strong><small>ประจำหรือครั้งเดียว</small></button><button onClick={() => setModal({ type: "liability" })}><span><WalletCards size={18} /></span><strong>เพิ่มหนี้</strong><small>บัตร บ้าน รถ และอื่นๆ</small></button></section>
     </m.div>}

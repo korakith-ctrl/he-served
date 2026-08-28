@@ -1419,50 +1419,30 @@ input:focus, textarea:focus, select:focus { border-color: #168f81; box-shadow: 0
   .cashflow-subtabs button svg { display:none; }
 }
 
-/* Personal debt payment progress by recorded installment. */
-.installment-cards-section { margin:18px 0; }
-.installment-cards-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:16px; margin-bottom:12px; }
-.installment-cards-heading h2,.installment-cards-heading p,.installment-cards-heading small { display:block; margin:0; }
-.installment-cards-heading h2 { color:#243c47; font-size:21px; letter-spacing:-.03em; }
-.installment-cards-heading small { margin-top:3px; color:#7d8b91; font-size:9px; }
-.installment-cards-heading > span { padding:5px 9px; color:#176f64; border-radius:999px; background:#dff1ec; font-size:8px; font-weight:800; }
-.installment-period-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
-.installment-period-card { min-width:0; padding:17px; border-color:#dce4e2; background:linear-gradient(145deg,#fff,#f8fbfa); }
-.installment-period-card header { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:9px; }
-.installment-period-card header > div { min-width:0; }
-.installment-period-card header small,.installment-period-card header strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.installment-period-card header small { color:#859298; font-size:8px; }
-.installment-period-card header strong { margin-top:1px; color:#304852; font-size:12px; }
-.installment-period-card header > b { padding:4px 7px; color:#176f63; border-radius:999px; background:#dff1ec; font-size:7px; white-space:nowrap; }
-.installment-period-card.partial header > b { color:#526ab4; background:#e8edfb; }
-.installment-period-card.unpaid header > b { color:#7c878d; background:#e9edec; }
-.installment-period-amount { margin-top:16px; }
-.installment-period-amount span,.installment-period-amount strong,.installment-period-amount small { display:block; }
-.installment-period-amount span { color:#849197; font-size:8px; }
-.installment-period-amount strong { margin-top:2px; color:#183d49; font-family:Georgia,serif; font-size:27px; font-weight:500; font-variant-numeric:tabular-nums; }
-.installment-period-amount small { margin-top:1px; color:#879399; font-size:8px; }
-.installment-period-progress { margin-top:14px; }
-.installment-period-progress > div { display:flex; align-items:center; justify-content:space-between; gap:10px; }
-.installment-period-progress > div span { overflow:hidden; color:#7f8d92; font-size:7px; text-overflow:ellipsis; white-space:nowrap; }
-.installment-period-progress > div strong { color:#157568; font-size:12px; font-variant-numeric:tabular-nums; }
-.installment-period-card.partial .installment-period-progress > div strong { color:#526ab4; }
-.installment-period-card.unpaid .installment-period-progress > div strong { color:#7d898e; }
-.installment-period-progress > i { display:block; height:9px; margin-top:6px; overflow:hidden; border-radius:999px; background:#e3e9e8; }
-.installment-period-progress > i > b { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,#159584,#52c0ae); box-shadow:0 2px 6px rgba(21,149,132,.18); }
-.installment-period-card.partial .installment-period-progress > i > b { background:linear-gradient(90deg,#5c7ee0,#8299e9); }
-.installment-period-empty { display:flex; align-items:center; gap:12px; padding:20px; color:#6f7e84; }
-.installment-period-empty > svg { flex:0 0 auto; color:#238176; }
-.installment-period-empty strong,.installment-period-empty p { display:block; margin:0; }
-.installment-period-empty strong { font-size:11px; }
-.installment-period-empty p { margin-top:3px; color:#879399; font-size:8px; }
+/* Salary-cycle debt payment summary on the personal overview. */
+.salary-cycle-debt-card { display:grid; grid-template-columns:minmax(240px,.85fr) minmax(320px,1.15fr); align-items:center; gap:30px; margin:18px 0; padding:25px 27px; color:#fff; border:0; background:linear-gradient(135deg,#173b50,#126e69); box-shadow:0 16px 38px rgba(20,69,76,.16); }
+.salary-cycle-debt-copy { display:grid; grid-template-columns:auto minmax(0,1fr); align-items:center; gap:11px; }
+.salary-cycle-debt-icon { display:grid; place-items:center; width:42px; height:42px; color:#164c50; border-radius:13px; background:#cfece5; }
+.salary-cycle-debt-copy .eyebrow,.salary-cycle-debt-copy h2 { margin:0; }
+.salary-cycle-debt-copy .eyebrow { color:#a9cfca; font-size:8px; }
+.salary-cycle-debt-copy h2 { color:#fff; font-size:17px; }
+.salary-cycle-debt-copy > span:not(.salary-cycle-debt-icon),.salary-cycle-debt-copy > strong { grid-column:1 / -1; display:block; }
+.salary-cycle-debt-copy > span:not(.salary-cycle-debt-icon) { margin-top:8px; color:#b6d2cf; font-size:9px; }
+.salary-cycle-debt-copy > strong { margin-top:-6px; font-family:Georgia,serif; font-size:35px; font-weight:500; font-variant-numeric:tabular-nums; }
+.salary-cycle-debt-progress > div:first-child { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.salary-cycle-debt-progress > div:first-child span { color:#bad5d2; font-size:10px; }
+.salary-cycle-debt-progress > div:first-child strong { color:#fff; font-size:22px; font-variant-numeric:tabular-nums; }
+.salary-cycle-debt-progress > i { display:block; height:12px; margin-top:8px; overflow:hidden; border-radius:999px; background:rgba(255,255,255,.16); }
+.salary-cycle-debt-progress > i > b { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,#76dbc8,#e2d29b); box-shadow:0 2px 8px rgba(116,219,200,.22); }
+.salary-cycle-debt-values { display:grid; grid-template-columns:1fr 1fr; gap:9px; margin-top:15px; }
+.salary-cycle-debt-values > div { padding:11px 12px; border:1px solid rgba(255,255,255,.11); border-radius:11px; background:rgba(255,255,255,.07); }
+.salary-cycle-debt-values span,.salary-cycle-debt-values strong { display:block; }
+.salary-cycle-debt-values span { color:#b5d0cd; font-size:8px; }
+.salary-cycle-debt-values strong { margin-top:3px; color:#fff; font-size:17px; font-variant-numeric:tabular-nums; }
+.salary-cycle-debt-values > div:last-child strong { color:#f1d6a2; }
+.salary-cycle-debt-card.complete .salary-cycle-debt-values > div:last-child strong { color:#9ce0d2; }
 
-@media (max-width:580px) {
-  .installment-cards-heading { align-items:flex-start; }
-  .installment-cards-heading small { max-width:240px; line-height:1.45; }
-  .installment-period-grid { grid-template-columns:1fr; }
-  .installment-period-card { padding:15px 14px; }
-}
-
-@media (min-width:581px) and (max-width:900px) {
-  .installment-period-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+@media (max-width:680px) {
+  .salary-cycle-debt-card { grid-template-columns:1fr; gap:22px; padding:21px 18px; }
+  .salary-cycle-debt-copy > strong { font-size:31px; }
 }
