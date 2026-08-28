@@ -348,10 +348,12 @@ function PaymentForm({ liability, selectedMonth, statementMonth, statement, defa
 function SalaryCycleDebtCard({ start, end, total, paid }) {
   const remaining = Math.max(0, total - paid);
   const percent = total > 0 ? paid / total * 100 : 0;
+  const remainingPercent = total > 0 ? remaining / total * 100 : 0;
   const displayPercent = Number(percent || 0).toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 1 });
-  return <section className={`personal-card salary-cycle-debt-card ${remaining <= 0 && total > 0 ? "complete" : ""}`} aria-label={`สรุปการจ่ายหนี้รอบเงินเดือน ${shortDate(start)} ถึง ${shortDate(end)}`}>
-    <div className="salary-cycle-debt-copy"><span className="salary-cycle-debt-icon"><WalletCards size={21} /></span><div><p className="eyebrow">รอบเงินเดือน {shortDate(start)} – {shortDate(end)}</p><h2>สรุปการจ่ายหนี้รอบนี้</h2></div><span>ยอดหนี้ที่ต้องจ่ายทั้งหมด</span><strong>{money(total)}</strong></div>
-    <div className="salary-cycle-debt-progress"><div><span>จ่ายแล้ว {money(paid)}</span><strong>{displayPercent}%</strong></div><i role="progressbar" aria-label={`จ่ายหนี้แล้ว ${displayPercent} เปอร์เซ็นต์`} aria-valuemin="0" aria-valuemax="100" aria-valuenow={Number(Math.min(100, percent).toFixed(1))}><m.b initial={{ width: 0 }} animate={{ width: `${Math.min(100, percent)}%` }} transition={{ duration: .75, ease: [.22, 1, .36, 1] }} /></i><div className="salary-cycle-debt-values"><div><span>จ่ายไปแล้ว</span><strong>{money(paid)}</strong></div><div><span>เหลือจ่าย</span><strong>{money(remaining)}</strong></div></div></div>
+  const status = total <= 0 ? { tone: "neutral", label: "ไม่มีภาระในรอบนี้", detail: "ยังไม่มียอดหนี้ที่ต้องจ่าย" } : remaining <= 0 ? { tone: "healthy", label: "ชำระครบแล้ว", detail: "เคลียร์ยอดของรอบนี้เรียบร้อย" } : paid > 0 ? { tone: "watch", label: "กำลังชำระ", detail: `เหลืออีก ${money(remaining)}` } : { tone: "neutral", label: "ยังไม่เริ่มชำระ", detail: `รอจ่าย ${money(remaining)}` };
+  return <section className="personal-hero salary-cycle-debt-card" aria-label={`สรุปการจ่ายหนี้รอบเงินเดือน ${shortDate(start)} ถึง ${shortDate(end)}`}>
+    <div className="personal-hero-copy"><div className={`finance-status ${status.tone}`}>{remaining <= 0 && total > 0 ? <BadgeCheck size={14} /> : <WalletCards size={14} />}<span><b>{status.label}</b><small>{status.detail}</small></span></div><span>ยอดหนี้ที่ต้องจ่ายทั้งหมด</span><AnimatedNumber className="amount-highlight" value={total} /><p>รอบเงินเดือน {shortDate(start)} – {shortDate(end)}</p></div>
+    <div className="flow-visual salary-cycle-visual" aria-label={`จ่ายแล้ว ${displayPercent} เปอร์เซ็นต์`}><header><span>สถานะการชำระหนี้</span><strong>{displayPercent}% ของยอดรอบนี้</strong></header><div><span><CheckCircle2 size={14} />จ่ายไปแล้ว</span><i><m.b initial={{ width: 0 }} animate={{ width: `${Math.min(100, percent)}%` }} transition={{ duration: .75, ease: [.22, 1, .36, 1] }} /></i><strong>{money(paid)}</strong></div><div><span><WalletCards size={14} />เหลือจ่าย</span><i><m.b className="debt" initial={{ width: 0 }} animate={{ width: `${Math.min(100, remainingPercent)}%` }} transition={{ duration: .75, delay: .08, ease: [.22, 1, .36, 1] }} /></i><strong>{money(remaining)}</strong></div></div>
   </section>;
 }
 
@@ -641,6 +643,8 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
         </div>
       </section>
 
+      {liabilities.length > 0 && <SalaryCycleDebtCard start={cycle.start} end={cycle.end} total={cyclePersonalDebtTotal} paid={actualDebtTotal} />}
+
       <section className="personal-kpis">
         <article><span className="kpi-icon income"><Banknote size={18} /></span><div><small>รายรับในรอบ</small><strong>{money(incomeTotal)}</strong><p>{cycleIncomes.length} รายรับส่วนตัว{linkedReceivables.length ? ` · เชื่อมแล้ว ${linkedReceivables.length}` : ""}</p></div></article>
         <article><span className="kpi-icon expense"><ArrowUp size={18} /></span><div><small>ค่าใช้จ่ายทั่วไป</small><strong>{money(expenseTotal)}</strong><p>{cycleExpenses.length} รายการในรอบนี้</p></div></article>
@@ -658,8 +662,6 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
           {warnings.length ? <div className="warning-list">{warnings.map((item, index) => { const WarningIcon = item.tone === "danger" ? CircleAlert : item.tone === "warn" ? TriangleAlert : Info; return <article key={`${item.title}-${index}`} className={item.tone}><i><WarningIcon size={15} /></i><div><strong>{item.title}</strong><p>{item.body}</p></div></article>; })}</div> : <div className="all-good"><span><BadgeCheck size={21} /></span><strong>แผนรอบนี้ดูสมดุลดี</strong><p>ยังไม่พบรายการที่ต้องรีบจัดการ</p></div>}
         </aside>
       </div>
-
-      {liabilities.length > 0 && <SalaryCycleDebtCard start={cycle.start} end={cycle.end} total={cyclePersonalDebtTotal} paid={actualDebtTotal} />}
 
       <section className="quick-actions"><button onClick={() => setModal({ type: "income" })}><span><Plus size={18} /></span><strong>เพิ่มรายรับ</strong><small>เงินเดือนหรือรายได้อื่น</small></button><button onClick={() => setModal({ type: "expense" })}><span><Minus size={18} /></span><strong>เพิ่มรายจ่าย</strong><small>ประจำหรือครั้งเดียว</small></button><button onClick={() => setModal({ type: "liability" })}><span><WalletCards size={18} /></span><strong>เพิ่มหนี้</strong><small>บัตร บ้าน รถ และอื่นๆ</small></button></section>
     </m.div>}
