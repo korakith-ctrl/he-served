@@ -357,6 +357,18 @@ function SalaryCycleDebtCard({ start, end, total, paid }) {
   </section>;
 }
 
+function PersonalDebtPaymentHistory({ payments, onDelete }) {
+  return <section className="debt-payment-history" aria-label="ประวัติการจ่ายหนี้">
+    <div className="debt-payment-history-head"><div><ReceiptText size={15} /><strong>ประวัติการจ่าย</strong></div><span>{payments.length} รายการ</span></div>
+    {payments.length > 0 ? <div className="debt-payment-history-list">{payments.map((payment) => <article key={payment.id}>
+      <span className="debt-payment-history-icon"><CheckCircle2 size={15} /></span>
+      <div><strong>{shortDate(payment.date)}</strong><small>{payment.statementMonth ? `รอบบิล ${monthLabel(payment.statementMonth)}` : `เงินต้น ${money(payment.principalAmount)}`}{Number(payment.interestAmount) > 0 ? ` · ดอกเบี้ย ${money(payment.interestAmount)}` : ""}{payment.note ? ` · ${payment.note}` : ""}</small></div>
+      <div><strong>{money(payment.amount)}</strong><small>ยอดที่จ่าย</small></div>
+      <button className="icon-delete" aria-label={`ลบประวัติการจ่าย ${money(payment.amount)}`} onClick={() => onDelete(payment)}><Trash2 size={13} /></button>
+    </article>)}</div> : <p className="debt-payment-history-empty">ยังไม่มีประวัติการจ่ายสำหรับหนี้ก้อนนี้</p>}
+  </section>;
+}
+
 function EmptyPanel({ title, body, action, onAction }) {
   return <div className="personal-empty"><span>◎</span><h3>{title}</h3><p>{body}</p><button className="secondary" onClick={onAction}>+ {action}</button></div>;
 }
@@ -690,12 +702,14 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
               const paidPercent = fullBalance ? (Number(statement?.amount) ? Number(statement?.paidAmount || 0) / Number(statement.amount) * 100 : 0) : item.type === "credit_card" ? (Number(item.creditLimit) ? Math.max(0, 100 - Number(item.outstanding) / Number(item.creditLimit) * 100) : 0) : (Number(item.originalBalance) ? Math.max(0, 100 - Number(item.outstanding) / Number(item.originalBalance) * 100) : Number(item.totalInstallments) ? Number(item.paidInstallments) / Number(item.totalInstallments) * 100 : 0);
               const utilization = Number(item.creditLimit) ? Number(item.outstanding) / Number(item.creditLimit) * 100 : 0;
               const expanded = expandedDebt === item.id;
+              const debtPayments = shared ? [] : payments.filter((payment) => payment.liabilityId === item.id);
               return <article className={`debt-compact-item ${expanded ? "expanded" : ""} ${item.active === false ? "inactive" : ""}`} key={item.id}>
                 <button className="debt-row-trigger" type="button" aria-expanded={expanded} onClick={() => setExpandedDebt(expanded ? "" : item.id)}><span className="debt-row-date"><CalendarDays size={15} /><b>{dueDate ? shortDate(dueDate) : "ไม่มีกำหนด"}</b></span><div><strong>{item.title}</strong><small>{shared ? `เจ้าหนี้ ${item.creditorName || "เจ้าหนี้"} · คงเหลือ ${money(item.outstandingAmount)}` : fullBalance ? (statement ? `ยอดรอบบิล ${monthLabel(statementMonth)}` : "ยังไม่ใส่ยอดรอบบิล") : `ยอดคงเหลือ ${money(item.outstanding)}`}</small></div><strong className="debt-row-amount">{money(shared ? (planned || dueAmount) : planned)}</strong><ChevronDown className="row-chevron" size={17} /></button>
                 {expanded && (shared ? <div className="debt-row-detail shared-debt-detail"><div className="liability-facts"><span>ยอดคงเหลือ <strong>{money(item.outstandingAmount)}</strong></span><span>งวดถัดไป <strong>{dueDate ? shortDate(dueDate) : "ไม่มีกำหนด"}</strong></span><span>เจ้าหนี้ <strong>{item.creditorName || "เจ้าหนี้"}</strong></span></div><div className="liability-actions"><button className="primary" onClick={() => onOpenSharedDebt?.(item.id)}><ExternalLink size={14} />เปิดรายการและชำระ</button></div></div> : <div className="debt-row-detail">
                   <div className="liability-progress"><i><b style={{ width: `${Math.min(100, paidPercent)}%` }} /></i><span>{fullBalance ? !statement ? "ยังไม่ใส่ยอดรอบบิล" : statementRemaining <= 0 ? "จ่ายครบแล้ว" : `เหลือจ่าย ${money(statementRemaining)}` : item.type === "credit_card" && item.creditLimit ? `ใช้วงเงิน ${utilization.toFixed(0)}%` : `ชำระแล้ว ${Math.min(100, paidPercent).toFixed(0)}%`}</span></div>
                   <div className="liability-facts">{fullBalance ? <><span>ยอดเรียกเก็บ <strong>{statement ? money(statement.amount) : "ยังไม่มี"}</strong></span><span>ครบกำหนด <strong>{shortDate(dueDate)}</strong></span></> : <><span>จ่ายเดือนละ <strong>{money(item.monthlyPayment)}</strong></span><span>ครบกำหนด <strong>{shortDate(dueDate)}</strong></span></>}{Number(item.annualRate) > 0 && <span>ดอกเบี้ย <strong>{money(item.annualRate)}%</strong></span>}{Number(item.totalInstallments) > 0 && <span>เหลือ <strong>{Math.max(0, Number(item.totalInstallments) - Number(item.paidInstallments))} งวด</strong></span>}</div>
                   <div className={`liability-actions ${fullBalance ? "card-actions" : ""}`}>{fullBalance && <button className="secondary statement-button" onClick={() => setModal({ type: "statement", item, statement, statementMonth })}><ReceiptText size={14} />{statement ? "แก้ยอดรอบบิล" : "ใส่ยอดรอบบิล"}</button>}<button className="primary" disabled={item.active === false || (fullBalance ? !statement || statementRemaining <= 0 : Number(item.outstanding) <= 0)} onClick={() => setModal({ type: "payment", item, statement, statementMonth, defaultDate: dueDate })}><CheckCircle2 size={14} />{fullBalance && statementRemaining <= 0 && statement ? "จ่ายครบแล้ว" : "บันทึกจ่าย"}</button><button className="secondary" onClick={() => setModal({ type: "liability", item })}><Pencil size={14} />แก้ไข</button><button className="icon-delete" aria-label={`ลบ ${item.title}`} onClick={() => deleteLiability(item)}><Trash2 size={14} /></button></div>
+                  <PersonalDebtPaymentHistory payments={debtPayments} onDelete={deletePayment} />
                 </div>)}
               </article>;
             })}</div>}
