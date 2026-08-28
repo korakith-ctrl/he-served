@@ -384,42 +384,21 @@ function installmentPercentLabel(value) {
   return Number(value || 0).toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 1 });
 }
 
-function PersonalInstallmentOverviewCard({ liabilities, payments, cardStatements }) {
-  const accounts = liabilities.map((liability) => ({
-    liability,
-    rows: personalInstallmentRows(liability, payments.filter((payment) => payment.liabilityId === liability.id), cardStatements[liability.id]),
-  }));
-  const chartRows = accounts.flatMap((account) => account.rows);
-  const totalTarget = chartRows.reduce((sum, item) => sum + item.targetAmount, 0);
-  const totalPaid = chartRows.reduce((sum, item) => sum + item.paidAmount, 0);
-  const totalPercent = totalTarget > 0 ? totalPaid / totalTarget * 100 : 0;
-  const completedInstallments = chartRows.filter((item) => item.targetAmount > 0 && item.paidAmount >= item.targetAmount).length;
-  const accountsWithHistory = accounts.filter((account) => account.rows.length > 0).length;
+function PersonalInstallmentCards({ liabilities, payments, cardStatements }) {
+  const cards = liabilities.flatMap((liability) => personalInstallmentRows(liability, payments.filter((payment) => payment.liabilityId === liability.id), cardStatements[liability.id]).map((row) => ({ liability, row })));
 
-  return <article className="personal-card installment-overall-card">
-    <div className="installment-overall-main"><span><ChartNoAxesColumnIncreasing size={21} /></span><div><p className="eyebrow">ภาพรวมทุกบัญชี</p><h3>การจ่ายหนี้รายงวด</h3></div><strong>{money(totalPaid)}</strong><small>จ่ายสะสมจากยอดตามงวด {money(totalTarget)}</small></div>
-    <div className="installment-overall-progress"><div><span>ความคืบหน้ารวม</span><strong>{installmentPercentLabel(totalPercent)}%</strong></div><i role="progressbar" aria-label={`ความคืบหน้าการจ่ายหนี้รายงวด ${installmentPercentLabel(totalPercent)} เปอร์เซ็นต์`} aria-valuemin="0" aria-valuemax="100" aria-valuenow={Number(Math.min(100, totalPercent).toFixed(1))}><m.b initial={{ width: 0 }} animate={{ width: `${Math.min(100, totalPercent)}%` }} transition={{ duration: .75, ease: [.22, 1, .36, 1] }} /></i><dl><div><dt>งวดที่บันทึก</dt><dd>{chartRows.length}</dd></div><div><dt>จ่ายครบแล้ว</dt><dd>{completedInstallments}</dd></div><div><dt>บัญชีที่มีประวัติ</dt><dd>{accountsWithHistory}/{liabilities.length}</dd></div></dl></div>
-  </article>;
-}
-
-function PersonalInstallmentChart({ liability, payments, statements }) {
-  const chartRows = personalInstallmentRows(liability, payments, statements);
-
-  const totalTarget = chartRows.reduce((sum, item) => sum + item.targetAmount, 0);
-  const totalPaid = chartRows.reduce((sum, item) => sum + item.paidAmount, 0);
-  const totalPercent = totalTarget > 0 ? totalPaid / totalTarget * 100 : 0;
-
-  return <section className="personal-installment-chart" aria-label={`กราฟการจ่ายแต่ละงวดของ ${liability.title}`}>
-    <div className="personal-installment-chart-head"><div><span><ChartNoAxesColumnIncreasing size={16} /></span><div><strong>จ่ายแต่ละงวดไปเท่าไร</strong><small>{isFullBalanceCard(liability) ? "เทียบยอดที่จ่ายกับยอดเรียกเก็บแต่ละรอบบิล" : "เทียบยอดที่จ่ายจริงกับยอดที่ต้องจ่ายต่องวด"}</small></div></div>{chartRows.length > 0 && <div><strong>{money(totalPaid)}</strong><small>จาก {money(totalTarget)} · {installmentPercentLabel(totalPercent)}%</small></div>}</div>
-    {chartRows.length > 0 ? <div className="personal-installment-chart-rows">{chartRows.map((row, index) => {
+  return <section className="installment-cards-section" aria-label="ภาพรวมการจ่ายหนี้แยกแต่ละงวด">
+    <div className="installment-cards-heading"><div><p className="eyebrow">ประวัติหนี้ส่วนตัว</p><h2>ภาพรวมแต่ละงวด</h2><small>หนึ่ง card ต่อหนึ่งงวด แสดงยอดจ่ายจริงเทียบกับยอดของงวดนั้น</small></div><span>{cards.length} งวด</span></div>
+    {cards.length > 0 ? <div className="installment-period-grid">{cards.map(({ liability, row }, index) => {
+      const DebtIcon = LIABILITY_TYPES[liability.type]?.icon || CircleDollarSign;
       const percent = row.targetAmount > 0 ? row.paidAmount / row.targetAmount * 100 : 0;
       const tone = percent >= 100 ? "paid" : percent > 0 ? "partial" : "unpaid";
-      return <div className={`personal-installment-chart-row ${tone}`} key={row.key}>
-        <div><strong>{row.label}</strong><small>{row.meta}</small></div>
-        <div className="personal-installment-track" role="progressbar" aria-label={`${row.label} จ่ายแล้ว ${installmentPercentLabel(percent)} เปอร์เซ็นต์`} aria-valuemin="0" aria-valuemax="100" aria-valuenow={Number(Math.min(100, percent).toFixed(1))}><m.i initial={{ width: 0 }} animate={{ width: `${Math.min(100, percent)}%` }} transition={{ duration: .6, delay: Math.min(index * .04, .32), ease: [.22, 1, .36, 1] }} /></div>
-        <div><strong>{money(row.paidAmount)}</strong><small>จาก {money(row.targetAmount)}</small></div><b>{installmentPercentLabel(percent)}%</b>
-      </div>;
-    })}</div> : <p className="personal-installment-empty">ยังไม่มีงวดที่บันทึกการชำระ เมื่อกด “บันทึกจ่าย” กราฟจะแสดงที่นี่</p>}
+      return <article className={`personal-card installment-period-card ${tone}`} key={`${liability.id}_${row.key}`}>
+        <header><span className={`liability-icon ${liability.type}`}><DebtIcon size={18} strokeWidth={1.8} /></span><div><small>{liability.title}</small><strong>{row.label}</strong></div><b>{percent >= 100 ? "จ่ายครบ" : percent > 0 ? "จ่ายบางส่วน" : "ยังไม่จ่าย"}</b></header>
+        <div className="installment-period-amount"><span>จ่ายแล้ว</span><strong>{money(row.paidAmount)}</strong><small>จากยอดงวด {money(row.targetAmount)}</small></div>
+        <div className="installment-period-progress"><div><span>{row.meta}</span><strong>{installmentPercentLabel(percent)}%</strong></div><i role="progressbar" aria-label={`${liability.title} ${row.label} จ่ายแล้ว ${installmentPercentLabel(percent)} เปอร์เซ็นต์`} aria-valuemin="0" aria-valuemax="100" aria-valuenow={Number(Math.min(100, percent).toFixed(1))}><m.b initial={{ width: 0 }} animate={{ width: `${Math.min(100, percent)}%` }} transition={{ duration: .65, delay: Math.min(index * .035, .3), ease: [.22, 1, .36, 1] }} /></i></div>
+      </article>;
+    })}</div> : <div className="personal-card installment-period-empty"><ChartNoAxesColumnIncreasing size={22} /><div><strong>ยังไม่มีงวดที่บันทึกการชำระ</strong><p>เมื่อกด “บันทึกจ่าย” card ของงวดนั้นจะแสดงที่นี่</p></div></div>}
   </section>;
 }
 
@@ -721,17 +700,7 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
         </aside>
       </div>
 
-      {liabilities.length > 0 && <section className="installment-cards-section">
-        <div className="installment-cards-heading"><div><p className="eyebrow">ประวัติหนี้ส่วนตัว</p><h2>ยอดที่จ่ายแต่ละงวด</h2></div><span>{liabilities.length} บัญชี</span></div>
-        <PersonalInstallmentOverviewCard liabilities={liabilities} payments={payments} cardStatements={cardStatements} />
-        <div className="installment-account-grid">{liabilities.map((item) => {
-          const DebtIcon = LIABILITY_TYPES[item.type]?.icon || CircleDollarSign;
-          return <article className="personal-card installment-account-card" key={item.id}>
-            <header className="installment-account-head"><span className={`liability-icon ${item.type}`}><DebtIcon size={20} strokeWidth={1.8} /></span><div><small>{LIABILITY_TYPES[item.type]?.label || "หนี้ส่วนตัว"}</small><h3>{item.title}</h3></div><div><span>ยอดคงเหลือ</span><strong>{money(item.outstanding)}</strong></div></header>
-            <PersonalInstallmentChart liability={item} payments={payments.filter((payment) => payment.liabilityId === item.id)} statements={cardStatements[item.id]} />
-          </article>;
-        })}</div>
-      </section>}
+      {liabilities.length > 0 && <PersonalInstallmentCards liabilities={liabilities} payments={payments} cardStatements={cardStatements} />}
 
       <section className="quick-actions"><button onClick={() => setModal({ type: "income" })}><span><Plus size={18} /></span><strong>เพิ่มรายรับ</strong><small>เงินเดือนหรือรายได้อื่น</small></button><button onClick={() => setModal({ type: "expense" })}><span><Minus size={18} /></span><strong>เพิ่มรายจ่าย</strong><small>ประจำหรือครั้งเดียว</small></button><button onClick={() => setModal({ type: "liability" })}><span><WalletCards size={18} /></span><strong>เพิ่มหนี้</strong><small>บัตร บ้าน รถ และอื่นๆ</small></button></section>
     </m.div>}
