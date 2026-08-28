@@ -426,6 +426,7 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
   const [modal, setModal] = useState(null);
   const [openDebtGroup, setOpenDebtGroup] = useState("");
   const [expandedDebt, setExpandedDebt] = useState("");
+  const [chartLiabilityId, setChartLiabilityId] = useState("");
 
   function changeSection(nextSection) {
     if (nextSection === section) return;
@@ -452,6 +453,7 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
   const expenses = useMemo(() => rows(data.expenses), [data.expenses]);
   const liabilities = useMemo(() => rows(data.liabilities).sort((a, b) => Number(b.outstanding) - Number(a.outstanding)), [data.liabilities]);
   const payments = useMemo(() => rows(data.payments).sort((a, b) => String(b.date).localeCompare(String(a.date))), [data.payments]);
+  const chartLiability = liabilities.find((item) => item.id === chartLiabilityId) || liabilities[0] || null;
   const cardStatements = data.cardStatements || {};
   const salaryIncome = incomes.find((item) => item.active !== false && item.frequency === "monthly" && item.category === "เงินเดือน") || incomes.find((item) => item.active !== false && item.frequency === "monthly");
   const payday = Number(salaryIncome?.dayOfMonth || 1);
@@ -713,6 +715,10 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
           <div className="coverage-content"><div className="coverage-ring" role="img" aria-label={`หนี้คิดเป็น ${debtCoverage.toFixed(1)} เปอร์เซ็นต์ของเงินเดือน`} style={{ "--coverage": `${Math.min(100, debtCoverage)}%` }}><AnimatedNumber as="strong" value={debtCoverage} digits={1} suffix="%" /><span>ของเงินเดือน</span></div><div className="coverage-copy"><span>{afterDebt >= 0 ? "เหลือหลังหักหนี้" : "เงินเดือนยังขาด"}</span><AnimatedNumber value={Math.abs(afterDebt)} prefix={afterDebt < 0 ? "−" : ""} /><small>{afterDebt >= 0 ? "ยังไม่รวมค่าใช้จ่ายทั่วไป" : "ควรจัดลำดับยอดที่ต้องจ่ายก่อน"}</small></div></div>
         </article>
       </section>
+      {chartLiability && <section className="personal-card installment-overview-card">
+        <div className="personal-section-head"><div><p className="eyebrow">ประวัติหนี้ส่วนตัว</p><h2>ยอดที่จ่ายแต่ละงวด</h2></div><label className="installment-account-picker"><span>เลือกบัญชีหนี้</span><select value={chartLiability.id} onChange={(event) => setChartLiabilityId(event.target.value)}>{liabilities.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label></div>
+        <PersonalInstallmentChart liability={chartLiability} payments={payments.filter((payment) => payment.liabilityId === chartLiability.id)} statements={cardStatements[chartLiability.id]} />
+      </section>}
       {debtStrategies.length > 1 && <section className="strategy-note"><span><TrendingDown size={18} /></span><div><strong>ถ้าต้องการลดดอกเบี้ยรวม ให้เริ่มจาก {debtStrategies[0]?.title}</strong><p>อัตราดอกเบี้ย {money(debtStrategies[0]?.annualRate)}% ต่อปี สูงสุดในรายการของคุณ โดยยังคงจ่ายขั้นต่ำบัญชีอื่นให้ครบ</p></div></section>}
       {liabilities.length || activeSharedPayables.length ? <section className="debt-category-list" aria-label="หนี้แยกตามหมวด">
         {debtGroups.map((group) => {
@@ -730,7 +736,6 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
                 {expanded && (shared ? <div className="debt-row-detail shared-debt-detail"><div className="liability-facts"><span>ยอดคงเหลือ <strong>{money(item.outstandingAmount)}</strong></span><span>งวดถัดไป <strong>{dueDate ? shortDate(dueDate) : "ไม่มีกำหนด"}</strong></span><span>เจ้าหนี้ <strong>{item.creditorName || "เจ้าหนี้"}</strong></span></div><div className="liability-actions"><button className="primary" onClick={() => onOpenSharedDebt?.(item.id)}><ExternalLink size={14} />เปิดรายการและชำระ</button></div></div> : <div className="debt-row-detail">
                   <div className="liability-progress"><i><b style={{ width: `${Math.min(100, paidPercent)}%` }} /></i><span>{fullBalance ? !statement ? "ยังไม่ใส่ยอดรอบบิล" : statementRemaining <= 0 ? "จ่ายครบแล้ว" : `เหลือจ่าย ${money(statementRemaining)}` : item.type === "credit_card" && item.creditLimit ? `ใช้วงเงิน ${utilization.toFixed(0)}%` : `ชำระแล้ว ${Math.min(100, paidPercent).toFixed(0)}%`}</span></div>
                   <div className="liability-facts">{fullBalance ? <><span>ยอดเรียกเก็บ <strong>{statement ? money(statement.amount) : "ยังไม่มี"}</strong></span><span>ครบกำหนด <strong>{shortDate(dueDate)}</strong></span></> : <><span>จ่ายเดือนละ <strong>{money(item.monthlyPayment)}</strong></span><span>ครบกำหนด <strong>{shortDate(dueDate)}</strong></span></>}{Number(item.annualRate) > 0 && <span>ดอกเบี้ย <strong>{money(item.annualRate)}%</strong></span>}{Number(item.totalInstallments) > 0 && <span>เหลือ <strong>{Math.max(0, Number(item.totalInstallments) - Number(item.paidInstallments))} งวด</strong></span>}</div>
-                  <PersonalInstallmentChart liability={item} payments={payments.filter((payment) => payment.liabilityId === item.id)} statements={cardStatements[item.id]} />
                   <div className={`liability-actions ${fullBalance ? "card-actions" : ""}`}>{fullBalance && <button className="secondary statement-button" onClick={() => setModal({ type: "statement", item, statement, statementMonth })}><ReceiptText size={14} />{statement ? "แก้ยอดรอบบิล" : "ใส่ยอดรอบบิล"}</button>}<button className="primary" disabled={item.active === false || (fullBalance ? !statement || statementRemaining <= 0 : Number(item.outstanding) <= 0)} onClick={() => setModal({ type: "payment", item, statement, statementMonth, defaultDate: dueDate })}><CheckCircle2 size={14} />{fullBalance && statementRemaining <= 0 && statement ? "จ่ายครบแล้ว" : "บันทึกจ่าย"}</button><button className="secondary" onClick={() => setModal({ type: "liability", item })}><Pencil size={14} />แก้ไข</button><button className="icon-delete" aria-label={`ลบ ${item.title}`} onClick={() => deleteLiability(item)}><Trash2 size={14} /></button></div>
                 </div>)}
               </article>;
