@@ -698,6 +698,17 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
         </aside>
       </div>
 
+      {liabilities.length > 0 && <section className="installment-cards-section">
+        <div className="installment-cards-heading"><div><p className="eyebrow">ประวัติหนี้ส่วนตัว</p><h2>ยอดที่จ่ายแต่ละงวด</h2></div><span>{liabilities.length} บัญชี</span></div>
+        <div className="installment-account-grid">{liabilities.map((item) => {
+          const DebtIcon = LIABILITY_TYPES[item.type]?.icon || CircleDollarSign;
+          return <article className="personal-card installment-account-card" key={item.id}>
+            <header className="installment-account-head"><span className={`liability-icon ${item.type}`}><DebtIcon size={20} strokeWidth={1.8} /></span><div><small>{LIABILITY_TYPES[item.type]?.label || "หนี้ส่วนตัว"}</small><h3>{item.title}</h3></div><div><span>ยอดคงเหลือ</span><strong>{money(item.outstanding)}</strong></div></header>
+            <PersonalInstallmentChart liability={item} payments={payments.filter((payment) => payment.liabilityId === item.id)} statements={cardStatements[item.id]} />
+          </article>;
+        })}</div>
+      </section>}
+
       <section className="quick-actions"><button onClick={() => setModal({ type: "income" })}><span><Plus size={18} /></span><strong>เพิ่มรายรับ</strong><small>เงินเดือนหรือรายได้อื่น</small></button><button onClick={() => setModal({ type: "expense" })}><span><Minus size={18} /></span><strong>เพิ่มรายจ่าย</strong><small>ประจำหรือครั้งเดียว</small></button><button onClick={() => setModal({ type: "liability" })}><span><WalletCards size={18} /></span><strong>เพิ่มหนี้</strong><small>บัตร บ้าน รถ และอื่นๆ</small></button></section>
     </m.div>}
 
@@ -713,16 +724,6 @@ export default function PersonalFinance({ user, onToast, sharedReceivables = [],
           <div className="coverage-content"><div className="coverage-ring" role="img" aria-label={`หนี้คิดเป็น ${debtCoverage.toFixed(1)} เปอร์เซ็นต์ของเงินเดือน`} style={{ "--coverage": `${Math.min(100, debtCoverage)}%` }}><AnimatedNumber as="strong" value={debtCoverage} digits={1} suffix="%" /><span>ของเงินเดือน</span></div><div className="coverage-copy"><span>{afterDebt >= 0 ? "เหลือหลังหักหนี้" : "เงินเดือนยังขาด"}</span><AnimatedNumber value={Math.abs(afterDebt)} prefix={afterDebt < 0 ? "−" : ""} /><small>{afterDebt >= 0 ? "ยังไม่รวมค่าใช้จ่ายทั่วไป" : "ควรจัดลำดับยอดที่ต้องจ่ายก่อน"}</small></div></div>
         </article>
       </section>
-      {liabilities.length > 0 && <section className="installment-cards-section">
-        <div className="installment-cards-heading"><div><p className="eyebrow">ประวัติหนี้ส่วนตัว</p><h2>ยอดที่จ่ายแต่ละงวด</h2></div><span>{liabilities.length} บัญชี</span></div>
-        <div className="installment-account-grid">{liabilities.map((item) => {
-          const DebtIcon = LIABILITY_TYPES[item.type]?.icon || CircleDollarSign;
-          return <article className="personal-card installment-account-card" key={item.id}>
-            <header className="installment-account-head"><span className={`liability-icon ${item.type}`}><DebtIcon size={20} strokeWidth={1.8} /></span><div><small>{LIABILITY_TYPES[item.type]?.label || "หนี้ส่วนตัว"}</small><h3>{item.title}</h3></div><div><span>ยอดคงเหลือ</span><strong>{money(item.outstanding)}</strong></div></header>
-            <PersonalInstallmentChart liability={item} payments={payments.filter((payment) => payment.liabilityId === item.id)} statements={cardStatements[item.id]} />
-          </article>;
-        })}</div>
-      </section>}
       {debtStrategies.length > 1 && <section className="strategy-note"><span><TrendingDown size={18} /></span><div><strong>ถ้าต้องการลดดอกเบี้ยรวม ให้เริ่มจาก {debtStrategies[0]?.title}</strong><p>อัตราดอกเบี้ย {money(debtStrategies[0]?.annualRate)}% ต่อปี สูงสุดในรายการของคุณ โดยยังคงจ่ายขั้นต่ำบัญชีอื่นให้ครบ</p></div></section>}
       {liabilities.length || activeSharedPayables.length ? <section className="debt-category-list" aria-label="หนี้แยกตามหมวด">
         {debtGroups.map((group) => {
