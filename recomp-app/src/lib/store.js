@@ -13,9 +13,11 @@ export const defaultPreferences = {
 
 export function initialStore() {
   return {
-    version: 3,
+    version: 5,
     logs: { zackdark: makeInitialLogs("zackdark"), tony: makeInitialLogs("tony") },
     workouts: { zackdark: [], tony: [] },
+    healthWorkouts: { zackdark: [], tony: [] },
+    integrations: { appleHealth: {} },
     preferences: { ...defaultPreferences },
   };
 }
@@ -23,7 +25,16 @@ export function initialStore() {
 export function loadStore() {
   try {
     const current = JSON.parse(localStorage.getItem(STORE_KEY));
-    if (current?.logs) return { ...initialStore(), ...current, preferences: { ...defaultPreferences, ...current.preferences } };
+    if (current?.logs) {
+      const baseline = initialStore();
+      return {
+        ...baseline,
+        ...current,
+        healthWorkouts: { ...baseline.healthWorkouts, ...(current.healthWorkouts || {}) },
+        integrations: { ...baseline.integrations, ...(current.integrations || {}) },
+        preferences: { ...defaultPreferences, ...current.preferences },
+      };
+    }
   } catch {
     // Corrupt local data falls back to a safe baseline and can later be restored from backup.
   }
@@ -32,7 +43,7 @@ export function loadStore() {
 }
 
 export function saveStore(state) {
-  localStorage.setItem(STORE_KEY, JSON.stringify({ ...state, version: 3 }));
+  localStorage.setItem(STORE_KEY, JSON.stringify({ ...state, version: 5 }));
 }
 
 export function cleanLogInput(form) {

@@ -1,0 +1,344 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0C8E6747D1149577AF73B81D /* RecompHealthApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F38AE59A63E921436E31AC9 /* RecompHealthApp.swift */; };
+		40CE1EDBF289140482411053 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F54FA75735C2C0BADCEE1B08 /* ContentView.swift */; };
+		45E60B889D310FE12CF6F878 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9A71CE739A535218D5D823A /* KeychainStore.swift */; };
+		5A4C0377BEE843390313FFC2 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9581EC3B754E87D3AA0F667 /* Models.swift */; };
+		CB4BDEA73072F644B5B5D012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1F598803745A0474FD63BA1E /* Assets.xcassets */; };
+		D56671C1C9EAC30EABE7E7E9 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 3C017B9AA092C5A4179893D4 /* PrivacyInfo.xcprivacy */; };
+		DF3F5EA0E93265780E2FFB41 /* HealthKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A06A46F794ABF28E960511E3 /* HealthKitManager.swift */; };
+		E27C713BC558CBFBB5353F58 /* AppViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE19907D82270431E07ADA45 /* AppViewModel.swift */; };
+		FFF18D68D922ACD1CA81F6B4 /* SyncClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D8D7999575FBD6BC79E04C1 /* SyncClient.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		1F38AE59A63E921436E31AC9 /* RecompHealthApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecompHealthApp.swift; sourceTree = "<group>"; };
+		1F598803745A0474FD63BA1E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		3C017B9AA092C5A4179893D4 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		9D8D7999575FBD6BC79E04C1 /* SyncClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncClient.swift; sourceTree = "<group>"; };
+		A06A46F794ABF28E960511E3 /* HealthKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitManager.swift; sourceTree = "<group>"; };
+		A9581EC3B754E87D3AA0F667 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		B9A71CE739A535218D5D823A /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
+		DD1D2B62638CB8FD8E630A11 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		E667141E828D1AAB702F6882 /* RecompHealth.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RecompHealth.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EE19907D82270431E07ADA45 /* AppViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModel.swift; sourceTree = "<group>"; };
+		F409A99F9687CF5F62AF8CDA /* RecompHealth.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = RecompHealth.entitlements; sourceTree = "<group>"; };
+		F54FA75735C2C0BADCEE1B08 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		5FCB2AC694B3E3556FC30BF5 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				E667141E828D1AAB702F6882 /* RecompHealth.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		95636E52E2F716D3D4179508 = {
+			isa = PBXGroup;
+			children = (
+				E9EC7A4CE0341CF55347C401 /* RecompHealth */,
+				5FCB2AC694B3E3556FC30BF5 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		E9EC7A4CE0341CF55347C401 /* RecompHealth */ = {
+			isa = PBXGroup;
+			children = (
+				EE19907D82270431E07ADA45 /* AppViewModel.swift */,
+				1F598803745A0474FD63BA1E /* Assets.xcassets */,
+				F54FA75735C2C0BADCEE1B08 /* ContentView.swift */,
+				A06A46F794ABF28E960511E3 /* HealthKitManager.swift */,
+				DD1D2B62638CB8FD8E630A11 /* Info.plist */,
+				B9A71CE739A535218D5D823A /* KeychainStore.swift */,
+				A9581EC3B754E87D3AA0F667 /* Models.swift */,
+				3C017B9AA092C5A4179893D4 /* PrivacyInfo.xcprivacy */,
+				F409A99F9687CF5F62AF8CDA /* RecompHealth.entitlements */,
+				1F38AE59A63E921436E31AC9 /* RecompHealthApp.swift */,
+				9D8D7999575FBD6BC79E04C1 /* SyncClient.swift */,
+			);
+			path = RecompHealth;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		C2D68958F36A1952D68B6839 /* RecompHealth */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4F3E8BBEEA50BD089A7F7006 /* Build configuration list for PBXNativeTarget "RecompHealth" */;
+			buildPhases = (
+				8315C048A63CCE34DDA65DDB /* Sources */,
+				22A67D38661CBA77D1BCA0F9 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = RecompHealth;
+			packageProductDependencies = (
+			);
+			productName = RecompHealth;
+			productReference = E667141E828D1AAB702F6882 /* RecompHealth.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		BC370ACB141D603A6045B550 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					C2D68958F36A1952D68B6839 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 0598B2EBA58B550FF500C409 /* Build configuration list for PBXProject "RecompHealth" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 95636E52E2F716D3D4179508;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 5FCB2AC694B3E3556FC30BF5 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				C2D68958F36A1952D68B6839 /* RecompHealth */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		22A67D38661CBA77D1BCA0F9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CB4BDEA73072F644B5B5D012 /* Assets.xcassets in Resources */,
+				D56671C1C9EAC30EABE7E7E9 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		8315C048A63CCE34DDA65DDB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E27C713BC558CBFBB5353F58 /* AppViewModel.swift in Sources */,
+				40CE1EDBF289140482411053 /* ContentView.swift in Sources */,
+				DF3F5EA0E93265780E2FFB41 /* HealthKitManager.swift in Sources */,
+				45E60B889D310FE12CF6F878 /* KeychainStore.swift in Sources */,
+				5A4C0377BEE843390313FFC2 /* Models.swift in Sources */,
+				0C8E6747D1149577AF73B81D /* RecompHealthApp.swift in Sources */,
+				FFF18D68D922ACD1CA81F6B4 /* SyncClient.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		033E1B514038DBE42489AE5D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = RecompHealth/RecompHealth.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				INFOPLIST_FILE = RecompHealth/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.korakritinsa.recomphealth;
+				PRODUCT_NAME = "Recomp Health";
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		710FB38E6A4F022E99210AE4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		994377A36A5AD71F115B25E0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A4C18CD65C59AFA7B650EFD3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = RecompHealth/RecompHealth.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				INFOPLIST_FILE = RecompHealth/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.korakritinsa.recomphealth;
+				PRODUCT_NAME = "Recomp Health";
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		0598B2EBA58B550FF500C409 /* Build configuration list for PBXProject "RecompHealth" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				994377A36A5AD71F115B25E0 /* Debug */,
+				710FB38E6A4F022E99210AE4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		4F3E8BBEEA50BD089A7F7006 /* Build configuration list for PBXNativeTarget "RecompHealth" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A4C18CD65C59AFA7B650EFD3 /* Debug */,
+				033E1B514038DBE42489AE5D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = BC370ACB141D603A6045B550 /* Project object */;
+}

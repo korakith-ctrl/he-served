@@ -1,9 +1,15 @@
 const axios = require("axios");
 const admin = require("firebase-admin");
 const crypto = require("crypto");
-const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret, defineString } = require("firebase-functions/params");
 const logger = require("firebase-functions/logger");
+const {
+  hashPairingToken,
+  mergeAppleHealthLog,
+  normalizeAppleHealthPayload,
+  safeTokenMatch,
+} = require("./recompHealth");
 
 admin.initializeApp();
 const db = admin.database();
@@ -2474,4 +2480,103 @@ exports.markDebtNotificationRead = onCall(DEBT_CALL_OPTIONS, async (request) => 
   if (!snapshot.exists()) throw new HttpsError("not-found", "ไม่พบการแจ้งเตือน");
   await ref.update({ readAt: new Date().toISOString() });
   return { read: true };
+});
+
+const RECOMP_CHALLENGE_ID = "16-week-2026";
+const RECOMP_ROOT = `recompChallenges/${RECOMP_CHALLENGE_ID}`;
+
+async function requiredRecompMember(request) {
+  if (!request.auth) throw new HttpsError("unauthenticated", "กรุณาเข้าสู่ระบบก่อน");
+  const snapshot = await db.ref(`${RECOMP_ROOT}/members/${request.auth.uid}`).once("value");
+  if (!snapshot.exists()) throw new HttpsError("permission-denied", "บัญชีนี้ไม่ได้เป็นสมาชิก Recomp challenge");
+  const member = snapshot.val() || {};
+  if (!["zackdark", "tony"].includes(member.profileId)) throw new HttpsError("failed-precondition", "สมาชิกยังไม่มี profile ที่ถูกต้อง");
+  return { ...member, uid: request.auth.uid };
+}
+
+exports.createAppleHealthPairingToken = onCall({ region: REGION }, async (request) => {
+  const member = await requiredRecompMember(request);
+  const token = crypto.randomBytes(32).toString("base64url");
+  const now = new Date().toISOString();
+  await db.ref(`${RECOMP_ROOT}/appleHealthPairings/${member.profileId}`).set({
+    tokenHash: hashPairingToken(token),
+    createdAt: now,
+    createdBy: member.uid,
+  });
+  await db.ref(`${RECOMP_ROOT}/data/integrations/appleHealth/${member.profileId}`).update({
+    paired: true,
+    pairedAt: now,
+    lastSyncedAt: null,
+  });
+  return {
+    profileId: member.profileId,
+    token,
+    endpoint: `https://${REGION}-${process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || "he-served"}.cloudfunctions.net/syncAppleHealth`,
+  };
+});
+
+exports.revokeAppleHealthPairing = onCall({ region: REGION }, async (request) => {
+  const member = await requiredRecompMember(request);
+  await Promise.all([
+    db.ref(`${RECOMP_ROOT}/appleHealthPairings/${member.profileId}`).remove(),
+    db.ref(`${RECOMP_ROOT}/data/integrations/appleHealth/${member.profileId}`).update({ paired: false, revokedAt: new Date().toISOString() }),
+  ]);
+  return { revoked: true, profileId: member.profileId };
+});
+
+exports.syncAppleHealth = onRequest({ region: REGION, cors: false, timeoutSeconds: 60 }, async (request, response) => {
+  if (request.method !== "POST") {
+    response.set("Allow", "POST").status(405).json({ error: "method-not-allowed" });
+    return;
+  }
+  try {
+    const payload = normalizeAppleHealthPayload(request.body);
+    const authorization = String(request.get("authorization") || "");
+    const token = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
+    const pairingSnapshot = await db.ref(`${RECOMP_ROOT}/appleHealthPairings/${payload.profileId}`).once("value");
+    const pairing = pairingSnapshot.val() || {};
+    if (!safeTokenMatch(token, pairing.tokenHash)) {
+      response.status(401).json({ error: "invalid-pairing-token" });
+      return;
+    }
+
+    const syncedAt = new Date().toISOString();
+    let updatedLogs = 0;
+    const workoutUpdates = {};
+    for (const day of payload.days) {
+      const logRef = db.ref(`${RECOMP_ROOT}/data/logs/${payload.profileId}/${day.date}`);
+      const transaction = await logRef.transaction((current) => mergeAppleHealthLog(current, day, syncedAt, payload.profileId, payload.capturedAt));
+      if (transaction.committed) updatedLogs += 1;
+      for (const workout of day.workouts) {
+        workoutUpdates[`${RECOMP_ROOT}/data/healthWorkouts/${payload.profileId}/${workout.id}`] = {
+          ...workout,
+          date: day.date,
+          profileId: payload.profileId,
+          syncedAt,
+        };
+      }
+    }
+    const integrationPath = `${RECOMP_ROOT}/data/integrations/appleHealth/${payload.profileId}`;
+    const updates = {
+      ...workoutUpdates,
+      [`${integrationPath}/paired`]: true,
+      [`${integrationPath}/lastSyncedAt`]: syncedAt,
+      [`${integrationPath}/lastCapturedAt`]: payload.capturedAt,
+      [`${integrationPath}/timezone`]: payload.timezone,
+      [`${integrationPath}/daysReceived`]: payload.days.length,
+      [`${integrationPath}/workoutsReceived`]: Object.keys(workoutUpdates).length,
+    };
+    await db.ref().update(updates);
+    response.status(200).json({
+      ok: true,
+      profileId: payload.profileId,
+      daysReceived: payload.days.length,
+      logsProcessed: updatedLogs,
+      workoutsReceived: Object.keys(workoutUpdates).length,
+      syncedAt,
+    });
+  } catch (error) {
+    logger.warn("Apple Health sync rejected", { message: error.message });
+    response.status(400).json({ error: error.message || "invalid-payload" });
+  }
 });

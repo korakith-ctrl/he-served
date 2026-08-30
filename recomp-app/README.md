@@ -19,3 +19,7 @@ npm run preview
 ```
 
 Real logs and workout sessions are local-first in the app's own versioned `localStorage` namespace and synchronize live through the existing Firebase project after Google sign-in. Challenge data lives under `recompChallenges/16-week-2026`; database rules restrict access to the seeded ZackDark and Tony Kora member UIDs. Demo preview is generated in memory and never overwrites real or remote logs.
+
+## Apple Health beta
+
+Signed-in members can create or revoke a one-time pairing token from **Realtime sync & reminders → Apple Health · Beta**. The native source is in `../recomp-health-ios`. Its HTTPS bridge fills empty daily fields from HealthKit and refreshes fields already sourced from Apple Health; manually entered Recomp values take precedence.

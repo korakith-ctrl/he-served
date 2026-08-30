@@ -1,6 +1,7 @@
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { GoogleAuthProvider, getAuth, onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import { get, getDatabase, onValue, ref, runTransaction, set } from "firebase/database";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { initialStore } from "./store.js";
 
 const firebaseConfig = {
@@ -19,6 +20,7 @@ export const firebaseConfigured = required.every(key => Boolean(firebaseConfig[k
 const app = firebaseConfigured ? (getApps().length ? getApp() : initializeApp(firebaseConfig)) : null;
 export const firebaseAuth = app ? getAuth(app) : null;
 export const realtimeDb = app ? getDatabase(app) : null;
+const firebaseFunctions = app ? getFunctions(app, "asia-southeast1") : null;
 export const CHALLENGE_ID = "16-week-2026";
 const challengePath = `recompChallenges/${CHALLENGE_ID}`;
 const dataPath = `${challengePath}/data`;
@@ -28,9 +30,11 @@ const objectValues = value => Array.isArray(value) ? value : Object.values(value
 
 export function encodeStore(store, userId = null) {
   return clean({
-    version: 4,
+    version: 5,
     logs: Object.fromEntries(Object.entries(store.logs).map(([profileId, logs]) => [profileId, Object.fromEntries(logs.map(log => [log.date, log]))])),
     workouts: Object.fromEntries(Object.entries(store.workouts).map(([profileId, workouts]) => [profileId, Object.fromEntries(workouts.map(workout => [`${workout.date}_${workout.type}`, workout]))])),
+    healthWorkouts: Object.fromEntries(Object.entries(store.healthWorkouts || {}).map(([profileId, workouts]) => [profileId, Object.fromEntries(workouts.map(workout => [workout.id, workout]))])),
+    integrations: store.integrations || { appleHealth: {} },
     preferences: store.preferences,
     updatedAt: new Date().toISOString(),
     updatedBy: userId,
@@ -42,7 +46,7 @@ export function decodeStore(value) {
   if (!value) return baseline;
   return {
     ...baseline,
-    version: 4,
+    version: 5,
     logs: {
       zackdark: objectValues(value.logs?.zackdark).sort((a, b) => a.date.localeCompare(b.date)),
       tony: objectValues(value.logs?.tony).sort((a, b) => a.date.localeCompare(b.date)),
@@ -51,6 +55,11 @@ export function decodeStore(value) {
       zackdark: objectValues(value.workouts?.zackdark).sort((a, b) => a.date.localeCompare(b.date)),
       tony: objectValues(value.workouts?.tony).sort((a, b) => a.date.localeCompare(b.date)),
     },
+    healthWorkouts: {
+      zackdark: objectValues(value.healthWorkouts?.zackdark).sort((a, b) => String(a.startAt).localeCompare(String(b.startAt))),
+      tony: objectValues(value.healthWorkouts?.tony).sort((a, b) => String(a.startAt).localeCompare(String(b.startAt))),
+    },
+    integrations: { ...baseline.integrations, ...(value.integrations || {}), appleHealth: { ...baseline.integrations.appleHealth, ...(value.integrations?.appleHealth || {}) } },
     preferences: { ...baseline.preferences, ...(value.preferences || {}) },
   };
 }
@@ -63,7 +72,15 @@ const newest = (left, right) => {
 
 export function mergeStores(remote, local) {
   const baseline = initialStore();
-  const result = { ...baseline, version: 4, logs: {}, workouts: {}, preferences: { ...baseline.preferences, ...local.preferences, ...remote.preferences } };
+  const result = {
+    ...baseline,
+    version: 5,
+    logs: {},
+    workouts: {},
+    healthWorkouts: {},
+    integrations: { ...baseline.integrations, ...local.integrations, ...remote.integrations, appleHealth: { ...(local.integrations?.appleHealth || {}), ...(remote.integrations?.appleHealth || {}) } },
+    preferences: { ...baseline.preferences, ...local.preferences, ...remote.preferences },
+  };
   for (const profileId of ["zackdark", "tony"]) {
     const logs = new Map();
     [...(remote.logs[profileId] || []), ...(local.logs[profileId] || [])].forEach(log => logs.set(log.date, newest(logs.get(log.date), log)));
@@ -74,6 +91,9 @@ export function mergeStores(remote, local) {
       workouts.set(key, newest(workouts.get(key), workout));
     });
     result.workouts[profileId] = [...workouts.values()].sort((a, b) => a.date.localeCompare(b.date));
+    const healthWorkouts = new Map();
+    [...(remote.healthWorkouts?.[profileId] || []), ...(local.healthWorkouts?.[profileId] || [])].forEach(workout => healthWorkouts.set(workout.id, newest(healthWorkouts.get(workout.id), workout)));
+    result.healthWorkouts[profileId] = [...healthWorkouts.values()].sort((a, b) => String(a.startAt).localeCompare(String(b.startAt)));
   }
   return result;
 }
@@ -91,6 +111,18 @@ export async function signInFirebase() {
 }
 
 export const signOutFirebase = () => firebaseAuth ? signOut(firebaseAuth) : Promise.resolve();
+
+export async function createAppleHealthPairing() {
+  if (!firebaseFunctions || !firebaseAuth?.currentUser) throw new Error("กรุณาเข้าสู่ระบบสมาชิกก่อน");
+  const result = await httpsCallable(firebaseFunctions, "createAppleHealthPairingToken")({});
+  return result.data;
+}
+
+export async function revokeAppleHealthPairing() {
+  if (!firebaseFunctions || !firebaseAuth?.currentUser) throw new Error("กรุณาเข้าสู่ระบบสมาชิกก่อน");
+  const result = await httpsCallable(firebaseFunctions, "revokeAppleHealthPairing")({});
+  return result.data;
+}
 
 export async function connectRealtime(user, localStore, { onStore, onState }) {
   if (!realtimeDb || !user) return () => {};
