@@ -17,7 +17,21 @@
     <meta name="twitter:image" content="https://he-served-three.vercel.app/logo.png" />
     <link rel="icon" type="image/png" href="/logo-zone2.png" />
     <link rel="apple-touch-icon" href="/logo-zone2.png" />
-    <link rel="manifest" href="/site.webmanifest" />
+    <script>
+      (() => {
+        const routeMatch = window.location.pathname.match(/^\/order\/([A-Za-z0-9_-]{1,128})\/?$/);
+        const manifest = document.createElement("link");
+        manifest.rel = "manifest";
+        manifest.href = "/site.webmanifest";
+        if (routeMatch) {
+          const query = new URLSearchParams({ shopUid: routeMatch[1] });
+          const eventId = new URLSearchParams(window.location.search).get("event");
+          if (/^[A-Za-z0-9_-]{1,128}$/.test(eventId || "")) query.set("event", eventId);
+          manifest.href = `/api/site-manifest?${query}`;
+        }
+        document.head.appendChild(manifest);
+      })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <style>

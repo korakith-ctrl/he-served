@@ -7,6 +7,7 @@ import QRCode from "qrcode";
 import Login from "./Login.jsx";
 import CustomerOrder from "./CustomerOrder.jsx";
 import LandingScreen, { LANDING_SCREEN_EXIT_MS, LANDING_SCREEN_MINIMUM_MS } from "./LandingScreen.jsx";
+import { resolveCustomerLaunch } from "./customerLaunch.js";
 
 const UNITS = { g: "กรัม", ml: "มล.", piece: "ชิ้น" };
 const CATEGORIES = [
@@ -10583,6 +10584,20 @@ function AdminDashboard({ user, theme, onToggleTheme }) {
   );
 }
 
+function MissingCustomerLaunch() {
+  return (
+    <main style={{ minHeight:"100dvh", display:"grid", placeItems:"center", padding:24, boxSizing:"border-box", background:"linear-gradient(160deg, #FFFFFF, #EDF9FD)", fontFamily:"Inter, sans-serif" }}>
+      <section style={{ width:"min(100%, 420px)", padding:"30px 24px", border:"1px solid rgba(0,163,224,.18)", borderRadius:22, background:"rgba(255,255,255,.88)", boxShadow:"0 18px 50px rgba(0,91,133,.12)", textAlign:"center" }}>
+        <img src="/logo-zone2.png" alt="ZONE 2" style={{ width:88, height:88, objectFit:"contain", borderRadius:20 }} />
+        <h1 style={{ margin:"18px 0 8px", color:"#003B5C", fontSize:20 }}>กรุณาเปิดลิงก์หน้าร้านอีกครั้ง</h1>
+        <p style={{ margin:0, color:"#55778A", fontSize:13.5, lineHeight:1.7 }}>
+          เครื่องนี้ยังไม่มีข้อมูลลิงก์ร้าน กรุณาสแกน QR หรือเปิดลิงก์สั่งซื้อของร้านหนึ่งครั้ง แล้วเพิ่มลงหน้าจอหลักใหม่
+        </p>
+      </section>
+    </main>
+  );
+}
+
 
 export default function App() {
   const [user, setUser] = useState(undefined);
@@ -10591,30 +10606,42 @@ export default function App() {
     if (saved === "dark" || saved === "light") return saved;
     return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   });
-  const orderShopUid = window.location.pathname.match(/^\/order\/([^/]+)/)?.[1] || null;
-  const eventId = orderShopUid ? new URLSearchParams(window.location.search).get("event") : null;
+  const customerLaunch = useMemo(() => resolveCustomerLaunch(window), []);
+  const orderShopUid = customerLaunch.route?.shopUid || null;
+  const eventId = customerLaunch.route?.eventId || null;
 
   useEffect(() => {
-    if (orderShopUid) return undefined;
+    if (!customerLaunch.restored || !customerLaunch.route) return;
+    const currentPath = `${window.location.pathname}${window.location.search}`;
+    if (currentPath !== customerLaunch.route.path) {
+      window.history.replaceState(null, "", customerLaunch.route.path);
+    }
+  }, [customerLaunch]);
+
+  useEffect(() => {
+    if (customerLaunch.isCustomerEntry) return undefined;
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme;
     localStorage.setItem("coffee-shop-theme", theme);
     return undefined;
-  }, [theme, orderShopUid]);
+  }, [theme, customerLaunch.isCustomerEntry]);
 
   function toggleTheme() {
     setTheme((current) => current === "dark" ? "light" : "dark");
   }
 
   useEffect(() => {
-    if (orderShopUid) return;
+    if (customerLaunch.isCustomerEntry) return undefined;
     const unsub = onAuthStateChanged(auth, (u) => setUser(u));
     return () => unsub();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [customerLaunch.isCustomerEntry]);
 
   if (orderShopUid) {
     return <CustomerOrder shopUid={orderShopUid} eventId={eventId} />;
+  }
+
+  if (customerLaunch.isCustomerEntry) {
+    return <MissingCustomerLaunch />;
   }
 
   if (user === undefined) {
