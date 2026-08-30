@@ -1,4 +1,4 @@
--- Recomp app schema. Demo mode uses localStorage; production can connect this schema.
+-- Standalone Recomp app schema. Demo mode uses localStorage; production can connect this schema.
 create extension if not exists "pgcrypto";
 
 create table if not exists public.challenges (

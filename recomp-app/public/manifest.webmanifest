@@ -2,12 +2,12 @@
   "name": "Recomp · 16 Week Protocol",
   "short_name": "Recomp",
   "description": "Weight loss and body recomposition tracker for Zackdark and Tony",
-  "start_url": "/recomp",
-  "scope": "/recomp",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#f4f6f3",
   "theme_color": "#178f5d",
   "icons": [
-    { "src": "/recomp/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
   ]
 }

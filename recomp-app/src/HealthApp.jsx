@@ -266,11 +266,11 @@ export default function HealthApp() {
   useEffect(()=>localStorage.setItem(STORE,JSON.stringify(allLogs)),[allLogs]);
   useEffect(()=>{
     document.title="Recomp · 16 Week Protocol";
-    document.querySelector('link[rel="manifest"]')?.setAttribute("href","/recomp-manifest.webmanifest");
-    document.querySelector('link[rel="icon"]')?.setAttribute("href","/recomp/icon.svg");
-    document.querySelector('link[rel="apple-touch-icon"]')?.setAttribute("href","/recomp/icon.svg");
+    document.querySelector('link[rel="manifest"]')?.setAttribute("href","/manifest.webmanifest");
+    document.querySelector('link[rel="icon"]')?.setAttribute("href","/icon.svg");
+    document.querySelector('link[rel="apple-touch-icon"]')?.setAttribute("href","/icon.svg");
     document.querySelector('meta[name="theme-color"]')?.setAttribute("content",dark?"#0f1512":"#f4f6f3");
-    if("serviceWorker" in navigator) navigator.serviceWorker.register("/recomp-sw.js",{scope:"/recomp"}).catch(()=>{});
+    if("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(()=>{});
   },[dark]);
   const saveLog=(form)=>setAllLogs(prev=>({...prev,[profileId]:[...prev[profileId].filter(x=>x.date!==form.date),{...form,id:`${profileId}-${form.date}`,profileId,weight:number(form.weight)||undefined,calories:number(form.calories)||undefined,protein:number(form.protein)||undefined,carbs:number(form.carbs)||undefined,fat:number(form.fat)||undefined,water:number(form.water)||undefined,steps:number(form.steps)||undefined,waist:number(form.waist)||undefined,bodyFat:number(form.bodyFat)||undefined,muscle:number(form.muscle)||undefined,visceral:number(form.visceral)||undefined}].sort((a,b)=>a.date.localeCompare(b.date))}));
   const reset=()=>setAllLogs({zackdark:makeDemoLogs("zackdark"),tony:makeDemoLogs("tony")});

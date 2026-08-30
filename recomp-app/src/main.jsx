@@ -1,10 +1,9 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import "@tabler/icons-webfont/dist/tabler-icons.min.css";
-import App from "./App.jsx";
+import HealthApp from "./HealthApp.jsx";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    <App />
-  </React.StrictMode>
+    <HealthApp />
+  </React.StrictMode>,
 );
