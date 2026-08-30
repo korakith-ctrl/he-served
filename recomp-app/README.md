@@ -18,4 +18,4 @@ npm run build
 npm run preview
 ```
 
-Demo logs are stored only in this app's `localStorage` namespace. The production Supabase schema and Row Level Security policies are in `supabase/migrations`.
+Real logs and workout sessions are local-first in the app's own versioned `localStorage` namespace. Demo preview is generated in memory and never overwrites real logs. Optional Supabase magic-link sync, schema, and Row Level Security policies are in `supabase/migrations`.

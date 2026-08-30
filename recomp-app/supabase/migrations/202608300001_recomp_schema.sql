@@ -1,4 +1,4 @@
--- Standalone Recomp app schema. Demo mode uses localStorage; production can connect this schema.
+-- Standalone Recomp app schema. Real data is local-first; production can optionally connect this schema.
 create extension if not exists "pgcrypto";
 
 create table if not exists public.challenges (
@@ -41,7 +41,8 @@ create table if not exists public.daily_logs (
   weight numeric(5,2), calories integer, protein numeric(6,1), carbs numeric(6,1), fat numeric(6,1),
   water numeric(4,1), steps integer, sleep_minutes integer, waist numeric(5,1), body_fat numeric(4,1),
   muscle_mass numeric(5,2), visceral_fat numeric(4,1), mood text, hunger smallint check(hunger between 1 and 5),
-  energy smallint check(energy between 1 and 5), notes text, sick_day boolean not null default false,
+  energy smallint check(energy between 1 and 5), notes text, workout_completed boolean not null default false,
+  rest_day boolean not null default false, sick_day boolean not null default false,
   vacation_mode boolean not null default false, created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
   unique(profile_id,date)
 );
@@ -49,7 +50,8 @@ create table if not exists public.daily_logs (
 create table if not exists public.workouts (
   id uuid primary key default gen_random_uuid(), profile_id uuid not null references public.profiles(id) on delete cascade,
   date date not null, workout_type text not null check(workout_type in ('A','B','custom')),
-  duration integer, notes text, created_at timestamptz not null default now()
+  duration integer, notes text, created_at timestamptz not null default now(),
+  unique(profile_id,date,workout_type)
 );
 
 create table if not exists public.workout_sets (
