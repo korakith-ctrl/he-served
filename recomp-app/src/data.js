@@ -10,6 +10,14 @@ const DEMO = {
   tony: [95.5,95.2,95.3,94.9,94.8,94.5,94.4,94.5,94.2,94,93.9,93.7,93.6,93.4],
 };
 
+export function makeInitialLogs(profileId) {
+  const p = PROFILES[profileId];
+  return [{
+    id:`${profileId}-2026-08-30`, profileId, date:"2026-08-30", weight:p.startWeight,
+    bodyFat:p.bodyFat, muscle:p.muscle, visceral:p.visceral, workout:false, notes:"Starting point",
+  }];
+}
+
 export function makeDemoLogs(profileId) {
   const p = PROFILES[profileId];
   return DEMO[profileId].map((weight, i) => ({

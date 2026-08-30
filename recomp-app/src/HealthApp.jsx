@@ -11,10 +11,10 @@ import {
   Scale, Settings2, Sparkles, Sun, Target, TrendingDown, Trophy, Utensils, Users, X, Zap,
 } from "lucide-react";
 import { z } from "zod";
-import { makeDemoLogs, MILESTONES, PHASES, PROFILES, WORKOUTS } from "./data.js";
+import { makeDemoLogs, makeInitialLogs, MILESTONES, PHASES, PROFILES, WORKOUTS } from "./data.js";
 import "./health.css";
 
-const STORE = "recomp-health-demo-v1";
+const STORE = "recomp-health-actual-v2";
 const nav = [
   ["dashboard","Overview",Home], ["log","Quick log",Plus], ["progress","Progress",BarChart3],
   ["workout","Workout",Dumbbell], ["profile","Profile",CircleUserRound],
@@ -43,16 +43,18 @@ function statsFor(logs, profile) {
   const lost = profile.startWeight - latest.weight;
   const progress = pct(lost, profile.startWeight - profile.goalMax);
   const consistency = Math.round(average(logs.slice(-7).map(x => ({ score:dailyScore(x,profile) })),"score"));
-  return { latest, avg7, prev, weeklyLoss, lost, progress, consistency };
+  return { latest, avg7, prev, weeklyLoss, lost, progress, consistency, sampleCount:weighted.length };
 }
 
 function dailyScore(log, p) {
   if (!log) return 0;
+  if (![log.calories,log.protein,log.steps,log.water,log.sleep].some(value=>number(value)>0) && !log.workout) return 0;
   const calorieOk = log.calories >= p.calorieTarget*.85 && log.calories <= p.calorieTarget*1.1;
   return Math.round((calorieOk?20:10) + Math.min(25,pct(log.protein,p.proteinMin)*.25) + Math.min(15,pct(log.steps,p.stepsTarget)*.15) + (log.workout?20:12) + Math.min(5,pct(log.water,p.waterTarget)*.05) + Math.min(15,pct(log.sleep,480)*.15));
 }
 
 function coaching(stats) {
+  if (stats.sampleCount < 8) return { label:"Baseline set", tone:"blue", text:"บันทึกจุดเริ่มต้นแล้ว เก็บข้อมูลต่อเนื่องอย่างน้อย 7 วันก่อนประเมินความเร็วในการลดน้ำหนัก" };
   if (stats.weeklyLoss > 1) return { label:"Ahead", tone:"amber", text:"น้ำหนักลดค่อนข้างเร็ว ลองเช็ก recovery, food intake และ training performance" };
   if (stats.weeklyLoss >= .5) return { label:"On track", tone:"green", text:"กำลังดี ไม่ต้องปรับ Calories รักษาความสม่ำเสมอแบบนี้ต่อไป" };
   if (stats.weeklyLoss < .4) return { label:"Slightly behind", tone:"blue", text:"เช็ก Calories, Steps และ Weekend อีก 1 สัปดาห์ก่อนพิจารณาปรับ" };
@@ -73,7 +75,7 @@ function Sidebar({ page, setPage, dark, setDark }) {
     <nav>{nav.map(([id,label,Icon]) => <button key={id} className={page===id?"active":""} onClick={()=>setPage(id)}><Icon size={19}/><span>{label}</span>{id==="log"&&<kbd>N</kbd>}</button>)}</nav>
     <div className="side-challenge">
       <div className="mini-icon"><Sparkles size={17}/></div><strong>Shared challenge</strong>
-      <p>Week 2 is looking strong. Keep each other moving.</p>
+      <p>Week 1 starts here. Build the first consistent week together.</p>
       <button onClick={()=>setPage("compare")}>View comparison <ArrowRight size={14}/></button>
     </div>
     <button className="theme-row" onClick={()=>setDark(!dark)}>{dark?<Sun size={18}/>:<Moon size={18}/>} {dark?"Light mode":"Dark mode"}</button>
@@ -84,7 +86,7 @@ function Topbar({ profileId, setProfileId, profile, dark, setDark }) {
   const [open,setOpen]=useState(false);
   return <header className="topbar">
     <div className="mobile-brand"><Brand/></div>
-    <div className="page-kicker">16 WEEK RECOMPOSITION <span>•</span> WEEK 2 OF 16</div>
+    <div className="page-kicker">16 WEEK RECOMPOSITION <span>•</span> WEEK 1 OF 16</div>
     <div className="top-actions">
       <IconButton label="สลับธีม" onClick={()=>setDark(!dark)} className="desktop-theme">{dark?<Sun size={18}/>:<Moon size={18}/>}</IconButton>
       <IconButton label="การแจ้งเตือน"><Bell size={18}/><i/></IconButton>
@@ -129,13 +131,13 @@ function WeightChart({ logs, compact=false }) {
 
 function Dashboard({ profile, logs, allLogs, setPage }) {
   const s=statsFor(logs,profile), coach=coaching(s), today=logs.at(-1);
-  const daysLeft=112-logs.length;
+  const daysLeft=112-Math.max(0,logs.length-1), hasHistory=s.sampleCount>1;
   const targets=[
-    {icon:Utensils,label:"Calories",value:today.calories,target:profile.calorieTarget,unit:"kcal",color:"#5c7cdb"},
-    {icon:Zap,label:"Protein",value:today.protein,target:profile.proteinMin,unit:"g",color:"#bd7a2d"},
-    {icon:Droplets,label:"Water",value:today.water,target:profile.waterTarget,unit:"L",color:"#2e9eb8"},
-    {icon:Footprints,label:"Steps",value:today.steps,target:profile.stepsTarget,unit:"",color:"#1f9d6a"},
-    {icon:BedDouble,label:"Sleep",value:today.sleep,target:480,display:`${Math.floor(today.sleep/60)}h ${today.sleep%60}m`,targetDisplay:"8h",unit:"",color:"#8d67bb"},
+    {icon:Utensils,label:"Calories",value:number(today.calories),target:profile.calorieTarget,unit:"kcal",color:"#5c7cdb"},
+    {icon:Zap,label:"Protein",value:number(today.protein),target:profile.proteinMin,unit:"g",color:"#bd7a2d"},
+    {icon:Droplets,label:"Water",value:number(today.water),target:profile.waterTarget,unit:"L",color:"#2e9eb8"},
+    {icon:Footprints,label:"Steps",value:number(today.steps),target:profile.stepsTarget,unit:"",color:"#1f9d6a"},
+    {icon:BedDouble,label:"Sleep",value:number(today.sleep),target:480,display:today.sleep?`${Math.floor(today.sleep/60)}h ${today.sleep%60}m`:"Not logged",targetDisplay:"8h",unit:"",color:"#8d67bb"},
     {icon:Dumbbell,label:"Workout",value:today.workout?1:0,target:1,display:today.workout?"Workout A ✓":"Rest day",targetDisplay:"Planned",unit:"",color:"#d06558"},
   ];
   return <>
@@ -147,13 +149,13 @@ function Dashboard({ profile, logs, allLogs, setPage }) {
         <ProgressBar value={s.progress}/>
         <div className="weight-summary"><div><span>Starting</span><b>{profile.startWeight} kg</b></div><div><span>Total lost</span><b className="green-text"><ArrowDown size={13}/>{fmt1(s.lost)} kg</b></div><div><span>Goal range</span><b>{profile.goalMin}–{profile.goalMax} kg</b></div></div>
       </div>
-      <div className="consistency-card card"><div className="card-head"><span><Gauge size={17}/> CONSISTENCY</span><span>This week</span></div><div className="score-row"><Ring value={s.consistency} color="#1f9d6a"><b>{s.consistency}</b><small>/ 100</small></Ring><div><h3>Strong week</h3><p>คุณทำเป้าหมายหลักได้ดี<br/>5 จาก 6 habits</p></div></div><div className="micro-bars">{[["Protein",93],["Steps",88],["Sleep",82]].map(x=><div key={x[0]}><span>{x[0]}</span><ProgressBar value={x[1]}/><b>{x[1]}%</b></div>)}</div></div>
+      <div className="consistency-card card"><div className="card-head"><span><Gauge size={17}/> CONSISTENCY</span><span>This week</span></div><div className="score-row"><Ring value={s.consistency} color="#1f9d6a"><b>{s.consistency}</b><small>/ 100</small></Ring><div><h3>{hasHistory?"Building momentum":"Ready to begin"}</h3><p>{hasHistory?"เก็บข้อมูลต่อเนื่องเพื่อดูแนวโน้ม":"เริ่มบันทึกเป้าหมายประจำวัน"}<br/>{hasHistory?`${logs.length} days logged`:"Starting point saved"}</p></div></div><div className="micro-bars">{[["Protein",pct(today.protein,profile.proteinMin)],["Steps",pct(today.steps,profile.stepsTarget)],["Sleep",pct(today.sleep,480)]].map(x=><div key={x[0]}><span>{x[0]}</span><ProgressBar value={x[1]}/><b>{Math.round(x[1])}%</b></div>)}</div></div>
     </section>
 
-    <div className="section-heading"><div><p>TODAY · 12 SEP</p><h2>Today's targets</h2></div><span>4 of 6 looking good</span></div>
+    <div className="section-heading"><div><p>TODAY · 30 AUG</p><h2>Today's targets</h2></div><span>{targets.filter(item=>pct(item.value,item.target)>=80).length} of 6 looking good</span></div>
     <section className="target-grid">{targets.map(({icon:Icon,...x})=><div className="target-card card" style={{"--target-color":x.color}} key={x.label}><div className="target-icon" style={{color:x.color,background:`${x.color}18`}}><Icon size={19}/></div><div><span>{x.label}</span><b>{x.display||x.value.toLocaleString()} <small>/ {x.targetDisplay||x.target.toLocaleString()} {x.unit}</small></b><ProgressBar value={pct(x.value,x.target)} color="custom"/></div><strong>{Math.round(pct(x.value,x.target))}%</strong></div>)}</section>
     <section className="lower-grid">
-      <div className="trend-card card"><div className="card-head"><div><span>WEIGHT TREND</span><h3>Steady progress</h3></div><div className="chart-legend"><i/> Daily <i className="avg"/> 7-day avg</div></div><WeightChart logs={logs} compact/><div className="trend-stats"><div><span>7-day average</span><b>{fmt1(s.avg7)} kg</b></div><div><span>Previous week</span><b>{fmt1(s.prev)} kg</b></div><div><span>Weekly change</span><b className="green-text">−{fmt1(s.weeklyLoss)} kg</b></div></div></div>
+      <div className="trend-card card"><div className="card-head"><div><span>WEIGHT TREND</span><h3>{hasHistory?"Building your trend":"Starting point recorded"}</h3></div><div className="chart-legend"><i/> Daily <i className="avg"/> 7-day avg</div></div><WeightChart logs={logs} compact/><div className="trend-stats"><div><span>7-day average</span><b>{fmt1(s.avg7)} kg</b></div><div><span>Previous week</span><b>{s.sampleCount>=8?`${fmt1(s.prev)} kg`:"—"}</b></div><div><span>Weekly change</span><b className="green-text">{s.sampleCount>=8?`−${fmt1(s.weeklyLoss)} kg`:"—"}</b></div></div></div>
       <div className="stack-column">
         <div className="insight-card card"><div className="insight-icon"><Sparkles size={18}/></div><div><span>COACHING INSIGHT</span><h3>{coach.label}</h3><p>{coach.text}</p><button onClick={()=>setPage("progress")}>ดูข้อมูลประกอบ <ArrowRight size={14}/></button></div></div>
         <WorkoutMini setPage={setPage}/>
@@ -164,7 +166,7 @@ function Dashboard({ profile, logs, allLogs, setPage }) {
   </>;
 }
 
-function WorkoutMini({setPage}) { return <div className="workout-mini card"><div className="date-block"><b>14</b><span>SEP</span></div><div><span>NEXT WORKOUT</span><h3>Full Body · Workout A</h3><p>6 exercises · ~55 min</p></div><button onClick={()=>setPage("workout")}><ArrowRight size={18}/></button></div>; }
+function WorkoutMini({setPage}) { return <div className="workout-mini card"><div className="date-block"><b>31</b><span>AUG</span></div><div><span>NEXT WORKOUT</span><h3>Full Body · Workout A</h3><p>6 exercises · ~55 min</p></div><button onClick={()=>setPage("workout")}><ArrowRight size={18}/></button></div>; }
 
 function ComparisonMini({allLogs,setPage}) {
   const rows=Object.values(PROFILES).map(p=>({p,s:statsFor(allLogs[p.id],p)}));
@@ -177,7 +179,7 @@ const logSchema=z.object({weight:z.coerce.number().min(30).max(300).optional(),c
 
 function LogPage({profile,logs,onSave}) {
   const last=logs.at(-1); const [saved,setSaved]=useState(false);
-  const [form,setForm]=useState(()=>({date:"2026-09-13",weight:last.weight,calories:"",protein:"",carbs:"",fat:"",water:profile.waterTarget,steps:"",sleepHours:7,sleepMinutes:30,waist:last.waist,bodyFat:last.bodyFat,muscle:last.muscle,visceral:last.visceral,mood:"good",hunger:3,energy:4,notes:""}));
+  const [form,setForm]=useState(()=>({date:"2026-08-30",weight:last.weight,calories:"",protein:"",carbs:"",fat:"",water:profile.waterTarget,steps:"",sleepHours:7,sleepMinutes:30,waist:last.waist||"",bodyFat:last.bodyFat,muscle:last.muscle,visceral:last.visceral,mood:"good",hunger:3,energy:4,notes:""}));
   const set=(key,val)=>setForm(f=>({...f,[key]:val}));
   const submit=(e)=>{e.preventDefault();const checked=logSchema.safeParse(form);if(!checked.success)return;onSave({...form,sleep:number(form.sleepHours)*60+number(form.sleepMinutes),workout:false});setSaved(true);setTimeout(()=>setSaved(false),2200)};
   return <>
@@ -185,7 +187,7 @@ function LogPage({profile,logs,onSave}) {
     <div className="quick-actions">{[[Scale,"Weight"],[Utensils,"Meal"],[Droplets,"Water"],[Dumbbell,"Workout"],[Footprints,"Steps"]].map(([Icon,label])=><button type="button" key={label}><Icon size={16}/>{label}</button>)}</div>
     <form className="log-layout" onSubmit={submit}>
       <div className="log-main">
-        <div className="log-card card featured-input"><div className="log-card-title"><div className="field-icon green"><Scale size={19}/></div><div><span>WEIGHT</span><h3>Morning weigh-in</h3></div><div className="date-chip"><CalendarDays size={14}/>{format(parseISO(form.date),"d MMM")}</div></div><div className="big-input"><button type="button" onClick={()=>set("weight",+(number(form.weight)-.1).toFixed(1))}>−</button><label><input type="number" inputMode="decimal" step="0.1" value={form.weight} onChange={e=>set("weight",e.target.value)}/><span>kg</span></label><button type="button" onClick={()=>set("weight",+(number(form.weight)+.1).toFixed(1))}>+</button></div><div className="yesterday"><span>Yesterday <b>{last.weight} kg</b></span><span className="green-text"><ArrowDown size={13}/> {Math.abs(number(form.weight)-last.weight).toFixed(1)} kg</span></div></div>
+        <div className="log-card card featured-input"><div className="log-card-title"><div className="field-icon green"><Scale size={19}/></div><div><span>WEIGHT</span><h3>Morning weigh-in</h3></div><div className="date-chip"><CalendarDays size={14}/>{format(parseISO(form.date),"d MMM")}</div></div><div className="big-input"><button type="button" onClick={()=>set("weight",+(number(form.weight)-.1).toFixed(1))}>−</button><label><input type="number" inputMode="decimal" step="0.1" value={form.weight} onChange={e=>set("weight",e.target.value)}/><span>kg</span></label><button type="button" onClick={()=>set("weight",+(number(form.weight)+.1).toFixed(1))}>+</button></div><div className="yesterday"><span>Starting entry <b>{last.weight} kg</b></span><span className="green-text">Baseline</span></div></div>
         <LogSection icon={Utensils} title="Nutrition" note={`Target ${profile.calorieTarget.toLocaleString()} kcal · ${profile.proteinMin}–${profile.proteinMax} g protein`}>
           <Field label="Calories" unit="kcal" value={form.calories} onChange={v=>set("calories",v)} placeholder={profile.calorieTarget}/><Field label="Protein" unit="g" value={form.protein} onChange={v=>set("protein",v)} placeholder={profile.proteinMin}/><Field label="Carbs" unit="g" value={form.carbs} onChange={v=>set("carbs",v)} placeholder="Optional"/><Field label="Fat" unit="g" value={form.fat} onChange={v=>set("fat",v)} placeholder="Optional"/>
         </LogSection>
@@ -219,14 +221,14 @@ function ProgressPage({profile,logs}) {
 }
 
 function CalendarCard({profile,logs}) {
-  const month=new Date(2026,8,1), days=eachDayOfInterval({start:startOfMonth(month),end:endOfMonth(month)}), first=getDay(days[0]);
+  const month=parseISO(logs.at(-1)?.date||"2026-08-30"), days=eachDayOfInterval({start:startOfMonth(month),end:endOfMonth(month)}), first=getDay(days[0]);
   const byDate=Object.fromEntries(logs.map(x=>[x.date,x]));
-  return <section className="calendar-card card"><div className="card-head"><div><span>DAILY CONSISTENCY</span><h3>September 2026</h3></div><div className="calendar-key"><i className="good"/>Good <i className="partial"/>Partial <i className="low"/>Low</div></div><div className="calendar-grid">{["S","M","T","W","T","F","S"].map((x,i)=><b key={i}>{x}</b>)}{Array.from({length:first}).map((_,i)=><span key={`empty-${i}`}/>)}{days.map(day=>{const key=format(day,"yyyy-MM-dd"),log=byDate[key],score=log?dailyScore(log,profile):null;return <button key={key} className={score==null?"":score>=80?"good":score>=55?"partial":"low"}><span>{format(day,"d")}</span>{score!=null&&<i/>}</button>})}</div></section>;
+  return <section className="calendar-card card"><div className="card-head"><div><span>DAILY CONSISTENCY</span><h3>{format(month,"MMMM yyyy")}</h3></div><div className="calendar-key"><i className="good"/>Good <i className="partial"/>Partial <i className="low"/>Low</div></div><div className="calendar-grid">{["S","M","T","W","T","F","S"].map((x,i)=><b key={i}>{x}</b>)}{Array.from({length:first}).map((_,i)=><span key={`empty-${i}`}/>)}{days.map(day=>{const key=format(day,"yyyy-MM-dd"),log=byDate[key],score=log?dailyScore(log,profile):null;return <button key={key} className={score==null?"":score>=80?"good":score>=55?"partial":"low"}><span>{format(day,"d")}</span>{score!=null&&<i/>}</button>})}</div></section>;
 }
 
 function MilestoneChart({profile}) { return <div className="card metric-chart"><div className="card-head"><div><span>16-WEEK PATH</span><h3>Target milestones</h3></div><Target size={20}/></div><ResponsiveContainer width="100%" height={260}><AreaChart data={MILESTONES[profile.id]}><CartesianGrid vertical={false} strokeDasharray="3 7" stroke="var(--line)"/><XAxis dataKey="w" tickFormatter={v=>`W${v}`} axisLine={false} tickLine={false} tick={{fill:"var(--muted)",fontSize:11}}/><YAxis domain={["dataMin - 2","dataMax + 2"]} axisLine={false} tickLine={false} tick={{fill:"var(--muted)",fontSize:11}}/><Tooltip labelFormatter={v=>`Week ${v}`} formatter={v=>[`${v} kg`,`Target midpoint`]}/><Area dataKey="v" stroke="#1f9d6a" fill="url(#weightFill)" strokeWidth={3}/></AreaChart></ResponsiveContainer></div>; }
 
-function WeeklyReview({profile,logs}) { const x=logs.slice(-7), prev=logs.slice(-14,-7); const loss=average(prev,"weight")-average(x,"weight"); return <section className="weekly-review card"><div className="review-top"><div className="trophy-icon"><Award size={23}/></div><div><span>WEEK 2 REVIEW</span><h2>A consistent week, {profile.name}</h2><p>น้ำหนักเฉลี่ยลด {fmt1(loss)} kg พร้อมรักษา training consistency ได้ดี แนะนำให้คง Calories เดิม</p></div><button className="secondary-btn">Open review <ArrowRight size={15}/></button></div><div className="review-stats">{[["Average weight",`${fmt1(average(x,"weight"))} kg`],["Avg calories",`${Math.round(average(x,"calories")).toLocaleString()} kcal`],["Protein goal","6 / 7 days"],["Avg steps",Math.round(average(x,"steps")).toLocaleString()],["Workouts","3 / 3"],["Avg sleep",`${Math.floor(average(x,"sleep")/60)}h ${Math.round(average(x,"sleep")%60)}m`]].map(([a,b])=><div key={a}><span>{a}</span><b>{b}</b></div>)}</div></section>; }
+function WeeklyReview({profile,logs}) { if(logs.length<7)return <section className="weekly-review card"><div className="review-top"><div className="trophy-icon"><Award size={23}/></div><div><span>WEEK 1 · GETTING STARTED</span><h2>Starting point saved, {profile.name}</h2><p>Weekly Review จะพร้อมเมื่อมีข้อมูลครบ 7 วัน ระหว่างนี้บันทึกเท่าที่ทำได้โดยไม่ต้องกรอกทุกช่อง</p></div></div></section>; const x=logs.slice(-7), prev=logs.slice(-14,-7); const loss=average(prev,"weight")-average(x,"weight"); return <section className="weekly-review card"><div className="review-top"><div className="trophy-icon"><Award size={23}/></div><div><span>WEEKLY REVIEW</span><h2>A consistent week, {profile.name}</h2><p>น้ำหนักเฉลี่ยลด {fmt1(loss)} kg พร้อมรักษา training consistency ได้ดี แนะนำให้คง Calories เดิม</p></div><button className="secondary-btn">Open review <ArrowRight size={15}/></button></div><div className="review-stats">{[["Average weight",`${fmt1(average(x,"weight"))} kg`],["Avg calories",`${Math.round(average(x,"calories")).toLocaleString()} kcal`],["Protein goal","6 / 7 days"],["Avg steps",Math.round(average(x,"steps")).toLocaleString()],["Workouts","3 / 3"],["Avg sleep",`${Math.floor(average(x,"sleep")/60)}h ${Math.round(average(x,"sleep")%60)}m`]].map(([a,b])=><div key={a}><span>{a}</span><b>{b}</b></div>)}</div></section>; }
 
 function WorkoutPage() {
   const [type,setType]=useState("A"), [completed,setCompleted]=useState([]);
@@ -240,27 +242,29 @@ function Exercise({index,name,scheme,weight,done,toggle}) { const [reps,setReps]
 
 function ComparePage({allLogs}) {
   const rows=Object.values(PROFILES).map(p=>({p,s:statsFor(allLogs[p.id],p),logs:allLogs[p.id]}));
-  return <><PageTitle eyebrow="SHARED CHALLENGE" title="Better together" note="Friendly competition ที่ให้คะแนนจาก consistency และ % การเปลี่ยนแปลง" action={<div className="week-nav"><ChevronLeft size={16}/> Week 2 <ChevronRight size={16}/></div>}/>
-    <div className="leader-card"><div><Trophy size={25}/><span>WEEK 2 LEADERBOARD</span><h2>Both moving forward</h2><p>คะแนนห่างกันเพียง 2% — สัปดาห์ที่สม่ำเสมอสำหรับทั้งคู่</p></div><div className="podium">{rows.map(({p,s},i)=><div key={p.id} className={i===1?"winner":""}><span>#{i+1}</span><Avatar profile={p} large/><b>{p.name}</b><strong>{s.consistency}%</strong><small>consistency</small></div>)}</div></div>
+  const baseline=rows.every(row=>row.logs.length<=1);
+  return <><PageTitle eyebrow="SHARED CHALLENGE" title="Better together" note="Friendly competition ที่ให้คะแนนจาก consistency และ % การเปลี่ยนแปลง" action={<div className="week-nav"><ChevronLeft size={16}/> Week 1 <ChevronRight size={16}/></div>}/>
+    <div className="leader-card"><div><Trophy size={25}/><span>WEEK 1 · STARTING POINT</span><h2>{baseline?"Challenge starts today":"Both moving forward"}</h2><p>{baseline?"ทั้งคู่เริ่มต้นจากข้อมูลจริงวันนี้ คะแนน consistency จะเพิ่มเมื่อเริ่มบันทึกกิจวัตร":"วัดความสม่ำเสมออย่างเป็นธรรม โดยไม่ตัดสินจากน้ำหนักตัวอย่างเดียว"}</p></div><div className="podium">{rows.map(({p,s},i)=><div key={p.id}><span>#{i+1}</span><Avatar profile={p} large/><b>{p.name}</b><strong>{s.consistency}%</strong><small>consistency</small></div>)}</div></div>
     <section className="compare-table card"><div className="compare-head"><span>METRIC</span>{rows.map(({p})=><div key={p.id}><Avatar profile={p}/><b>{p.name}</b></div>)}</div>{[
       ["Body weight lost",r=>`${fmt1((r.s.lost/r.p.startWeight)*100)}%`,"ใช้ % เพื่อเทียบอย่างยุติธรรม"],
       ["Weight lost",r=>`${fmt1(r.s.lost)} kg`,"จากน้ำหนักเริ่มต้น"],
       ["Waist change",r=>`−${fmt1(r.logs[0].waist-r.logs.at(-1).waist)} cm`,"Positive body composition"],
       ["Protein compliance",r=>`${Math.round(pct(average(r.logs.slice(-7),"protein"),r.p.proteinMin))}%`,"ค่าเฉลี่ย 7 วัน"],
       ["Steps compliance",r=>`${Math.round(pct(average(r.logs.slice(-7),"steps"),r.p.stepsTarget))}%`,"ค่าเฉลี่ย 7 วัน"],
-      ["Workout compliance",()=>"100%","3 จาก 3 sessions"],
+      ["Workout compliance",r=>`${Math.round(pct(r.logs.filter(x=>x.workout).length,3))}%`,"เป้าหมาย 3 sessions"],
     ].map(([label,get,note])=><div className="compare-line" key={label}><div><b>{label}</b><small>{note}</small></div>{rows.map(r=><strong key={r.p.id}>{get(r)}</strong>)}</div>)}</section>
-    <section className="insight-wide"><Sparkles size={20}/><div><span>TEAM INSIGHT</span><h3>Momentum กำลังมาถูกทาง</h3><p>Zackdark ทำ Protein ได้สม่ำเสมอ ส่วน Tony มี Steps consistency เด่น ทั้งคู่รักษา strength training ได้ครบ</p></div></section>
+    <section className="insight-wide"><Sparkles size={20}/><div><span>TEAM INSIGHT</span><h3>{baseline?"เริ่มจาก baseline ที่ชัดเจน":"Momentum กำลังมาถูกทาง"}</h3><p>{baseline?"Zackdark เริ่มที่ 87.8 kg และ Tony เริ่มที่ 95.5 kg — รอข้อมูลจริงก่อนสร้าง insight":"ทั้งคู่กำลังสร้างกิจวัตรที่สนับสนุนเป้าหมายระยะยาว"}</p></div></section>
   </>;
 }
 
-function ProfilePage({profile,allLogs,setPage,reset}) { return <><PageTitle eyebrow="ACCOUNT & PLAN" title="Profile" note="Starting point และเป้าหมาย 16 สัปดาห์"/><section className="profile-layout"><div className="card profile-card"><Avatar profile={profile} large/><h2>{profile.name}</h2><p>Started 30 August 2026</p><div className="profile-numbers">{[["Start weight",`${profile.startWeight} kg`],["Main goal",`${profile.goalMin}–${profile.goalMax} kg`],["Body fat",`${profile.bodyFat}%`],["Muscle",`${profile.muscle} kg`],["BMR",`${profile.bmr} kcal`],["Visceral fat",profile.visceral]].map(([a,b])=><div key={a}><span>{a}</span><b>{b}</b></div>)}</div></div><div className="profile-stack"><div className="card settings-card"><h3>Daily targets</h3>{[["Calories",`${profile.calorieTarget.toLocaleString()} kcal`],["Protein",`${profile.proteinMin}–${profile.proteinMax} g`],["Water",`${profile.waterTarget} L`],["Steps",profile.stepsTarget.toLocaleString()],["Sleep","8 hours"]].map(([a,b])=><p key={a}><span>{a}</span><b>{b}</b></p>)}</div><div className="card settings-card"><h3>Data & challenge</h3><button onClick={()=>setPage("compare")}><Users size={17}/> Zackdark vs Tony <ArrowRight size={15}/></button><button onClick={()=>exportData(allLogs)}><Download size={17}/> Export JSON <ArrowRight size={15}/></button><button onClick={reset}><RefreshCcw size={17}/> Reset demo data <ArrowRight size={15}/></button></div></div></section></> }
+function ProfilePage({profile,allLogs,setPage,reset,loadDemo}) { return <><PageTitle eyebrow="ACCOUNT & PLAN" title="Profile" note="Starting point และเป้าหมาย 16 สัปดาห์"/><section className="profile-layout"><div className="card profile-card"><Avatar profile={profile} large/><h2>{profile.name}</h2><p>Started 30 August 2026</p><div className="profile-numbers">{[["Start weight",`${profile.startWeight} kg`],["Main goal",`${profile.goalMin}–${profile.goalMax} kg`],["Body fat",`${profile.bodyFat}%`],["Muscle",`${profile.muscle} kg`],["BMR",`${profile.bmr} kcal`],["Visceral fat",profile.visceral]].map(([a,b])=><div key={a}><span>{a}</span><b>{b}</b></div>)}</div></div><div className="profile-stack"><div className="card settings-card"><h3>Daily targets</h3>{[["Calories",`${profile.calorieTarget.toLocaleString()} kcal`],["Protein",`${profile.proteinMin}–${profile.proteinMax} g`],["Water",`${profile.waterTarget} L`],["Steps",profile.stepsTarget.toLocaleString()],["Sleep","8 hours"]].map(([a,b])=><p key={a}><span>{a}</span><b>{b}</b></p>)}</div><div className="card settings-card"><h3>Data & challenge</h3><button onClick={()=>setPage("compare")}><Users size={17}/> Zackdark vs Tony <ArrowRight size={15}/></button><button onClick={()=>exportData(allLogs)}><Download size={17}/> Export JSON <ArrowRight size={15}/></button><button onClick={reset}><RefreshCcw size={17}/> Reset to starting data <ArrowRight size={15}/></button><button onClick={loadDemo}><Sparkles size={17}/> Load demo preview <ArrowRight size={15}/></button></div></div></section></> }
 
 function exportData(data) { const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}));a.download="recomp-backup.json";a.click();URL.revokeObjectURL(a.href); }
 
 export default function HealthApp() {
   const [page,setPage]=useState("dashboard"), [profileId,setProfileId]=useState("zackdark"), [dark,setDark]=useState(()=>localStorage.getItem("recomp-theme")==="dark");
-  const [allLogs,setAllLogs]=useState(()=>{try{return JSON.parse(localStorage.getItem(STORE))||{zackdark:makeDemoLogs("zackdark"),tony:makeDemoLogs("tony")}}catch{return {zackdark:makeDemoLogs("zackdark"),tony:makeDemoLogs("tony")}}});
+  const initialData=()=>({zackdark:makeInitialLogs("zackdark"),tony:makeInitialLogs("tony")});
+  const [allLogs,setAllLogs]=useState(()=>{try{return JSON.parse(localStorage.getItem(STORE))||initialData()}catch{return initialData()}});
   const profile=PROFILES[profileId], logs=allLogs[profileId];
   useEffect(()=>{document.documentElement.dataset.recompTheme=dark?"dark":"light";localStorage.setItem("recomp-theme",dark?"dark":"light")},[dark]);
   useEffect(()=>localStorage.setItem(STORE,JSON.stringify(allLogs)),[allLogs]);
@@ -273,7 +277,8 @@ export default function HealthApp() {
     if("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(()=>{});
   },[dark]);
   const saveLog=(form)=>setAllLogs(prev=>({...prev,[profileId]:[...prev[profileId].filter(x=>x.date!==form.date),{...form,id:`${profileId}-${form.date}`,profileId,weight:number(form.weight)||undefined,calories:number(form.calories)||undefined,protein:number(form.protein)||undefined,carbs:number(form.carbs)||undefined,fat:number(form.fat)||undefined,water:number(form.water)||undefined,steps:number(form.steps)||undefined,waist:number(form.waist)||undefined,bodyFat:number(form.bodyFat)||undefined,muscle:number(form.muscle)||undefined,visceral:number(form.visceral)||undefined}].sort((a,b)=>a.date.localeCompare(b.date))}));
-  const reset=()=>setAllLogs({zackdark:makeDemoLogs("zackdark"),tony:makeDemoLogs("tony")});
-  let content=page==="dashboard"?<Dashboard profile={profile} logs={logs} allLogs={allLogs} setPage={setPage}/>:page==="log"?<LogPage profile={profile} logs={logs} onSave={saveLog}/>:page==="progress"?<ProgressPage profile={profile} logs={logs}/>:page==="workout"?<WorkoutPage/>:page==="compare"?<ComparePage allLogs={allLogs}/>:<ProfilePage profile={profile} allLogs={allLogs} setPage={setPage} reset={reset}/>;
+  const reset=()=>setAllLogs(initialData());
+  const loadDemo=()=>setAllLogs({zackdark:makeDemoLogs("zackdark"),tony:makeDemoLogs("tony")});
+  let content=page==="dashboard"?<Dashboard profile={profile} logs={logs} allLogs={allLogs} setPage={setPage}/>:page==="log"?<LogPage profile={profile} logs={logs} onSave={saveLog}/>:page==="progress"?<ProgressPage profile={profile} logs={logs}/>:page==="workout"?<WorkoutPage/>:page==="compare"?<ComparePage allLogs={allLogs}/>:<ProfilePage profile={profile} allLogs={allLogs} setPage={setPage} reset={reset} loadDemo={loadDemo}/>;
   return <div className="recomp-app"><Sidebar page={page} setPage={setPage} dark={dark} setDark={setDark}/><div className="app-column"><Topbar profileId={profileId} setProfileId={setProfileId} profile={profile} dark={dark} setDark={setDark}/><main>{content}</main></div><MobileNav page={page} setPage={setPage}/></div>;
 }
