@@ -1,6 +1,6 @@
 # Recomp · 16 Week Protocol
 
-Standalone Vite application for Zackdark and Tony. This app has its own dependencies, build output, PWA scope, offline storage, database migration, and Vercel project.
+Standalone Vite application for Zackdark and Tony. This app has its own dependencies, build output, PWA scope, offline storage, Firebase Realtime Database namespace, and Vercel project.
 
 ## Local development
 
@@ -18,4 +18,4 @@ npm run build
 npm run preview
 ```
 
-Real logs and workout sessions are local-first in the app's own versioned `localStorage` namespace. Demo preview is generated in memory and never overwrites real logs. Optional Supabase magic-link sync, schema, and Row Level Security policies are in `supabase/migrations`.
+Real logs and workout sessions are local-first in the app's own versioned `localStorage` namespace and synchronize live through the existing Firebase project after Google sign-in. Challenge data lives under `recompChallenges/16-week-2026`; database rules restrict access to the seeded ZackDark and Tony Kora member UIDs. Demo preview is generated in memory and never overwrites real or remote logs.

@@ -153,6 +153,18 @@
         ".write": "auth != null && auth.uid === $uid"
       }
     },
+    "recompChallenges": {
+      "$challengeId": {
+        ".read": "auth != null && data.child('members').child(auth.uid).exists()",
+        "members": {
+          ".write": false
+        },
+        "data": {
+          ".write": "auth != null && root.child('recompChallenges').child($challengeId).child('members').child(auth.uid).exists()",
+          ".validate": "newData.hasChildren(['version', 'logs', 'preferences'])"
+        }
+      }
+    },
     "debtRateLimits": {
       ".read": false,
       ".write": false
