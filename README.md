@@ -1,5 +1,20 @@
 # ระบบหลังบ้านร้านกาแฟ — คู่มือทำให้ออนไลน์ฟรี
 
+> แอปร้านกาแฟเดิมยังอยู่ที่ `/` และแอป Recomp ใหม่อยู่ที่ `/recomp`
+
+## Recomp — 16 Week Protocol
+
+เปิดในเครื่องด้วย `npm run dev` แล้วไปที่ `http://localhost:5173/recomp` หน้าใหม่นี้แยก route และ storage จากแอปร้านกาแฟเดิมโดยสมบูรณ์
+
+- Dashboard, 7-day average, adaptive coaching และ habit score
+- Quick Log พร้อม smart defaults และบันทึกแบบ offline-first
+- Progress charts, weekly review, milestones และ body composition
+- Workout A/B tracker, progressive-overload hint และ strength trend
+- Zackdark vs Tony shared challenge โดยเทียบ consistency และ % body weight
+- Responsive sidebar/bottom navigation, dark mode และ PWA manifest
+
+ข้อมูลตัวอย่าง 14 วันเก็บใน `localStorage` และ reset/export ได้จากหน้า Profile ส่วน schema สำหรับ production อยู่ที่ `supabase/migrations/202608300001_recomp_schema.sql` พร้อม Row Level Security สำหรับเจ้าของ profile และสมาชิก challenge เดียวกัน
+
 แอปนี้เก็บข้อมูลบน Firebase (ฟรี) และ deploy เป็นเว็บไซต์จริงด้วย Vercel (ฟรี)
 ทำตามลำดับด้านล่าง ใช้เวลาประมาณ 20-30 นาที
 
