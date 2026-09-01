@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import CoffeeBeanIcon from "./CoffeeBeanIcon.jsx";
 import CoffeeBeanProgress from "./CoffeeBeanProgress.jsx";
+import { WHEEL_SEGMENTS, wheelPrizeLabel } from "./wheelPrizes.js";
 import "./loyalty.css";
 
 const LOYALTY_TIERS = [
@@ -29,7 +30,7 @@ function CardShell({ children, state = "default", className = "", live = false }
   return (
     <section
       className={`loyalty-card loyalty-card--${state} ${className}`.trim()}
-      aria-label="สะสมเมล็ดรับส่วนลดเครื่องดื่ม"
+      aria-label="สะสมเมล็ดหมุนกงล้อลุ้นรางวัล"
       {...(live ? { "aria-live": "polite" } : {})}
     >
       {children}
@@ -44,7 +45,7 @@ function CardHeader({ pending = 0 }) {
         <span className="loyalty-card__medallion" aria-hidden="true">
           <CoffeeBeanIcon status="earned" size={21} />
         </span>
-        <h2 className="loyalty-card__title">สะสมเมล็ดรับส่วนลด</h2>
+        <h2 className="loyalty-card__title">สะสมเมล็ด หมุนลุ้นรางวัล</h2>
       </div>
       {pending > 0 && <span className="loyalty-card__badge">+{pending} รอยืนยัน</span>}
     </div>
@@ -75,6 +76,81 @@ function LoyaltySkeleton() {
   );
 }
 
+function RewardWheel({ prize, onSpin, disabled, freeDrinkCap }) {
+  const initialSegment = Math.max(0, Math.min(WHEEL_SEGMENTS.length - 1, Number(prize?.segmentIndex) || 0));
+  const [rotation, setRotation] = useState(prize ? 360 * 5 + (360 - initialSegment * 45 - 22.5) : 0);
+  const [spinning, setSpinning] = useState(false);
+  const [revealed, setRevealed] = useState(Boolean(prize));
+  const [spinError, setSpinError] = useState("");
+  const timerRef = useRef(null);
+
+  useEffect(() => () => window.clearTimeout(timerRef.current), []);
+
+  useEffect(() => {
+    if (!prize || spinning || rotation !== 0) return;
+    const segmentIndex = Math.max(0, Math.min(WHEEL_SEGMENTS.length - 1, Number(prize.segmentIndex) || 0));
+    setRotation(360 * 5 + (360 - segmentIndex * 45 - 22.5));
+    setRevealed(true);
+  }, [prize, spinning, rotation]);
+
+  async function spin() {
+    if (spinning || disabled) return;
+    setSpinError("");
+    setRevealed(false);
+    setSpinning(true);
+    try {
+      const result = await onSpin();
+      const segmentIndex = Math.max(0, Math.min(WHEEL_SEGMENTS.length - 1, Number(result?.segmentIndex) || 0));
+      const nextRotation = rotation + 360 * 6 + (360 - ((rotation % 360) + segmentIndex * 45 + 22.5) % 360);
+      setRotation(nextRotation);
+      const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      timerRef.current = window.setTimeout(() => {
+        setSpinning(false);
+        setRevealed(true);
+      }, reduceMotion ? 80 : 3300);
+    } catch (error) {
+      setSpinning(false);
+      setRevealed(Boolean(prize));
+      setSpinError(error?.message || "หมุนกงล้อไม่สำเร็จ กรุณาลองใหม่");
+    }
+  }
+
+  return (
+    <div className="reward-wheel-panel">
+      <div className="reward-wheel-wrap" aria-label={spinning ? "กงล้อกำลังหมุน" : "กงล้อลุ้นรางวัล"}>
+        <span className="reward-wheel-pointer" aria-hidden="true" />
+        <div className="reward-wheel" style={{ transform: `rotate(${rotation}deg)` }}>
+          {WHEEL_SEGMENTS.map((segment, index) => (
+            <span
+              className="reward-wheel__label"
+              key={`${segment.id}-${index}`}
+              style={{ transform: `rotate(${index * 45 + 22.5}deg) translateY(-72px) rotate(90deg)` }}
+              aria-hidden="true"
+            >
+              <b>{segment.icon}</b><small>{segment.shortLabel}</small>
+            </span>
+          ))}
+          <span className="reward-wheel__hub" aria-hidden="true"><CoffeeBeanIcon status="earned" size={24} /></span>
+        </div>
+      </div>
+
+      {!prize && !spinning && (
+        <button type="button" className="loyalty-button loyalty-button--spin" disabled={disabled} onClick={spin}>
+          <i className="ti ti-rotate-clockwise" aria-hidden="true" /> หมุนกงล้อเลย
+        </button>
+      )}
+      {spinning && <p className="reward-wheel__status" role="status">กำลังลุ้นรางวัล...</p>}
+      {prize && revealed && !spinning && (
+        <div className="reward-wheel__result" role="status">
+          <span aria-hidden="true">🎉</span>
+          <span><small>คุณได้รับ</small><strong>{wheelPrizeLabel(prize, freeDrinkCap)}</strong></span>
+        </div>
+      )}
+      {spinError && <p className="reward-wheel__error" role="alert">{spinError}</p>}
+    </div>
+  );
+}
+
 export default function LoyaltyCard({
   phone,
   loyaltyStatus,
@@ -89,13 +165,14 @@ export default function LoyaltyCard({
   redeemLineId,
   setRedeemLineId,
   rewardVerified,
+  wheelPrize,
+  onSpinReward,
   onRequestRewardVerification,
   onShowRewardTerms,
 }) {
   const digits = phone.replace(/\D/g, "");
   const target = Math.max(1, Math.floor(Number(loyaltyBeanGoal) || 10));
-  const rewardValue = Math.min(10000, Math.max(1, Number(loyaltyRewardValue) || 60));
-  const rewardValueLabel = rewardValue.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const rewardValue = Math.min(60, Math.max(1, Number(loyaltyRewardValue) || 60));
   const earned = Math.max(0, Math.floor(Number(beanRecord?.beans) || 0));
   // Pending beans preview what this cart can earn, but they are not part of the
   // member's balance until the shop delivers the drinks.
@@ -138,12 +215,12 @@ export default function LoyaltyCard({
     setAnimatedIndexes(Array.from({ length: Math.max(0, last - first) }, (_, index) => first + index));
     setAnnouncement(
       previousEarned < target && earned >= target
-        ? `คุณมีรางวัลส่วนลดเครื่องดื่ม ${rewardValueLabel} บาทพร้อมใช้`
+        ? "คุณมีสิทธิ์หมุนกงล้อลุ้นรางวัลแล้ว"
         : `ได้รับ ${earned - previousEarned} เมล็ด ตอนนี้คุณมี ${earned} จาก ${target} เมล็ด`,
     );
     const timer = window.setTimeout(() => setAnimatedIndexes([]), 520);
     return () => window.clearTimeout(timer);
-  }, [animationKey, earned, recordIdentity, rewardValueLabel, target]);
+  }, [animationKey, earned, recordIdentity, target]);
 
   if (digits.length < 9) {
     return (
@@ -182,15 +259,15 @@ export default function LoyaltyCard({
       <div className="loyalty-card__status" aria-live="polite">
         {rewardReady ? (
           <>
-            <p className="loyalty-card__primary loyalty-card__primary--reward">คุณมีรางวัลพร้อมใช้!</p>
-            <p className="loyalty-card__reward-copy">ส่วนลดเครื่องดื่ม {rewardValueLabel} บาท</p>
+            <p className="loyalty-card__primary loyalty-card__primary--reward">หมุนกงล้อลุ้นรางวัลได้แล้ว!</p>
+            <p className="loyalty-card__reward-copy">ลุ้นฟรี 1 แก้ว, ลด 50% และรางวัลส่วนลดอีกเพียบ</p>
           </>
         ) : (
           <>
             <p className="loyalty-card__primary">
               {beanRecord.isNew && earned === 0
                 ? "เริ่มสะสมเมล็ดจากออเดอร์นี้ได้เลย"
-                : `อีก ${remaining} เมล็ด รับส่วนลด ${rewardValueLabel} บาท`}
+                : `อีก ${remaining} เมล็ด ได้สิทธิ์หมุนกงล้อ`}
             </p>
             <span className="sr-only">{announcement}</span>
           </>
@@ -216,7 +293,7 @@ export default function LoyaltyCard({
                 disabled={rewardEligibleCart.length === 0}
                 onClick={() => setRedeemMode(true)}
               >
-                ใช้รางวัลกับออเดอร์นี้
+                หมุนกงล้อลุ้นรางวัล
               </button>
               <button type="button" className="loyalty-button loyalty-button--quiet" onClick={() => setRedeemMode(false)}>
                 เก็บไว้ใช้ครั้งถัดไป
@@ -224,7 +301,7 @@ export default function LoyaltyCard({
             </div>
           ) : (
             <fieldset className="loyalty-redeem__choices">
-              <legend>เลือกแก้วที่ต้องการใช้ส่วนลด {rewardValueLabel} บาท</legend>
+              <legend>{wheelPrize ? "เลือกแก้วที่ต้องการใช้รางวัล" : "เลือกเครื่องดื่มก่อนหมุนกงล้อ"}</legend>
               {rewardEligibleCart.map((line) => (
                 <label key={line.lineId}>
                   <input
@@ -238,18 +315,15 @@ export default function LoyaltyCard({
               ))}
               {redeemLine && !rewardVerified && (
                 <button type="button" className="loyalty-button loyalty-button--reward" onClick={onRequestRewardVerification}>
-                  ยืนยัน OTP เพื่อใช้รางวัล
+                  ยืนยัน OTP เพื่อหมุนกงล้อ
                 </button>
               )}
-              {redeemLine && rewardVerified && (
-                <p className="loyalty-redeem__verified" role="status">
-                  <i className="ti ti-shield-check" aria-hidden="true" /> ยืนยันเบอร์แล้ว รางวัลจะถูกใช้เมื่อยืนยันสั่งซื้อ
-                </p>
-              )}
+              {redeemLine && rewardVerified && <RewardWheel prize={wheelPrize} onSpin={onSpinReward} freeDrinkCap={rewardValue} />}
+              {redeemLine && rewardVerified && wheelPrize && <p className="loyalty-redeem__verified" role="status"><i className="ti ti-shield-check" aria-hidden="true" /> ล็อกรางวัลไว้แล้ว เมล็ดจะถูกหักเมื่อยืนยันสั่งซื้อ</p>}
               <div className="loyalty-redeem__actions">
                 {redeemLine && (
                   <button type="button" className="loyalty-button loyalty-button--quiet" onClick={() => setRedeemLineId(null)}>
-                    ไม่แลกแล้ว
+                    เลือกแก้วใหม่
                   </button>
                 )}
                 <button
@@ -264,7 +338,7 @@ export default function LoyaltyCard({
               </div>
             </fieldset>
           )}
-          {rewardEligibleCart.length === 0 && <p className="loyalty-card__helper">เพิ่มเครื่องดื่มลงตะกร้าก่อนใช้รางวัล ขนมปังและอาหารไม่ร่วมรายการ</p>}
+          {rewardEligibleCart.length === 0 && <p className="loyalty-card__helper">เพิ่มเครื่องดื่มลงตะกร้าก่อนหมุนกงล้อ ขนมปังและอาหารไม่ร่วมรายการ</p>}
         </div>
       )}
 

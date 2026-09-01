@@ -447,7 +447,7 @@ function normalizeData(raw) {
       categoryOrder: raw.settings?.categoryOrder || [],
       defaultPackagingLines: raw.settings?.defaultPackagingLines || [],
       loyaltyBeanGoal: raw.settings?.loyaltyBeanGoal || 10,
-      loyaltyRewardValue: Math.min(10000, Math.max(1, Number(raw.settings?.loyaltyRewardValue) || 60)),
+      loyaltyRewardValue: Math.min(60, Math.max(1, Number(raw.settings?.loyaltyRewardValue) || 60)),
       seasonalEffect: ["off", "auto", "christmas", "songkran"].includes(raw.settings?.seasonalEffect) ? raw.settings.seasonalEffect : "auto",
       customerTheme: normalizeCustomerThemeSettings(raw.settings?.customerTheme),
       coffeePass: {
@@ -886,7 +886,7 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
     return () => unsub();
   }, [uid]);
 
-  // เก็บลูกค้า/เมล็ดสะสมแยกโหนดจาก shops/{uid} เหมือน orders — เพราะลูกค้าเขียนแลกเมล็ดตรงจากหน้า QR เอง
+  // เก็บลูกค้า/เมล็ดสะสมแยกโหนดจาก shops/{uid} เหมือน orders — เพราะการหมุนกงล้อและใช้สิทธิ์เกิดจากหน้าลูกค้า
   // (คนละ session กับแอดมิน) ถ้าฝากไว้ใน data ก้อนใหญ่ที่ set() ทับทั้งก้อนทุก 400ms จะโดนค่าเก่าทับหายได้
   useEffect(() => {
     const unsub = onValue(ref(db, `customers/${uid}`), (snap) => {
@@ -1647,7 +1647,7 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
   }
 
   // ให้เมล็ดสะสมตอนออเดอร์ถึงสถานะ "เสร็จ" (done) เท่านั้น และนับเฉพาะเครื่องดื่ม
-  // อาหาร/ขนมปังยังขายและตัดสต็อกตามปกติ แต่ไม่เพิ่มเมล็ดและไม่สามารถนำมาแลกรางวัลเครื่องดื่มได้
+  // อาหาร/ขนมปังยังขายและตัดสต็อกตามปกติ แต่ไม่เพิ่มเมล็ดและไม่สามารถใช้รางวัลจากกงล้อได้
   async function awardLoyaltyBeans(order) {
     const phoneKey = normalizeThaiPhone(order.customerPhone);
     if (!phoneKey) return { cups: 0, skipped: "invalid-phone" };
@@ -1761,7 +1761,7 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
   function updateLoyaltyReward(goal, rewardValue) {
     updateData((next) => {
       next.settings.loyaltyBeanGoal = Math.max(1, Math.floor(Number(goal) || 10));
-      next.settings.loyaltyRewardValue = Math.min(10000, Math.max(1, Math.round((Number(rewardValue) || 60) * 100) / 100));
+      next.settings.loyaltyRewardValue = Math.min(60, Math.max(1, Math.round((Number(rewardValue) || 60) * 100) / 100));
     });
   }
 
@@ -3207,7 +3207,7 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, loyaltyRewardValue, 
   function saveGoal() {
     updateLoyaltyReward(goalInput, rewardValueInput);
     setSettingsOpen(false);
-    showToast("บันทึกเกณฑ์และมูลค่ารางวัลแล้ว");
+    showToast("บันทึกเกณฑ์และกงล้อรางวัลแล้ว");
   }
 
   async function submitAdjust(sign) {
@@ -3313,7 +3313,7 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, loyaltyRewardValue, 
         {[
           { label:"ลูกค้าทั้งหมด", value:`${totalCustomers} คน`, icon:IconCustomers, bg:POS.chipBg, color:POS.navy },
           { label:"เมล็ดคงค้าง", value:totalBeansOut, icon:IconLoyaltyBeans, bg:"#F7E9DD", color:"#9A4D16" },
-          { label:"พร้อมแลกรางวัล", value:`${eligibleCount} คน`, icon:IconRewardReady, bg:"#E1F2E7", color:"#237A43" },
+          { label:"พร้อมหมุนกงล้อ", value:`${eligibleCount} คน`, icon:IconRewardReady, bg:"#E1F2E7", color:"#237A43" },
           { label:"ลูกค้าซื้อซ้ำ", value:`${repeatCount} คน`, icon:IconRepeatCustomer, bg:"#E8EEFF", color:"#315AA8" },
         ].map((item) => <div className="loy-stat" key={item.label}><div className="loy-stat-icon" style={{background:item.bg,color:item.color}}><item.icon size={22} aria-label={item.label}/></div><div><div style={{fontSize:11.5,color:POS.gray,fontWeight:600}}>{item.label}</div><div style={{fontSize:22,fontWeight:700,color:item.color,marginTop:2}}>{item.value}</div></div></div>)}
       </div>
@@ -3352,7 +3352,7 @@ function LoyaltyPanel({ customers, orders, loyaltyBeanGoal, loyaltyRewardValue, 
 
       {adjustFor && <div className="loy-modal-backdrop" onClick={()=>!adjustingBeans&&setAdjustFor(null)}><div className="loy-modal" role="dialog" aria-modal="true" aria-label={`ปรับเมล็ด ${adjustFor.name||adjustFor.phone}`} onClick={(e)=>e.stopPropagation()}><h3 style={{margin:"0 0 4px",color:POS.navy}}>ปรับเมล็ด — {adjustFor.name||adjustFor.phone}</h3><p style={{margin:"0 0 14px",fontSize:12,color:POS.gray}}>ปัจจุบัน {adjustFor.beans||0} เมล็ด · ระบบจะเก็บผู้ทำรายการ เวลา และเหตุผล</p><label style={{fontSize:11.5,fontWeight:700,color:POS.gray}}>จำนวนเมล็ด</label><input className="loy-field" type="number" min="1" step="1" value={adjustAmount} onChange={(e)=>setAdjustAmount(e.target.value)} inputMode="numeric"/><label style={{display:"block",margin:"10px 0 5px",fontSize:11.5,fontWeight:700,color:POS.gray}}>เหตุผล <span style={{color:"var(--danger)"}}>*</span></label><input className="loy-field" value={adjustReason} onChange={(e)=>setAdjustReason(e.target.value)} placeholder="ต้องระบุก่อนกด เช่น ชดเชยออเดอร์ #123456"/><div style={{display:"flex",gap:8,marginTop:14}}><button disabled={adjustingBeans} className="cbtn cbtn-accent" style={{flex:1}} onClick={()=>submitAdjust(1)}>{adjustingBeans?"กำลังบันทึก...":"+ เพิ่ม"}</button><button disabled={adjustingBeans} className="cbtn cbtn-danger" style={{flex:1}} onClick={()=>submitAdjust(-1)}>{adjustingBeans?"กำลังบันทึก...":"− หัก"}</button></div></div></div>}
 
-      {settingsOpen && <div className="loy-modal-backdrop" onClick={()=>setSettingsOpen(false)}><div className="loy-modal" role="dialog" aria-modal="true" aria-label="ตั้งค่ารางวัล" onClick={(e)=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><h3 style={{margin:0,color:POS.navy}}>ตั้งค่ารางวัล</h3><button className="cbtn" style={{width:32,height:32,padding:0}} onClick={()=>setSettingsOpen(false)}><Icon name="x"/></button></div><p style={{fontSize:12.5,color:POS.gray,lineHeight:1.5}}>กำหนดจำนวนเมล็ดและมูลค่าส่วนลดสำหรับเครื่องดื่ม 1 แก้ว หากราคาเกินมูลค่ารางวัล ลูกค้าชำระเฉพาะส่วนต่าง</p><label style={{display:"block",fontSize:12,fontWeight:700,color:POS.navy,marginBottom:6}}>จำนวนเมล็ดที่ใช้แลก</label><input className="loy-field" type="number" min="1" step="1" value={goalInput} onChange={(e)=>setGoalInput(e.target.value)} inputMode="numeric"/><label style={{display:"block",fontSize:12,fontWeight:700,color:POS.navy,margin:"12px 0 6px"}}>มูลค่ารางวัล (บาท)</label><input className="loy-field" type="number" min="1" max="10000" step="0.01" value={rewardValueInput} onChange={(e)=>setRewardValueInput(e.target.value)} inputMode="decimal"/><div style={{marginTop:8,padding:"8px 10px",borderRadius:9,background:"var(--cream-2)",color:POS.gray,fontSize:11.5}}>ตัวอย่าง: รางวัล ฿{money(Number(rewardValueInput)||60)} · เมนู ฿70 ลูกค้าชำระ ฿{money(Math.max(0,70-(Number(rewardValueInput)||60)))}<br/><b>หลังบันทึกจะมีลูกค้าพร้อมแลก {previewEligibleCount} คน</b></div><button className="cbtn cbtn-accent" style={{width:"100%",marginTop:14}} onClick={saveGoal}>บันทึกการตั้งค่า</button></div></div>}
+      {settingsOpen && <div className="loy-modal-backdrop" onClick={()=>setSettingsOpen(false)}><div className="loy-modal" role="dialog" aria-modal="true" aria-label="ตั้งค่ากงล้อรางวัล" onClick={(e)=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><h3 style={{margin:0,color:POS.navy}}>ตั้งค่ากงล้อรางวัล</h3><button className="cbtn" style={{width:32,height:32,padding:0}} onClick={()=>setSettingsOpen(false)}><Icon name="x"/></button></div><p style={{fontSize:12.5,color:POS.gray,lineHeight:1.5}}>ลูกค้าสะสมครบตามจำนวนแล้วหมุนลุ้น: ฟรี 1 แก้ว, ลด 50%, ลด 30, 25, 20 หรือ 15 บาท</p><label style={{display:"block",fontSize:12,fontWeight:700,color:POS.navy,marginBottom:6}}>จำนวนเมล็ดต่อการหมุน 1 ครั้ง</label><input className="loy-field" type="number" min="1" step="1" value={goalInput} onChange={(e)=>setGoalInput(e.target.value)} inputMode="numeric"/><label style={{display:"block",fontSize:12,fontWeight:700,color:POS.navy,margin:"12px 0 6px"}}>วงเงินฟรี 1 แก้ว สูงสุด (บาท)</label><input className="loy-field" type="number" min="1" max="60" step="0.01" value={rewardValueInput} onChange={(e)=>setRewardValueInput(e.target.value)} inputMode="decimal"/><div style={{marginTop:8,padding:"8px 10px",borderRadius:9,background:"var(--cream-2)",color:POS.gray,fontSize:11.5}}>โอกาสต่อช่องเท่ากัน 1 ใน 8 · ช่องลด 15 และ 20 บาทมีอย่างละ 2 ช่อง<br/><b>หลังบันทึกจะมีลูกค้าพร้อมหมุน {previewEligibleCount} คน</b></div><button className="cbtn cbtn-accent" style={{width:"100%",marginTop:14}} onClick={saveGoal}>บันทึกการตั้งค่า</button></div></div>}
 
       {addOpen && <div className="loy-modal-backdrop" onClick={()=>setAddOpen(false)}><div className="loy-modal" role="dialog" aria-modal="true" aria-label="เพิ่มลูกค้า" onClick={(e)=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><h3 style={{margin:0,color:POS.navy}}>เพิ่มลูกค้า</h3><button className="cbtn" style={{width:32,height:32,padding:0}} onClick={()=>setAddOpen(false)}><Icon name="x"/></button></div><label style={{display:"block",fontSize:12,fontWeight:700,color:POS.navy,marginBottom:6}}>ชื่อลูกค้า</label><input className="loy-field" value={newName} onChange={(e)=>setNewName(e.target.value)} placeholder="ไม่บังคับ"/><label style={{display:"block",fontSize:12,fontWeight:700,color:POS.navy,margin:"12px 0 6px"}}>เบอร์โทรศัพท์</label><input className="loy-field" value={newPhone} onChange={(e)=>setNewPhone(e.target.value)} inputMode="tel" placeholder="0xx-xxx-xxxx"/>{addError&&<p style={{fontSize:12,color:"var(--danger)",margin:"8px 0 0"}}>{addError}</p>}<button className="cbtn cbtn-accent" disabled={adding} style={{width:"100%",marginTop:14,opacity:adding?.65:1}} onClick={submitNewCustomer}>{adding?"กำลังเพิ่ม...":"เพิ่มลูกค้า"}</button></div></div>}
 
@@ -3462,7 +3462,7 @@ function LoyaltyDetailDrawer({ customer, orders, loyaltyBeanGoal, onResetPasscod
           <section style={{ padding:15, borderRadius:14, background:POS.chipBg, border:`1px solid ${POS.border}` }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:10 }}>
               <div><div style={{ color:POS.gray, fontSize:11.5, fontWeight:700 }}>เมล็ดพร้อมใช้</div><div style={{ marginTop:2, color:POS.navy, fontSize:25, fontWeight:700 }}>{beans} <span style={{ fontSize:12, fontWeight:600, color:POS.gray }}>/ {loyaltyBeanGoal} เมล็ด</span></div></div>
-              <span style={{ fontSize:11.5, fontWeight:700, color:beans >= loyaltyBeanGoal ? "#166534" : "#1D4ED8" }}>{beans >= loyaltyBeanGoal ? "พร้อมแลกรางวัล" : `เหลืออีก ${Math.max(0, loyaltyBeanGoal - beans)}`}</span>
+              <span style={{ fontSize:11.5, fontWeight:700, color:beans >= loyaltyBeanGoal ? "#166534" : "#1D4ED8" }}>{beans >= loyaltyBeanGoal ? "พร้อมหมุนกงล้อ" : `เหลืออีก ${Math.max(0, loyaltyBeanGoal - beans)}`}</span>
             </div>
             <div className="loy-progress" style={{ marginTop:10 }}><span style={{ width:`${progress}%`, background:beans >= loyaltyBeanGoal ? "#16A34A" : POS.primary }} /></div>
             <div style={{ marginTop:9, color:POS.gray, fontSize:11.5 }}>{nextTier ? `อีก ${Math.max(0, nextTier.min - lifetimeBeans)} เมล็ด ถึงระดับ ${nextTier.label}` : "ถึงระดับสมาชิกสูงสุดแล้ว"}</div>

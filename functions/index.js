@@ -80,6 +80,33 @@ function validShopUid(value) {
   return typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 }
 
+// Eight equally-likely slots. Repeated prizes make the odds visible on the wheel
+// instead of hiding weights behind an apparently even set of slices.
+const LOYALTY_WHEEL_SEGMENTS = [
+  { id:"free-drink", value:60 },
+  { id:"discount-15", value:15 },
+  { id:"half-price", value:50 },
+  { id:"discount-20", value:20 },
+  { id:"discount-30", value:30 },
+  { id:"discount-15", value:15 },
+  { id:"discount-25", value:25 },
+  { id:"discount-20", value:20 },
+];
+
+function loyaltyWheelPrizeLabel(prize, freeDrinkCap = 60) {
+  if (prize.id === "free-drink") return `ฟรี 1 แก้ว มูลค่าไม่เกิน ${freeDrinkCap} บาท`;
+  if (prize.id === "half-price") return "ลด 50% สำหรับเครื่องดื่ม 1 แก้ว";
+  return `ลด ${Number(prize.value) || 0} บาท สำหรับเครื่องดื่ม 1 แก้ว`;
+}
+
+function loyaltyWheelDiscount(prize, unitPrice) {
+  const price = Math.max(0, Number(unitPrice) || 0);
+  if (!prize || price <= 0) return 0;
+  if (prize.prizeId === "free-drink" || prize.id === "free-drink") return Math.min(price, Number(prize.value) || 60);
+  if (prize.prizeId === "half-price" || prize.id === "half-price") return Math.round(price * 50) / 100;
+  return Math.min(price, Math.max(0, Number(prize.value) || 0));
+}
+
 function hashPasscode(passcode, salt) {
   return crypto.scryptSync(String(passcode), salt, 32).toString("hex");
 }
@@ -120,6 +147,14 @@ exports.getCustomerSummary = onCall({ region: REGION }, async (request) => {
   return {
     beans:Math.max(0,Number(customer.beans)||0), lifetimeBeans:Math.max(0,Number(customer.lifetimeBeans)||0),
     redeemedCount:Math.max(0,Number(customer.redeemedCount)||0), passes,
+    ...(customer.activeWheelSpin?.attemptId ? { activeWheelSpin: {
+      attemptId:String(customer.activeWheelSpin.attemptId),
+      prizeId:String(customer.activeWheelSpin.prizeId || ""),
+      label:String(customer.activeWheelSpin.label || "").slice(0,120),
+      value:Math.max(0,Number(customer.activeWheelSpin.value)||0),
+      segmentIndex:Math.max(0,Math.min(7,Number(customer.activeWheelSpin.segmentIndex)||0)),
+      beanGoal:Math.max(1,Number(customer.activeWheelSpin.beanGoal)||10),
+    } } : {}),
   };
 });
 
@@ -549,8 +584,65 @@ exports.redeemCoffeePass = onCall({ region: REGION }, async (request) => {
   return { orderId: attempt.orderId, order: (await orderRef.once("value")).val(), pass };
 });
 
-// Reward checkout is server-owned: a verified phone token is required, beans are
-// deducted once per attempt ID, and retries resume the same deterministic order.
+// Create (or return) one server-owned wheel result. The active result is kept on
+// the member record so refreshing or changing devices cannot be used to reroll.
+// Beans are deliberately not deducted here: an abandoned checkout should not
+// cost the member anything.
+exports.spinLoyaltyWheel = onCall({ region: REGION }, async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "กรุณายืนยันเบอร์โทรศัพท์ก่อนหมุนกงล้อ");
+  const { shopUid, customerPhone, redemptionAttemptId } = request.data || {};
+  if (!validShopUid(shopUid) || !/^[A-Za-z0-9_-]{16,80}$/.test(String(redemptionAttemptId || ""))) {
+    throw new HttpsError("invalid-argument", "ข้อมูลการหมุนกงล้อไม่ถูกต้อง");
+  }
+  const verifiedPhone = normalizeThaiPhone(request.auth.token.phone_number);
+  const phone = normalizeThaiPhone(customerPhone);
+  if (!verifiedPhone || verifiedPhone !== phone) {
+    throw new HttpsError("permission-denied", "เบอร์ที่ยืนยันไม่ตรงกับเบอร์สมาชิก");
+  }
+
+  const settingsSnap = await db.ref(`shops/${shopUid}/settings`).once("value");
+  const settings = settingsSnap.val() || {};
+  if (settings.acceptingOrders === false) throw new HttpsError("failed-precondition", "ขณะนี้ร้านปิดรับออเดอร์");
+  const beanGoal = Math.max(1, Math.floor(Number(settings.loyaltyBeanGoal) || 10));
+  const freeDrinkCap = Math.min(60, Math.max(1, Math.round((Number(settings.loyaltyRewardValue) || 60) * 100) / 100));
+  const segmentIndex = crypto.randomInt(LOYALTY_WHEEL_SEGMENTS.length);
+  const selected = { ...LOYALTY_WHEEL_SEGMENTS[segmentIndex] };
+  if (selected.id === "free-drink") selected.value = freeDrinkCap;
+  const proposedSpin = {
+    attemptId:redemptionAttemptId,
+    prizeId:selected.id,
+    value:selected.value,
+    label:loyaltyWheelPrizeLabel(selected, freeDrinkCap),
+    segmentIndex,
+    beanGoal,
+    createdAt:Date.now(),
+  };
+
+  const customerRef = db.ref(`customers/${shopUid}/${phone}`);
+  const initialSnapshot = await customerRef.once("value");
+  if (!initialSnapshot.exists()) throw new HttpsError("failed-precondition", "ไม่พบบัญชีสมาชิกสำหรับเบอร์นี้");
+  const initialCustomer = initialSnapshot.val();
+  const transaction = await customerRef.transaction((current) => {
+    const customer = current || initialCustomer;
+    if (customer.activeWheelSpin?.attemptId && customer.activeWheelSpin?.prizeId) return customer;
+    if ((Number(customer.beans) || 0) < beanGoal) return undefined;
+    return { ...customer, activeWheelSpin:proposedSpin, updatedAt:new Date().toISOString() };
+  });
+  if (!transaction.committed) throw new HttpsError("failed-precondition", "เมล็ดสะสมไม่พอสำหรับหมุนกงล้อแล้ว");
+  const spin = transaction.snapshot.child("activeWheelSpin").val();
+  if (!spin?.attemptId || !spin?.prizeId) throw new HttpsError("internal", "ไม่สามารถบันทึกผลกงล้อได้ กรุณาลองใหม่");
+  return {
+    redemptionAttemptId:spin.attemptId,
+    prizeId:spin.prizeId,
+    value:Number(spin.value)||0,
+    label:String(spin.label || ""),
+    segmentIndex:Number(spin.segmentIndex)||0,
+  };
+});
+
+// Reward checkout is server-owned: a verified phone token and a previously
+// stored wheel result are required, beans are deducted once per attempt ID, and
+// retries resume the same deterministic order.
 exports.checkoutWithReward = onCall({ region: REGION }, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "กรุณายืนยันเบอร์โทรศัพท์ก่อนใช้รางวัล");
 
@@ -584,9 +676,6 @@ exports.checkoutWithReward = onCall({ region: REGION }, async (request) => {
   if (!selectedMenu || isFoodProduct(selectedMenu) || isFoodProduct(selectedLine)) {
     throw new HttpsError("failed-precondition", "รางวัลนี้ใช้แลกได้เฉพาะเครื่องดื่ม");
   }
-  const beanGoal = Math.max(1, Math.floor(Number(settings.loyaltyBeanGoal) || 10));
-  const rewardValue = Math.min(10000, Math.max(1, Math.round((Number(settings.loyaltyRewardValue) || 60) * 100) / 100));
-  const proposedRewardDiscount = Math.max(0, Math.round(Math.min(Number(selectedLine.unitPrice) || 0, rewardValue) * 100) / 100);
   const proposedOrderId = db.ref(`orders/${shopUid}`).push().key;
   const customerRef = db.ref(`customers/${shopUid}/${orderPhone}`);
   // Prime the complete customer record before starting the transaction. A cold
@@ -599,12 +688,27 @@ exports.checkoutWithReward = onCall({ region: REGION }, async (request) => {
   }
   const initialCustomer = customerSnapshot.val();
   const now = Date.now();
+  const existingAttempt = initialCustomer.redemptionAttempts?.[redemptionAttemptId];
+  const activeSpin = existingAttempt || initialCustomer.activeWheelSpin;
+  if (!activeSpin || (activeSpin.attemptId && activeSpin.attemptId !== redemptionAttemptId)) {
+    throw new HttpsError("failed-precondition", "กรุณาหมุนกงล้อรับรางวัลก่อนยืนยันสั่งซื้อ");
+  }
+  const beanGoal = Math.max(1, Math.floor(Number(activeSpin.beanGoal) || Number(settings.loyaltyBeanGoal) || 10));
+  const prizeId = String(activeSpin.prizeId || "");
+  if (!LOYALTY_WHEEL_SEGMENTS.some((prize) => prize.id === prizeId)) {
+    throw new HttpsError("failed-precondition", "ผลรางวัลไม่ถูกต้อง กรุณาติดต่อร้าน");
+  }
+  const prizeValue = Math.max(0, Number(activeSpin.value) || 0);
+  const prizeLabel = String(activeSpin.label || loyaltyWheelPrizeLabel({ id:prizeId, value:prizeValue }, prizeValue)).slice(0,120);
+  const proposedRewardDiscount = Math.max(0, Math.round(loyaltyWheelDiscount({ prizeId, value:prizeValue }, selectedLine.unitPrice) * 100) / 100);
 
   const transaction = await customerRef.transaction((current) => {
     const customer = current || initialCustomer;
     const attempts = customer.redemptionAttempts || {};
     const existing = attempts[redemptionAttemptId];
     if (existing) return customer;
+    const currentSpin = customer.activeWheelSpin;
+    if (!currentSpin || currentSpin.attemptId !== redemptionAttemptId || currentSpin.prizeId !== prizeId) return undefined;
     if ((Number(customer.beans) || 0) < beanGoal) return undefined;
 
     const recentAttempts = Object.fromEntries(
@@ -616,16 +720,17 @@ exports.checkoutWithReward = onCall({ region: REGION }, async (request) => {
       ...customer,
       beans: (Number(customer.beans) || 0) - beanGoal,
       redeemedCount: (Number(customer.redeemedCount) || 0) + 1,
+      activeWheelSpin: null,
       updatedAt: new Date(now).toISOString(),
       redemptionAttempts: {
         ...recentAttempts,
-        [redemptionAttemptId]: { orderId: proposedOrderId, rewardValue, rewardDiscount: proposedRewardDiscount, createdAt: now },
+        [redemptionAttemptId]: { orderId: proposedOrderId, prizeId, prizeValue, prizeLabel, beanGoal, rewardDiscount: proposedRewardDiscount, createdAt: now },
       },
     };
   });
 
   if (!transaction.committed) {
-    throw new HttpsError("failed-precondition", "เมล็ดสะสมไม่พอสำหรับแลกรางวัลแล้ว");
+    throw new HttpsError("failed-precondition", "สิทธิ์กงล้อไม่พร้อมใช้หรือเมล็ดสะสมไม่พอแล้ว");
   }
 
   const attempt = transaction.snapshot.child(`redemptionAttempts/${redemptionAttemptId}`).val();
@@ -633,8 +738,7 @@ exports.checkoutWithReward = onCall({ region: REGION }, async (request) => {
     throw new HttpsError("internal", "ไม่สามารถยืนยันรายการแลกได้ กรุณาลองใหม่");
   }
 
-  const appliedRewardValue = Math.min(10000, Math.max(1, Number(attempt.rewardValue) || rewardValue));
-  const rewardDiscount = Math.max(0, Math.round(Math.min(Number(selectedLine.unitPrice) || 0, Number(attempt.rewardDiscount ?? proposedRewardDiscount) || 0, appliedRewardValue) * 100) / 100);
+  const rewardDiscount = Math.max(0, Math.round(Math.min(Number(selectedLine.unitPrice) || 0, Number(attempt.rewardDiscount ?? proposedRewardDiscount) || 0) * 100) / 100);
   const orderRef = db.ref(`orders/${shopUid}/${attempt.orderId}`);
   const items = draft.items.map(({ lineId, ...item }) => ({
     ...item,
@@ -653,7 +757,9 @@ exports.checkoutWithReward = onCall({ region: REGION }, async (request) => {
     total,
     redeemedBeans: true,
     beansUsed: beanGoal,
-    rewardValue: appliedRewardValue,
+    rewardPrizeId: String(attempt.prizeId || prizeId),
+    rewardPrizeLabel: String(attempt.prizeLabel || prizeLabel),
+    rewardValue: Math.max(0, Number(attempt.prizeValue) || prizeValue),
     rewardDiscount,
     redemptionAttemptId,
     status: "pending",

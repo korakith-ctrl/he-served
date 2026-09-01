@@ -12,6 +12,7 @@ import generatePayload from "promptpay-qr";
 import { firebaseConfig } from "./firebase";
 import LoyaltyCard from "./components/loyalty/LoyaltyCard.jsx";
 import RewardOtpModal from "./components/loyalty/RewardOtpModal.jsx";
+import { wheelPrizeDiscount, wheelPrizeLabel } from "./components/loyalty/wheelPrizes.js";
 import PromotionTakeover from "./components/promotions/PromotionTakeover.jsx";
 import OrderPreparationExperience from "./components/orders/OrderPreparationExperience.jsx";
 import LandingScreen, { LANDING_SCREEN_EXIT_MS, LANDING_SCREEN_MINIMUM_MS } from "./LandingScreen.jsx";
@@ -318,14 +319,15 @@ function RewardTermsSheet({ goal, rewardValue, onClose }) {
       <div style={{
         ...GLASS_PANEL, borderRadius: 20, padding: 20, width: "100%", maxWidth: 420, maxHeight: "85dvh", overflowY: "auto",
         transform: shown ? "translateY(0)" : "translateY(calc(100% + 24px))", transition: "transform .34s cubic-bezier(.22,1,.36,1)",
-      }} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="เงื่อนไขการสะสมเมล็ดและรางวัล">
-        <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 18, margin: "0 0 12px", color: COLORS.espresso5 }}>เงื่อนไขการสะสมเมล็ด</h2>
+      }} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="เงื่อนไขการสะสมเมล็ดและหมุนกงล้อ">
+        <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 18, margin: "0 0 12px", color: COLORS.espresso5 }}>เงื่อนไขกงล้อลุ้นรางวัล</h2>
         <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: COLORS.espresso3, lineHeight: 1.9 }}>
           <li>ได้รับ 1 เมล็ดต่อเครื่องดื่ม 1 แก้วที่สั่งซื้อ ไม่ว่าจะสั่งกี่แก้วในออเดอร์เดียวก็นับครบทุกแก้ว</li>
-          <li>ขนมปัง อาหาร และสินค้าอื่นที่ไม่ใช่เครื่องดื่ม ไม่ร่วมสะสมเมล็ดและไม่สามารถใช้เป็นเมนูแลกรางวัลได้</li>
+          <li>ขนมปัง อาหาร และสินค้าอื่นที่ไม่ใช่เครื่องดื่ม ไม่ร่วมสะสมเมล็ดและไม่สามารถใช้รางวัลได้</li>
           <li>เมล็ดเข้าบัญชีเมื่อร้านส่งมอบเครื่องดื่มให้คุณเรียบร้อยแล้ว (ไม่ใช่ตอนชำระเงิน)</li>
-          <li>สะสมครบ {goal} เมล็ด รับส่วนลดเครื่องดื่มสูงสุด {money(rewardValue)} บาท สำหรับ 1 แก้วที่เลือกจากตะกร้า</li>
-          <li>หากเครื่องดื่มราคาเกิน {money(rewardValue)} บาท ชำระเฉพาะส่วนต่าง หากราคาต่ำกว่า ส่วนต่างที่เหลือไม่สามารถทอนหรือเก็บไว้ใช้ครั้งถัดไป</li>
+          <li>สะสมครบ {goal} เมล็ด ได้สิทธิ์หมุนกงล้อ 1 ครั้ง ลุ้นฟรี 1 แก้วมูลค่าไม่เกิน {money(rewardValue)}, ลด 50% หรือลด 15–30 บาท</li>
+          <li>ผลที่หมุนได้จะถูกล็อกไว้จนกว่าจะใช้กับออเดอร์ ไม่สามารถหมุนซ้ำเพื่อเปลี่ยนรางวัลได้</li>
+          <li>รางวัลใช้กับเครื่องดื่ม 1 แก้ว หากส่วนลดมากกว่าราคาเครื่องดื่ม ส่วนต่างไม่สามารถทอนหรือเก็บไว้ใช้ครั้งถัดไป</li>
           <li>เมล็ดและรางวัลผูกกับเบอร์โทรศัพท์ที่ใช้สั่งซื้อ ไม่มีวันหมดอายุ</li>
         </ul>
         <BackIconButton onClick={onClose} label="ปิด" style={{ marginTop: 18 }} />
@@ -1670,6 +1672,7 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
   const [rewardOtpResendAt, setRewardOtpResendAt] = useState(0);
   const [rewardVerification, setRewardVerification] = useState(null);
   const [redemptionAttemptId, setRedemptionAttemptId] = useState("");
+  const [wheelPrize, setWheelPrize] = useState(null);
   const rewardVerificationIdRef = useRef("");
   const rewardRecaptchaRef = useRef(null);
   const [showRewardTerms, setShowRewardTerms] = useState(false);
@@ -1827,7 +1830,7 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
     );
     const unsub9 = onValue(ref(db, `shops/${shopUid}/settings/categoryOrder`), (snap) => setCategoryOrder(snap.val() || []));
     const unsub10 = onValue(ref(db, `shops/${shopUid}/settings/loyaltyBeanGoal`), (snap) => setLoyaltyBeanGoal(snap.val() || 10));
-    const unsub10b = onValue(ref(db, `shops/${shopUid}/settings/loyaltyRewardValue`), (snap) => setLoyaltyRewardValue(Math.min(10000, Math.max(1, Number(snap.val()) || 60))));
+    const unsub10b = onValue(ref(db, `shops/${shopUid}/settings/loyaltyRewardValue`), (snap) => setLoyaltyRewardValue(Math.min(60, Math.max(1, Number(snap.val()) || 60))));
     const unsub11 = onValue(
       ref(db, `shops/${shopUid}/settings/seasonalEffect`),
       (snap) => {
@@ -1939,6 +1942,19 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
   }, [phone, shopUid, loyaltyRetryTick, authUid]);
 
   useEffect(() => {
+    const activeSpin = beanRecord?.activeWheelSpin;
+    if (!activeSpin?.attemptId || !activeSpin?.prizeId) return;
+    setWheelPrize({
+      id: activeSpin.prizeId,
+      label: activeSpin.label,
+      value: activeSpin.value,
+      segmentIndex: activeSpin.segmentIndex,
+    });
+    setRedemptionAttemptId(activeSpin.attemptId);
+    setRedeemMode(true);
+  }, [beanRecord?.activeWheelSpin]);
+
+  useEffect(() => {
     if (!order) return;
     const unsub = onValue(ref(db, `orders/${shopUid}/${order.id}/status`), (snap) => {
       if (snap.exists()) setOrder((prev) => (prev ? { ...prev, status: snap.val() } : prev));
@@ -1962,6 +1978,7 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
     setRedeemMode(false);
     setRewardVerification(null);
     setRedemptionAttemptId("");
+    setWheelPrize(null);
     setRewardOtpOpen(false);
     setRewardOtpStatus("idle");
     setRewardOtpCode("");
@@ -2546,7 +2563,9 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
     menuIds: Array.isArray(raw?.menuIds) ? raw.menuIds : Object.values(raw?.menuIds || {}),
   })).sort((a, b) => (Number(a.expiresAt) || 0) - (Number(b.expiresAt) || 0));
   const activeCustomerPasses = customerPasses.filter((pass) => Number(pass.remainingUses) > 0 && Number(pass.expiresAt) >= Date.now() && pass.status !== "cancelled");
-  const redeemDiscount = beanGoalMet && redeemLine && rewardVerified ? Math.min(Number(redeemLine.unitPrice) || 0, loyaltyRewardValue) : 0;
+  const redeemDiscount = beanGoalMet && redeemLine && rewardVerified && wheelPrize
+    ? wheelPrizeDiscount(wheelPrize, redeemLine.unitPrice, loyaltyRewardValue)
+    : 0;
   const total = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0) - redeemDiscount;
   const cartCount = cart.reduce((s, l) => s + l.qty, 0);
   const loyaltyCartCount = cart.reduce((sum, line) => sum + (productTypeOf(line) === "drink" ? line.qty : 0), 0);
@@ -2594,7 +2613,7 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
       setRedeemLineId(null);
       setRedeemMode(false);
       setRewardVerification(null);
-      setRedemptionAttemptId("");
+      if (!wheelPrize) setRedemptionAttemptId("");
       return;
     }
     setSelectedPassId("");
@@ -2643,10 +2662,10 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
     if (redeemLineId && (!beanGoalMet || !cart.some((l) => l.lineId === redeemLineId && productTypeOf(l) === "drink"))) {
       setRedeemLineId(null);
       setRewardVerification(null);
-      setRedemptionAttemptId("");
+      if (!wheelPrize) setRedemptionAttemptId("");
     }
     if (!beanGoalMet) setRedeemMode(false);
-  }, [redeemLineId, beanGoalMet, cart]);
+  }, [redeemLineId, beanGoalMet, cart, wheelPrize]);
 
   useEffect(() => {
     if (cartCount > prevCartCountRef.current) {
@@ -2686,7 +2705,7 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
     }
     setRedeemLineId(lineId);
     setRewardVerification(null);
-    setRedemptionAttemptId("");
+    if (!wheelPrize) setRedemptionAttemptId("");
   }
 
   function startRewardOtp() {
@@ -2700,7 +2719,8 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
     }
     setError("");
     setRewardVerification(null);
-    setRedemptionAttemptId(newRedemptionAttemptId());
+    const attemptId = redemptionAttemptId || newRedemptionAttemptId();
+    setRedemptionAttemptId(attemptId);
     setRewardOtpStatus("idle");
     setRewardOtpCode("");
     setRewardOtpError("");
@@ -2757,6 +2777,39 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
       setRewardOtpStatus("code-sent");
       setRewardOtpError(rewardOtpErrorMessage(otpError));
     }
+  }
+
+  async function spinRewardWheel() {
+    if (!rewardVerified || !redemptionAttemptId) throw new Error("กรุณายืนยัน OTP ก่อนหมุนกงล้อ");
+    const spinWheel = httpsCallable(functions, "spinLoyaltyWheel");
+    const response = await spinWheel({
+      shopUid,
+      customerPhone: phoneDigits,
+      redemptionAttemptId,
+    });
+    const result = response.data || {};
+    const prize = {
+      id: result.prizeId,
+      label: result.label,
+      value: result.value,
+      segmentIndex: result.segmentIndex,
+    };
+    if (!prize.id) throw new Error("ไม่ได้รับผลรางวัล กรุณาลองใหม่");
+    if (result.redemptionAttemptId && result.redemptionAttemptId !== redemptionAttemptId) {
+      setRedemptionAttemptId(result.redemptionAttemptId);
+      setRewardVerification({
+        phone: phoneDigits,
+        lineId: redeemLineId,
+        cartFingerprint,
+        attemptId: result.redemptionAttemptId,
+      });
+    }
+    setWheelPrize(prize);
+    setBeanRecord((current) => current ? {
+      ...current,
+      activeWheelSpin: { ...prize, prizeId: prize.id, attemptId: result.redemptionAttemptId || redemptionAttemptId },
+    } : current);
+    return prize;
   }
 
   function clearFieldError(key) {
@@ -2832,6 +2885,10 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
       startRewardOtp();
       return;
     }
+    if (!usingCoffeePass && redeemLine && rewardVerified && !wheelPrize) {
+      setError("กรุณาหมุนกงล้อเพื่อรับรางวัลก่อนยืนยันสั่งซื้อ");
+      return;
+    }
     setSubmitting(true);
     try {
       // เช็ค session สดๆ ก่อนเขียนจริงเสมอ เผื่อ auth หลุดไปกลางคันโดยที่ authUid ใน state ยังค้างค่าเก่า
@@ -2883,7 +2940,7 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
         });
         orderId = response.data.orderId;
         orderData = response.data.order;
-      } else if (redeemLine && rewardVerified) {
+      } else if (redeemLine && rewardVerified && wheelPrize) {
         const createRewardOrder = httpsCallable(functions, "checkoutWithReward");
         const response = await createRewardOrder({
           shopUid,
@@ -3211,7 +3268,7 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
             ))}
             {orderRewardDiscount > 0 && (
               <div style={{ display:"flex", justifyContent:"space-between", marginTop:8, paddingTop:8, borderTop:`1px dashed ${COLORS.line}`, color:COLORS.sageDark, fontSize:12.5, fontWeight:700 }}>
-                <span>ส่วนลดรางวัลสมาชิก</span><span>-{money(orderRewardDiscount)}</span>
+                <span>{order.rewardPrizeLabel || "ส่วนลดจากกงล้อสมาชิก"}</span><span>-{money(orderRewardDiscount)}</span>
               </div>
             )}
           </div>
@@ -3245,7 +3302,7 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
           ))}
           {redeemDiscount > 0 && (
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: COLORS.sageDark, marginTop: 8 }}>
-              <span>ส่วนลดรางวัลสมาชิก (สูงสุด {money(loyaltyRewardValue)})</span><span>-{money(redeemDiscount)}</span>
+              <span>{wheelPrizeLabel(wheelPrize, loyaltyRewardValue)}</span><span>-{money(redeemDiscount)}</span>
             </div>
           )}
           {paymentMethod === "coffee-pass" && passCartLine && (
@@ -3296,6 +3353,7 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
               clearFieldError("phone");
               setRewardVerification(null);
               setRedemptionAttemptId("");
+              setWheelPrize(null);
               setSelectedPassId("");
               setPassRedeemCode("");
               setPassRedemptionAttemptId("");
@@ -3327,6 +3385,8 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
                 redeemLineId={redeemLineId}
                 setRedeemLineId={selectRedeemLine}
                 rewardVerified={rewardVerified}
+                wheelPrize={wheelPrize}
+                onSpinReward={spinRewardWheel}
                 onRequestRewardVerification={startRewardOtp}
                 onShowRewardTerms={() => setShowRewardTerms(true)}
               />
@@ -3430,7 +3490,7 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
                     setRedeemLineId(null);
                     setRedeemMode(false);
                     setRewardVerification(null);
-                    setRedemptionAttemptId("");
+                    if (!wheelPrize) setRedemptionAttemptId("");
                     if (!passRedemptionAttemptId) setPassRedemptionAttemptId(newRedemptionAttemptId());
                   }
                 }}
