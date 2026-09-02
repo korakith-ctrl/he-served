@@ -1451,3 +1451,38 @@ input:focus, textarea:focus, select:focus { border-color: #168f81; box-shadow: 0
   .debt-payment-history-list article { grid-template-columns:auto minmax(0,1fr) auto; gap:7px; }
   .debt-payment-history-list .icon-delete { grid-column:3; grid-row:2; justify-self:end; margin-top:-7px; }
 }
+
+/* Shared-debt filters and action badges. */
+.debt-filter-bar { display:grid; gap:12px; margin:0 0 9px; padding:13px; border:1px solid var(--aurora-line); border-radius:18px; background:rgba(255,255,255,.68); box-shadow:0 8px 24px rgba(45,61,91,.04); backdrop-filter:blur(14px); }
+.debt-filter-chips { display:flex; gap:7px; overflow-x:auto; padding-bottom:2px; scrollbar-width:thin; scrollbar-color:#bed1cd transparent; }
+.debt-filter-chips button { display:inline-flex; flex:0 0 auto; align-items:center; gap:7px; min-height:36px; padding:7px 10px 7px 12px; color:#627486; border:1px solid #dce5e6; border-radius:999px; background:#f9fbfb; font-size:10px; font-weight:750; white-space:nowrap; }
+.debt-filter-chips button:hover { color:#087f72; border-color:#b8d8d3; background:#f2faf8; }
+.debt-filter-chips button.active { color:#fff; border-color:#087f72; background:linear-gradient(135deg,#087f72,#0c9887); box-shadow:0 5px 14px rgba(8,127,114,.17); }
+.debt-filter-chips button.attention:not(.active) { color:#9a5a18; border-color:#ecd5ac; background:#fff8e9; }
+.debt-filter-chips button i { display:grid; place-items:center; min-width:19px; height:19px; padding:0 5px; color:inherit; border-radius:999px; background:rgba(102,122,133,.11); font-size:8px; font-style:normal; font-variant-numeric:tabular-nums; }
+.debt-filter-chips button.active i { background:rgba(255,255,255,.18); }
+.debt-filter-controls { display:grid; grid-template-columns:minmax(220px,1fr) auto; gap:9px; }
+.debt-search { display:flex; align-items:center; gap:8px; min-height:42px; padding:0 11px; border:1px solid #dbe4e7; border-radius:12px; background:#fff; }
+.debt-search:focus-within { border-color:#6bb9ad; box-shadow:0 0 0 3px rgba(21,145,130,.1); }
+.debt-search > span { color:#78909a; font-size:20px; line-height:1; transform:rotate(-15deg); }
+.debt-search input { width:100%; min-width:0; padding:0; border:0; outline:0; background:transparent; font-size:11px; }
+.debt-search > button { width:25px; height:25px; padding:0; color:#778b92; border:0; border-radius:50%; background:#edf2f2; }
+.debt-sort { display:flex; align-items:center; gap:7px; min-height:42px; padding:0 8px 0 12px; color:#75858d; border:1px solid #dbe4e7; border-radius:12px; background:#fff; font-size:9px; font-weight:700; }
+.debt-sort select { min-width:145px; padding:7px 24px 7px 6px; color:#304a54; border:0; outline:0; background:transparent; font-size:10px; font-weight:750; }
+.debt-result-summary { display:flex; gap:5px; min-height:22px; padding:0 5px; color:#7b8993; font-size:9px; }
+.debt-result-summary strong { color:#304d57; font-size:10px; }
+.card-payment-review { color:#975b1e!important; background:#fff1d5!important; }
+.card-agreement-accepted { color:#16695e!important; background:#e2f3ef!important; }
+.filtered-empty { padding-block:43px; }
+.filtered-empty .empty-illustration { width:58px; height:58px; }
+.filtered-empty .empty-illustration span { font-family:inherit; transform:rotate(-15deg); }
+
+@media (max-width:680px) {
+  .debt-filter-bar { margin-inline:-2px; padding:10px; border-radius:15px; }
+  .debt-filter-chips { margin-inline:-10px; padding-inline:10px; }
+  .debt-filter-controls { grid-template-columns:1fr; }
+  .debt-search,.debt-sort { min-height:40px; }
+  .debt-sort { justify-content:space-between; }
+  .debt-sort select { flex:1; text-align:right; }
+  .compact-debt-card .card-facts { row-gap:6px; }
+}

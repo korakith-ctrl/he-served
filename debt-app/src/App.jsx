@@ -338,6 +338,41 @@ function statusMeta(debt) {
   return { label: "กำลังชำระ", className: "active" };
 }
 
+function debtAgreementAccepted(debt) {
+  if (debt.agreementStatus) return debt.agreementStatus === "accepted";
+  return Boolean(debt.debtorUid && debt.acceptedAt && debt.status !== "pending");
+}
+
+function matchesDebtStatusFilter(debt, filter, userUid, pendingPaymentCount = 0) {
+  if (filter === "all") return true;
+  if (filter === "confirmed") return debt.creditorUid === userUid && debtAgreementAccepted(debt);
+  if (filter === "awaiting") return debt.status === "pending" || !debtAgreementAccepted(debt);
+  if (filter === "payment_review") return debt.creditorUid === userUid && pendingPaymentCount > 0;
+  if (filter === "overdue") return !["paid", "cancelled", "declined", "invite_revoked"].includes(debt.status) && Number(debtDueInfo(debt)?.days) < 0;
+  if (filter === "disputed") return debt.status === "disputed";
+  if (filter === "paid") return debt.status === "paid";
+  if (filter === "cancelled") return ["cancelled", "declined", "invite_revoked"].includes(debt.status);
+  return true;
+}
+
+function compareDebts(a, b, sort, pendingPaymentsByDebt) {
+  if (sort === "newest") return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
+  if (sort === "amount") return Number(b.outstandingAmount || b.amount || 0) - Number(a.outstandingAmount || a.amount || 0);
+  const aDue = debtDueInfo(a)?.dueDate || "9999-12-31";
+  const bDue = debtDueInfo(b)?.dueDate || "9999-12-31";
+  if (sort === "due") return aDue.localeCompare(bDue) || String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
+  const rank = (debt) => {
+    if (Number(pendingPaymentsByDebt[debt.id] || 0) > 0) return 0;
+    if (debt.status === "disputed") return 1;
+    if (Number(debtDueInfo(debt)?.days) < 0 && !["paid", "cancelled", "declined", "invite_revoked"].includes(debt.status)) return 2;
+    if (debt.status === "pending" || !debtAgreementAccepted(debt)) return 3;
+    if (debt.status === "active" || debt.outstandingStatus === "unconfirmed") return 4;
+    if (debt.status === "paid") return 5;
+    return 6;
+  };
+  return rank(a) - rank(b) || aDue.localeCompare(bDue) || String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
+}
+
 function EmptyState({ tab, onCreate }) {
   return (
     <div className="empty-state">
@@ -370,7 +405,7 @@ function UiIcon({ name, className = "" }) {
   return <svg className={`ui-icon ${className}`} aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
 }
 
-function DebtCard({ debt, user, onOpen }) {
+function DebtCard({ debt, user, pendingPaymentCount = 0, onOpen }) {
   const creditor = debt.creditorUid === user.uid;
   const otherName = creditor ? debt.debtorName : debt.creditorName;
   const meta = statusMeta(debt);
@@ -391,7 +426,9 @@ function DebtCard({ debt, user, onOpen }) {
         </div>
         {!outstandingUnconfirmed && <div className="progress compact-progress" aria-label={`ชำระแล้ว ${percent}%`}><m.span initial={{ width: 0 }} animate={{ width: `${percent}%` }} transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }} /></div>}
         <div className="card-facts">
+          {creditor && pendingPaymentCount > 0 && <span className="card-fact card-payment-review"><UiIcon name="bell" />รอตรวจรับเงิน {pendingPaymentCount} รายการ</span>}
           <span className={`card-fact card-status ${meta.className}`}><UiIcon name={meta.className === "overdue" || meta.className === "disputed" ? "alert" : "status"} />{meta.label}</span>
+          {creditor && debtAgreementAccepted(debt) && <span className="card-fact card-agreement-accepted"><UiIcon name="check" />ลูกหนี้ยืนยันแล้ว</span>}
           {outstandingUnconfirmed ? <span className="card-fact"><UiIcon name="alert" />ยังไม่รวมยอด</span> : dueInfo ? <>
             <span className={`card-fact card-due ${dueInfo.tone}`}><UiIcon name="calendar" /><strong>{dueInfo.label}</strong><span>· {shortDate(dueInfo.dueDate)}</span></span>
             <span className="card-fact card-due-amount"><UiIcon name={creditor ? "incoming" : "outgoing"} />{creditor ? "รับ" : "จ่าย"} ฿{money(dueInfo.dueAmount)}</span>
@@ -1011,7 +1048,7 @@ function DebtDetailModal({ debt, user, onClose, onToast, onArchived, archived, o
     <m.div className="modal-backdrop detail-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
       <m.div layoutId={`debt-${debt.id}`} className="modal-card detail-card" data-active-tab={detailTab} initial={{ opacity: 0, y: 30, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 20, scale: 0.98 }} transition={{ type: "spring", stiffness: 280, damping: 28 }}>
         <div className="modal-header"><div><span className={`status ${meta.className}`}>{meta.label}</span><h2>{debt.title}</h2></div><div className="header-actions">{!["paid", "cancelled", "declined", "disputed"].includes(debt.status) && (debt.status !== "pending" || creditor) && <button className="secondary mini" onClick={() => setShowEdit(true)}>แก้ไข</button>}<button className="close" onClick={onClose}>×</button></div></div>
-        <nav className="detail-tabs" aria-label="รายละเอียดรายการ">{[["overview", "ภาพรวม", "wallet"], ["schedule", "กำหนดการ", "calendar"], ["payments", "ชำระเงิน", "incoming"], ["agreement", "ข้อตกลง", "document"]].map(([value, label, icon]) => { const needsAttention = value === "agreement" ? !currentUserAcceptedAgreement || changeRequests.some((item) => item.status === "pending" && item.approverUid === user.uid) || consentRequests.some((item) => item.status === "pending" && item.approverUid === user.uid) : value === "payments" && creditor && payments.some((item) => item.status === "pending"); return <button key={value} className={detailTab === value ? "active" : ""} aria-current={detailTab === value ? "page" : undefined} onClick={() => setDetailTab(value)}><UiIcon name={icon} /><span>{label}</span>{needsAttention && <i aria-label="มีรายการรอดำเนินการ" />}</button>; })}</nav>
+        <nav className="detail-tabs" aria-label="รายละเอียดรายการ">{[["overview", "ภาพรวม", "wallet"], ["schedule", "กำหนดการ", "calendar"], ["payments", "ชำระเงิน", "incoming"], ["agreement", "ข้อตกลง", "document"]].map(([value, label, icon]) => { const needsAttention = value === "agreement" ? !currentUserAcceptedAgreement || changeRequests.some((item) => item.status === "pending" && item.approverUid === user.uid) || consentRequests.some((item) => item.status === "pending" && item.approverUid === user.uid) : value === "payments" && creditor && payments.some((item) => ["pending", "processing"].includes(item.status)); return <button key={value} className={detailTab === value ? "active" : ""} aria-current={detailTab === value ? "page" : undefined} onClick={() => setDetailTab(value)}><UiIcon name={icon} /><span>{label}</span>{needsAttention && <i aria-label="มีรายการรอดำเนินการ" />}</button>; })}</nav>
         <AnimatePresence>{celebration && <m.div className="celebration-burst" role="status" initial={{ opacity: 0, scale: 0.65, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.86, y: -10 }}><span><UiIcon name="check" /></span><strong>{celebration}</strong><i /><i /><i /></m.div>}</AnimatePresence>
         {debt.inviteDelivery === "direct" && debt.directInviteStatus === "pending" && debt.status === "pending" && !creditor && <div className="direct-invite-banner"><span><UiIcon name="bell" /></span><div><strong>เจ้าหนี้ส่งรายการนี้ให้คุณโดยตรง</strong><p>ตรวจสอบยอด วันชำระ และเงื่อนไขด้านล่าง ก่อนยืนยันเปิดรายการ</p></div><button className="danger-outline" disabled={busyId === "direct-invite"} onClick={declineDirectInvite}>ไม่ยืนยัน</button></div>}
         <div className="detail-hero">
@@ -1124,7 +1161,7 @@ function DebtDetailModal({ debt, user, onClose, onToast, onArchived, archived, o
               <div className={`payment-state ${payment.status}`}>{payment.status === "confirmed" ? "✓" : ["rejected", "reversed"].includes(payment.status) ? "×" : "…"}</div>
               <div className="payment-copy"><strong>฿{money(payment.amount)}</strong><span>{payment.note || "แจ้งชำระเงิน"} · ชำระ {shortDate(payment.paymentDate)} · {dateTime(payment.createdAt)}{payment.status === "pending" && payment.reviewDueAt ? ` · ควรตรวจภายใน ${dateTime(payment.reviewDueAt)}` : ""}{Number(payment.excessAmount) > 0 ? ` · ส่วนเกิน ฿${money(payment.excessAmount)} (${payment.excessDisposition === "refund" ? "รอคืน" : "เครดิต"})` : ""}</span><ProofLink proof={payment.proof} /></div>
               <span className={`status ${payment.status === "confirmed" ? "paid" : ["rejected", "reversed"].includes(payment.status) ? "cancelled" : "pending"}`}>{payment.status === "confirmed" ? "ยืนยันแล้ว" : payment.status === "rejected" ? "ไม่ผ่าน" : payment.status === "reversed" ? "ย้อนแล้ว" : "รอตรวจสอบ"}</span>
-              {creditor && payment.status === "pending" && <div className="payment-actions"><button disabled={busyId === payment.id} onClick={() => decide(payment.id, false)}>ปฏิเสธ</button><button disabled={busyId === payment.id} onClick={() => decide(payment.id, true)}>ยืนยัน</button></div>}
+              {creditor && ["pending", "processing"].includes(payment.status) && <div className="payment-actions"><button disabled={busyId === payment.id || payment.status === "processing"} onClick={() => decide(payment.id, false)}>ปฏิเสธ</button><button disabled={busyId === payment.id} onClick={() => decide(payment.id, true)}>ยืนยัน</button></div>}
               {payment.status === "confirmed" && <div className="payment-actions"><button className="danger-text" disabled={busyId === payment.id} onClick={() => doReversePayment(payment.id)}>ขอย้อนรายการชำระ</button></div>}
             </div>
           ))}
@@ -1151,6 +1188,10 @@ export default function App() {
   const [workspaceMode, setWorkspaceMode] = useState(() => inviteFromLocation() ? "shared" : localStorage.getItem("clear-kan-workspace") || "shared");
   const [debtsById, setDebtsById] = useState({});
   const [tab, setTab] = useState("all");
+  const [debtStatusFilter, setDebtStatusFilter] = useState("all");
+  const [debtSearch, setDebtSearch] = useState("");
+  const [debtSort, setDebtSort] = useState("attention");
+  const [pendingPaymentsByDebt, setPendingPaymentsByDebt] = useState({});
   const [showCreate, setShowCreate] = useState(false);
   const [createdInvite, setCreatedInvite] = useState(null);
   const [inviteCode, setInviteCode] = useState(inviteFromLocation());
@@ -1208,17 +1249,19 @@ export default function App() {
   useEffect(() => {
     if (!user) {
       setDebtsById({});
+      setPendingPaymentsByDebt({});
       return undefined;
     }
-    let debtUnsubscribers = [];
+    let recordUnsubscribers = [];
     const memberRef = ref(db, `debtMembers/${user.uid}`);
     const unsubscribeMembers = onValue(memberRef, (snapshot) => {
-      debtUnsubscribers.forEach((unsubscribe) => unsubscribe());
-      debtUnsubscribers = [];
+      recordUnsubscribers.forEach((unsubscribe) => unsubscribe());
+      recordUnsubscribers = [];
       const ids = Object.keys(snapshot.val() || {});
       setDebtsById((current) => Object.fromEntries(Object.entries(current).filter(([id]) => ids.includes(id))));
+      setPendingPaymentsByDebt((current) => Object.fromEntries(Object.entries(current).filter(([id]) => ids.includes(id))));
       ids.forEach((id) => {
-        const unsubscribe = onValue(ref(db, `debts/${id}`), (debtSnapshot) => {
+        recordUnsubscribers.push(onValue(ref(db, `debts/${id}`), (debtSnapshot) => {
           setDebtsById((current) => {
             if (!debtSnapshot.exists()) {
               const next = { ...current };
@@ -1227,13 +1270,22 @@ export default function App() {
             }
             return { ...current, [id]: { id, ...debtSnapshot.val() } };
           });
-        });
-        debtUnsubscribers.push(unsubscribe);
+        }));
+        recordUnsubscribers.push(onValue(ref(db, `debtPayments/${id}`), (paymentSnapshot) => {
+          const pendingCount = Object.values(paymentSnapshot.val() || {}).filter((payment) => ["pending", "processing"].includes(payment?.status)).length;
+          setPendingPaymentsByDebt((current) => {
+            if (pendingCount > 0) return { ...current, [id]: pendingCount };
+            if (!(id in current)) return current;
+            const next = { ...current };
+            delete next[id];
+            return next;
+          });
+        }));
       });
     });
     return () => {
       unsubscribeMembers();
-      debtUnsubscribers.forEach((unsubscribe) => unsubscribe());
+      recordUnsubscribers.forEach((unsubscribe) => unsubscribe());
     };
   }, [user]);
 
@@ -1256,18 +1308,43 @@ export default function App() {
   const payableSchedule = buildPaymentSchedule(payableDebts, "payable");
   const selectedCashflowSchedule = selectedCashflowKey?.direction === "payable" ? payableSchedule : receivableSchedule;
   const selectedCashflow = selectedCashflowKey ? selectedCashflowSchedule.find((group) => group.dueDate === selectedCashflowKey.dueDate) || null : null;
-  const visibleDebts = debts.filter((debt) => {
+  const tabDebts = debts.filter((debt) => {
     const archived = Boolean(archives[debt.id]);
     if (tab === "archived") return archived;
     if (archived) return false;
     return tab === "all" || (tab === "receivable" ? debt.creditorUid === user?.uid : debt.debtorUid === user?.uid);
   });
+  const statusFilterDefinitions = tab === "archived" ? [
+    { value: "all", label: "ทั้งหมด" },
+    { value: "paid", label: "เคลียร์แล้ว" },
+    { value: "cancelled", label: "ยกเลิก/ไม่ยืนยัน" },
+  ] : [
+    { value: "all", label: "ทั้งหมด" },
+    { value: "confirmed", label: "ลูกหนี้ยืนยันแล้ว", keep: true },
+    { value: "payment_review", label: "รอตรวจรับเงิน", attention: true },
+    { value: "awaiting", label: "รอยืนยันข้อตกลง" },
+    { value: "overdue", label: "เกินกำหนด" },
+    { value: "disputed", label: "มีข้อโต้แย้ง" },
+    { value: "paid", label: "เคลียร์แล้ว" },
+  ];
+  const debtFilterCounts = Object.fromEntries(statusFilterDefinitions.map((filter) => [filter.value, tabDebts.filter((debt) => matchesDebtStatusFilter(debt, filter.value, user?.uid, pendingPaymentsByDebt[debt.id])).length]));
+  const statusFilterOptions = statusFilterDefinitions.filter((filter) => filter.value === "all" || filter.keep || filter.value === debtStatusFilter || debtFilterCounts[filter.value] > 0);
+  const normalizedDebtSearch = debtSearch.trim().toLocaleLowerCase("th-TH");
+  const visibleDebts = tabDebts.filter((debt) => {
+    if (!matchesDebtStatusFilter(debt, debtStatusFilter, user?.uid, pendingPaymentsByDebt[debt.id])) return false;
+    if (!normalizedDebtSearch) return true;
+    return [debt.title, debt.debtorName, debt.creditorName, debt.debtorEmail, debt.creditorEmail, debt.amount, debt.outstandingAmount].filter((value) => value !== undefined && value !== null).join(" ").toLocaleLowerCase("th-TH").includes(normalizedDebtSearch);
+  }).sort((a, b) => compareDebts(a, b, debtSort, pendingPaymentsByDebt));
   const displayedDebts = visibleDebts.slice(0, visibleDebtLimit);
   const selectedDebt = debtsById[selectedId];
   const activeDebtCount = debts.filter((debt) => !archives[debt.id] && !["paid", "cancelled", "declined"].includes(debt.status)).length;
   const overlayOpen = Boolean(showCreate || createdInvite || inviteCode || selectedCashflow || selectedDebt || showNotifications);
 
-  useEffect(() => setVisibleDebtLimit(6), [tab]);
+  useEffect(() => {
+    setDebtStatusFilter("all");
+    setVisibleDebtLimit(6);
+  }, [tab]);
+  useEffect(() => setVisibleDebtLimit(6), [debtStatusFilter, debtSearch, debtSort]);
   useEffect(() => {
     if (cashflowView === "receivable" && !receivableSchedule.length && payableSchedule.length) setCashflowView("payable");
     if (cashflowView === "payable" && !payableSchedule.length && receivableSchedule.length) setCashflowView("receivable");
@@ -1365,7 +1442,15 @@ export default function App() {
 
         <m.section className="list-section" initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
           <div className="list-heading"><div><p className="eyebrow">รายการของฉัน</p><h2>{tab === "archived" ? "คลังรายการ" : "รายการทั้งหมด"}</h2></div><div className="tabs"><button className={tab === "all" ? "active" : ""} onClick={() => setTab("all")}>ทั้งหมด</button><button className={tab === "receivable" ? "active" : ""} onClick={() => setTab("receivable")}>ต้องรับ</button><button className={tab === "payable" ? "active" : ""} onClick={() => setTab("payable")}>ต้องจ่าย</button><button className={tab === "archived" ? "active" : ""} onClick={() => setTab("archived")}>คลัง</button></div></div>
-          <div className="debt-list">{visibleDebts.length ? displayedDebts.map((debt) => <DebtCard key={debt.id} debt={debt} user={user} onOpen={(item) => setSelectedId(item.id)} />) : <EmptyState tab={tab} onCreate={() => setShowCreate(true)} />}</div>
+          <div className="debt-filter-bar">
+            <div className="debt-filter-chips" role="group" aria-label="กรองตามสถานะ">{statusFilterOptions.map((filter) => <button key={filter.value} className={`${debtStatusFilter === filter.value ? "active" : ""} ${filter.attention && debtFilterCounts[filter.value] > 0 ? "attention" : ""}`} aria-pressed={debtStatusFilter === filter.value} onClick={() => setDebtStatusFilter(filter.value)}><span>{filter.label}</span><i>{debtFilterCounts[filter.value] || 0}</i></button>)}</div>
+            <div className="debt-filter-controls">
+              <label className="debt-search"><span aria-hidden="true">⌕</span><input type="search" value={debtSearch} onChange={(event) => setDebtSearch(event.target.value)} placeholder="ค้นหาชื่อรายการหรือคู่สัญญา" aria-label="ค้นหารายการหนี้" />{debtSearch && <button type="button" aria-label="ล้างคำค้น" onClick={() => setDebtSearch("")}>×</button>}</label>
+              <label className="debt-sort"><span>เรียง</span><select value={debtSort} onChange={(event) => setDebtSort(event.target.value)}><option value="attention">ต้องจัดการก่อน</option><option value="due">ครบกำหนดใกล้สุด</option><option value="newest">สร้างล่าสุด</option><option value="amount">ยอดคงเหลือสูงสุด</option></select></label>
+            </div>
+          </div>
+          <div className="debt-result-summary"><span>พบ <strong>{visibleDebts.length}</strong> รายการ</span>{debtStatusFilter !== "all" && <span>· {statusFilterDefinitions.find((filter) => filter.value === debtStatusFilter)?.label}</span>}</div>
+          <div className="debt-list">{visibleDebts.length ? displayedDebts.map((debt) => <DebtCard key={debt.id} debt={debt} user={user} pendingPaymentCount={pendingPaymentsByDebt[debt.id] || 0} onOpen={(item) => setSelectedId(item.id)} />) : (debtStatusFilter !== "all" || debtSearch ? <div className="empty-state filtered-empty"><div className="empty-illustration"><span>⌕</span></div><h3>ไม่พบรายการที่ตรงกับตัวกรอง</h3><p>ลองเปลี่ยนสถานะหรือคำค้นเพื่อดูรายการอื่น</p><button className="secondary" onClick={() => { setDebtStatusFilter("all"); setDebtSearch(""); }}>ล้างตัวกรอง</button></div> : <EmptyState tab={tab} onCreate={() => setShowCreate(true)} />)}</div>
           {visibleDebts.length > displayedDebts.length && <button className="secondary debt-list-more" onClick={() => setVisibleDebtLimit((value) => value + 6)}>ดูเพิ่มอีก {Math.min(6, visibleDebts.length - displayedDebts.length)} รายการ <span>แสดงแล้ว {displayedDebts.length}/{visibleDebts.length}</span></button>}
         </m.section>
       </main> : <PersonalFinance user={user} onToast={showToast} sharedReceivables={receivableDebts} sharedPayables={payableDebts} onOpenSharedDebt={openSharedDebtFromFinance} />}
