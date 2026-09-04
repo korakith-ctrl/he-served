@@ -18,6 +18,8 @@ test("normalizes a valid Apple Health payload", () => {
       sleepMinutes: 465,
       weightKg: 95.2,
       activeEnergyKcal: 640,
+      exerciseMinutes: 48,
+      restingHeartRate: 61,
       workouts: [{
         id: "ABCDEF12-3456",
         activityType: "traditionalStrengthTraining",
@@ -29,6 +31,8 @@ test("normalizes a valid Apple Health payload", () => {
   });
   assert.equal(payload.days[0].steps, 9012);
   assert.equal(payload.days[0].workouts.length, 1);
+  assert.equal(payload.days[0].exerciseMinutes, 48);
+  assert.equal(payload.days[0].restingHeartRate, 61);
 });
 
 test("rejects out-of-range health values", () => {

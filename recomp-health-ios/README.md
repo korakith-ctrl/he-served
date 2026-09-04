@@ -4,7 +4,7 @@ Native iPhone bridge from Apple Health/Apple Watch to the existing Recomp Fireba
 
 ## What it reads
 
-- Step count and active energy
+- Step count, Apple Exercise minutes, active energy, and resting heart rate
 - Sleep duration (overlapping sources are merged to avoid double counting)
 - Latest daily body mass, body-fat percentage, and lean body mass
 - Workout type, duration, active energy, and distance

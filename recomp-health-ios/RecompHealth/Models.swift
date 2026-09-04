@@ -16,11 +16,14 @@ struct HealthDayPayload: Codable, Identifiable {
     var bodyFatPercent: Double?
     var leanBodyMassKg: Double?
     var activeEnergyKcal: Double?
+    var exerciseMinutes: Double?
+    var restingHeartRate: Double?
     var workouts: [HealthWorkoutPayload]
 
     var hasData: Bool {
         steps != nil || sleepMinutes != nil || weightKg != nil || bodyFatPercent != nil ||
-        leanBodyMassKg != nil || activeEnergyKcal != nil || !workouts.isEmpty
+        leanBodyMassKg != nil || activeEnergyKcal != nil || exerciseMinutes != nil ||
+        restingHeartRate != nil || !workouts.isEmpty
     }
 }
 

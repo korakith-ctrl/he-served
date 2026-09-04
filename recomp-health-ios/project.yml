@@ -19,7 +19,7 @@ targets:
       properties:
         CFBundleDisplayName: Recomp Health
         LSRequiresIPhoneOS: true
-        NSHealthShareUsageDescription: Recomp อ่านจำนวนก้าว การนอน น้ำหนัก องค์ประกอบร่างกาย และการออกกำลังกาย เพื่ออัปเดตแดชบอร์ด 16 สัปดาห์ของคุณ
+        NSHealthShareUsageDescription: Recomp อ่านจำนวนก้าว นาทีออกกำลัง การนอน น้ำหนัก องค์ประกอบร่างกาย ชีพจรขณะพัก และ Workout เพื่ออัปเดตแดชบอร์ด 16 สัปดาห์ของคุณ
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UILaunchScreen: {}

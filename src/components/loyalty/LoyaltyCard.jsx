@@ -175,7 +175,7 @@ export default function LoyaltyCard({
   const rewardValue = Math.min(60, Math.max(1, Number(loyaltyRewardValue) || 60));
   const earned = Math.max(0, Math.floor(Number(beanRecord?.beans) || 0));
   // Pending beans preview what this cart can earn, but they are not part of the
-  // member's balance until the shop delivers the drinks.
+  // member's balance until the shop delivers the eligible items.
   const pending = Math.max(0, Math.floor(Number(cartCount) || 0));
   const remaining = Math.max(target - earned, 0);
   const rewardReady = earned >= target;
@@ -266,7 +266,7 @@ export default function LoyaltyCard({
           <>
             <p className="loyalty-card__primary">
               {beanRecord.isNew && earned === 0
-                ? "เริ่มสะสมเมล็ดจากออเดอร์นี้ได้เลย"
+                ? (pending > 0 ? "เริ่มสะสมเมล็ดจากออเดอร์นี้ได้เลย" : "ออเดอร์นี้ไม่มีเมนูที่ร่วมสะสมเมล็ด")
                 : `อีก ${remaining} เมล็ด ได้สิทธิ์หมุนกงล้อ`}
             </p>
             <span className="sr-only">{announcement}</span>
@@ -281,7 +281,7 @@ export default function LoyaltyCard({
         <span className="loyalty-card__pending-label">{pending > 0 ? `+${pending} รอยืนยัน` : "ไม่มีรอยืนยัน"}</span>
         <span>เป้าหมาย <strong>{target}</strong></span>
       </div>
-      <p className="loyalty-card__helper">คะแนนจะเข้าเมื่อได้รับเครื่องดื่ม</p>
+      <p className="loyalty-card__helper">คะแนนจะเข้าเมื่อได้รับรายการที่ร่วมสะสมเมล็ด</p>
 
       {rewardReady && (
         <div className="loyalty-redeem">

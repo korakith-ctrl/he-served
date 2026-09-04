@@ -13,9 +13,11 @@ import { firebaseConfig } from "./firebase";
 import LoyaltyCard from "./components/loyalty/LoyaltyCard.jsx";
 import RewardOtpModal from "./components/loyalty/RewardOtpModal.jsx";
 import { wheelPrizeDiscount, wheelPrizeLabel } from "./components/loyalty/wheelPrizes.js";
+import { menuEarnsLoyaltyBeans } from "./loyaltyEligibility.js";
 import PromotionTakeover from "./components/promotions/PromotionTakeover.jsx";
 import OrderPreparationExperience from "./components/orders/OrderPreparationExperience.jsx";
 import LandingScreen, { LANDING_SCREEN_EXIT_MS, LANDING_SCREEN_MINIMUM_MS } from "./LandingScreen.jsx";
+import { removeUnavailableCartLines, visibleCustomerMenus } from "./customerMenus.js";
 
 // Isolated secondary app so an anonymous customer session never shares
 // Auth persistence with the owner dashboard's login on the same device/browser.
@@ -322,9 +324,9 @@ function RewardTermsSheet({ goal, rewardValue, onClose }) {
       }} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="เงื่อนไขการสะสมเมล็ดและหมุนกงล้อ">
         <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 18, margin: "0 0 12px", color: COLORS.espresso5 }}>เงื่อนไขกงล้อลุ้นรางวัล</h2>
         <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: COLORS.espresso3, lineHeight: 1.9 }}>
-          <li>ได้รับ 1 เมล็ดต่อเครื่องดื่ม 1 แก้วที่สั่งซื้อ ไม่ว่าจะสั่งกี่แก้วในออเดอร์เดียวก็นับครบทุกแก้ว</li>
-          <li>ขนมปัง อาหาร และสินค้าอื่นที่ไม่ใช่เครื่องดื่ม ไม่ร่วมสะสมเมล็ดและไม่สามารถใช้รางวัลได้</li>
-          <li>เมล็ดเข้าบัญชีเมื่อร้านส่งมอบเครื่องดื่มให้คุณเรียบร้อยแล้ว (ไม่ใช่ตอนชำระเงิน)</li>
+          <li>ได้รับ 1 เมล็ดต่อสินค้า 1 ชิ้น/แก้ว เฉพาะเมนูที่ร้านกำหนดให้ร่วมสะสมเมล็ด</li>
+          <li>เมนูที่ไม่ร่วมสะสมจะไม่เพิ่มเมล็ด ส่วนรางวัลจากกงล้อยังคงใช้ได้กับเครื่องดื่มเท่านั้น</li>
+          <li>เมล็ดเข้าบัญชีเมื่อร้านส่งมอบรายการที่ร่วมสะสมให้คุณเรียบร้อยแล้ว (ไม่ใช่ตอนชำระเงิน)</li>
           <li>สะสมครบ {goal} เมล็ด ได้สิทธิ์หมุนกงล้อ 1 ครั้ง ลุ้นฟรี 1 แก้วมูลค่าไม่เกิน {money(rewardValue)}, ลด 50% หรือลด 15–30 บาท</li>
           <li>ผลที่หมุนได้จะถูกล็อกไว้จนกว่าจะใช้กับออเดอร์ ไม่สามารถหมุนซ้ำเพื่อเปลี่ยนรางวัลได้</li>
           <li>รางวัลใช้กับเครื่องดื่ม 1 แก้ว หากส่วนลดมากกว่าราคาเครื่องดื่ม ส่วนต่างไม่สามารถทอนหรือเก็บไว้ใช้ครั้งถัดไป</li>
@@ -1737,10 +1739,7 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
     return Object.entries(eventConfig.menuIds).filter(([, enabled]) => enabled === true).map(([id]) => id);
   }, [eventConfig]);
   const menus = useMemo(() => {
-    if (!allMenus) return allMenus;
-    if (!eventId) return allMenus;
-    const allowed = new Set(eventMenuIds);
-    return allMenus.filter((menu) => allowed.has(menu.id));
+    return visibleCustomerMenus(allMenus, eventId, eventMenuIds);
   }, [allMenus, eventId, eventMenuIds]);
   const eventPaymentMethods = useMemo(() => {
     if (!eventId || !eventConfig?.paymentMethods) return ["promptpay", "cash", "thaihelpthai"];
@@ -1895,6 +1894,22 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
     }
   }, [eventId, eventConfig, eventMenuIds, eventPaymentMethods]);
 
+  // เมนูที่แอดมินปิดขายต้องหายจากหน้าลูกค้าทันที รวมถึงรายการที่ค้างในตะกร้า
+  // จาก session ก่อนหน้า เพื่อไม่ให้สั่งเมนูที่ถูกปิดหลังจากเลือกไว้แล้วได้
+  useEffect(() => {
+    if (!menus) return;
+    const currentMenusById = Object.fromEntries(menus.map((menu) => [menu.id, menu]));
+    setCart((current) => removeUnavailableCartLines(current, menus).map((line) => {
+      const menu = currentMenusById[line.menuId];
+      return menu ? { ...line, earnsLoyaltyBeans: menuEarnsLoyaltyBeans(menu) } : line;
+    }));
+    const visibleMenuIds = new Set(menus.map((menu) => menu.id));
+    setPickingMenu((current) => current && !visibleMenuIds.has(current.id) ? null : current);
+    setEditingCartLine((current) => current && !visibleMenuIds.has(current.menuId) ? null : current);
+    setChoiceFlow((current) => current && current.queue.some((menu) => !visibleMenuIds.has(menu.id)) ? null : current);
+    setBundleFlow((current) => current && current.queue.some((menu) => !visibleMenuIds.has(menu.id)) ? null : current);
+  }, [menus]);
+
   // เมนูผูกกลุ่ม/ตัวเลือกด้วย id จึงใช้ชื่อจากต้นทางล่าสุดเสมอ แม้ลูกค้าจะใส่เมนู
   // ลงตะกร้าไว้ก่อนที่แอดมินจะเปลี่ยนชื่อ (ราคาในตะกร้ายังคงเป็น snapshot เดิมตามตอนเลือก)
   useEffect(() => {
@@ -2047,6 +2062,15 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
       return p.menuIds.every((id) => menusById[id] && menusById[id].available !== false);
     });
   }, [promotions, menusById]);
+
+  useEffect(() => {
+    const activePromotionIds = new Set(activePromotions.map((promotion) => promotion.id));
+    setPickingPromo((current) => current && !activePromotionIds.has(current.id) ? null : current);
+    setPickingChoicePromo((current) => current && !activePromotionIds.has(current.id) ? null : current);
+    setTakeoverContent((current) => (
+      current?.kind === "promotion" && !activePromotionIds.has(current.item.id) ? null : current
+    ));
+  }, [activePromotions]);
 
   const closePromotionTakeover = useCallback(() => setTakeoverContent(null), []);
 
@@ -2323,7 +2347,7 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
     const base = priceOverride !== undefined ? priceOverride : menu.priceStore;
     const unitPrice = base + optionDelta;
     setCart((c) => [...c, {
-      lineId: genLineId(), menuId: menu.id, name: menu.name, productType: productTypeOf(menu), unitPrice, originalUnitPrice: menu.priceStore + optionDelta,
+      lineId: genLineId(), menuId: menu.id, name: menu.name, productType: productTypeOf(menu), earnsLoyaltyBeans: menuEarnsLoyaltyBeans(menu), unitPrice, originalUnitPrice: menu.priceStore + optionDelta,
       qty, options, promoId: promoId || null, promoGroupId: promoId || null, promoKind: promoKind || null,
     }]);
   }
@@ -2378,7 +2402,7 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
         const optionDelta = opts.reduce((s, o) => s + (o.priceDelta || 0), 0);
         return {
           lineId: existing ? existing.lineId : genLineId(),
-          menuId: p.menuId, name: p.name, productType: productTypeOf(menusById[p.menuId]), unitPrice: p.unitPrice + optionDelta,
+          menuId: p.menuId, name: p.name, productType: productTypeOf(menusById[p.menuId]), earnsLoyaltyBeans: menuEarnsLoyaltyBeans(menusById[p.menuId]), unitPrice: p.unitPrice + optionDelta,
           originalUnitPrice: (Number(menusById[p.menuId]?.priceStore) || 0) + optionDelta,
           qty, options: opts, promoId: promo.id, promoGroupId: promo.id, promoKind: "bundle",
         };
@@ -2460,7 +2484,7 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
         const opts = (optionsByMenuId && optionsByMenuId[p.menuId]) || [];
         const optionDelta = opts.reduce((s, o) => s + (o.priceDelta || 0), 0);
         return {
-          lineId: genLineId(), menuId: p.menuId, name: p.name, productType: productTypeOf(menusById[p.menuId]), unitPrice: p.unitPrice + optionDelta, options: opts, qty: 1,
+          lineId: genLineId(), menuId: p.menuId, name: p.name, productType: productTypeOf(menusById[p.menuId]), earnsLoyaltyBeans: menuEarnsLoyaltyBeans(menusById[p.menuId]), unitPrice: p.unitPrice + optionDelta, options: opts, qty: 1,
           originalUnitPrice: (Number(menusById[p.menuId]?.priceStore) || 0) + optionDelta,
           promoId: setId, promoKind: "choice", promoGroupId: promo.id,
         };
@@ -2568,7 +2592,7 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
     : 0;
   const total = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0) - redeemDiscount;
   const cartCount = cart.reduce((s, l) => s + l.qty, 0);
-  const loyaltyCartCount = cart.reduce((sum, line) => sum + (productTypeOf(line) === "drink" ? line.qty : 0), 0);
+  const loyaltyCartCount = cart.reduce((sum, line) => sum + (menuEarnsLoyaltyBeans(menusById[line.menuId] || line) ? line.qty : 0), 0);
   const coffeePassPurchaseLine = cart.find((line) => line.promoKind === "coffee-pass-purchase") || null;
   const passCartLine = !coffeePassPurchaseLine && cart.length === 1 && cart[0].qty === 1 && productTypeOf(cart[0]) === "drink" ? cart[0] : null;
   const compatibleCustomerPasses = passCartLine
@@ -2840,6 +2864,13 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
   async function checkout() {
     setError("");
     if (cart.length === 0) { setError("กรุณาเลือกเมนูอย่างน้อย 1 รายการ"); return; }
+    const availableCart = removeUnavailableCartLines(cart, menus);
+    if (availableCart.length !== cart.length) {
+      setCart(availableCart);
+      setError("มีเมนูที่ร้านปิดขายแล้ว ระบบนำออกจากตะกร้าให้แล้ว กรุณาตรวจสอบรายการอีกครั้ง");
+      setStep("menu");
+      return;
+    }
     if (eventId) {
       const allowedMenus = new Set(eventMenuIds);
       if (!eventConfig || eventConfig.active === false || Number(eventConfig.expiresAt) <= Date.now()) { setError("ลิงก์อีเวนต์นี้ปิดรับออเดอร์แล้ว"); return; }
@@ -3079,7 +3110,7 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
         ? (promo.type === "qty" ? qtyPromoUnitPrice(promo, menu, qty) : singlePromoPrice(promo, menu))
         : Number(menu.priceStore) || 0;
       return [{
-        lineId: genLineId(), menuId: menu.id, name: menu.name, productType: productTypeOf(menu),
+        lineId: genLineId(), menuId: menu.id, name: menu.name, productType: productTypeOf(menu), earnsLoyaltyBeans: menuEarnsLoyaltyBeans(menu),
         unitPrice: promoBase + optionDelta, originalUnitPrice: (Number(menu.priceStore) || 0) + optionDelta,
         qty, options, promoId: promo?.id || null, promoGroupId: promo?.id || null,
         promoKind: promo ? (promo.type === "qty" ? "qty" : "single") : null,
@@ -3745,7 +3776,7 @@ export default function CustomerOrder({ shopUid, eventId = null }) {
       </nav>
 
       {menus.length === 0 ? (
-        <div style={{ padding: 24, textAlign: "center", color: COLORS.espresso2, fontSize: 13 }}>ร้านยังไม่มีเมนู</div>
+        <div style={{ padding: 24, textAlign: "center", color: COLORS.espresso2, fontSize: 13 }}>ขณะนี้ยังไม่มีเมนูที่เปิดขาย</div>
       ) : categories.length === 0 ? (
         <div style={{ margin: 10, padding: "24px 16px", border: `1px solid ${COLORS.line}`, borderRadius: 16, background: "rgba(255,255,255,.72)", textAlign: "center", color: COLORS.espresso2, fontSize: 12.5 }}>
           ยังไม่มีเมนูที่ตรงกับตัวกรองนี้
@@ -4359,7 +4390,7 @@ function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm, hideQty
           const currentChoice = currentGroup?.choices?.find((choice) => choice.id === o.choiceId);
           sel[o.groupId] = currentChoice
             ? { ...currentChoice, groupId: currentGroup.id, groupName: currentGroup.name }
-            : { id: o.choiceId, label: o.label, note: "", priceDelta: o.priceDelta || 0, ingredientId: o.ingredientId || null, qtyPercent: o.qtyPercent != null ? o.qtyPercent : 100, extraAdjustments: o.extraAdjustments || [], groupId: o.groupId, groupName: o.groupName };
+            : { id: o.choiceId, label: o.label, note: "", priceDelta: o.priceDelta || 0, ingredientId: o.ingredientId || null, qtyPercent: o.qtyPercent != null ? o.qtyPercent : 100, qtyMode:o.qtyMode || "percent", qtyValue:o.qtyValue != null ? o.qtyValue : (o.qtyPercent != null ? o.qtyPercent : 100), extraAdjustments: o.extraAdjustments || [], groupId: o.groupId, groupName: o.groupName };
         }
         setSelections(sel);
       } else {
@@ -4396,6 +4427,7 @@ function OptionPickerModal({ menu, groups, visible, onCancel, onConfirm, hideQty
       return [{
         groupId: grp.id, groupName: grp.name, choiceId: choice.id, label: choice.label, priceDelta: choice.priceDelta || 0,
         ingredientId: choice.ingredientId || null, qtyPercent: choice.qtyPercent != null ? choice.qtyPercent : 100,
+        qtyMode: choice.qtyMode || "percent", qtyValue: choice.qtyValue != null ? choice.qtyValue : (choice.qtyPercent != null ? choice.qtyPercent : 100),
         extraAdjustments: choice.extraAdjustments || [],
       }];
     });

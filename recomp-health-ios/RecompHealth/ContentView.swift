@@ -93,7 +93,7 @@ struct ContentView: View {
     }
 
     private var privacyNote: some View {
-        Label("ข้อมูลถูกส่งด้วย HTTPS และ token เก็บใน iPhone Keychain แอปไม่อ่าน heart-rate รายจังหวะหรือเส้นทางออกกำลังกาย", systemImage: "hand.raised.fill")
+            Label("ข้อมูลถูกส่งด้วย HTTPS และ token เก็บใน iPhone Keychain แอปอ่านเฉพาะ resting heart rate รายวัน ไม่อ่านชีพจรรายจังหวะหรือเส้นทางออกกำลังกาย", systemImage: "hand.raised.fill")
             .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
     }
 

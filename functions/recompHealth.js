@@ -43,6 +43,8 @@ function normalizeDay(raw) {
     ["bodyFatPercent", 1, 75],
     ["leanBodyMassKg", 10, 300],
     ["activeEnergyKcal", 0, 20000],
+    ["exerciseMinutes", 0, 1440],
+    ["restingHeartRate", 20, 240],
   ];
   for (const [key, minimum, maximum] of fields) {
     const value = finiteNumber(raw[key], minimum, maximum);
@@ -83,6 +85,8 @@ function mergeAppleHealthLog(existing, day, syncedAt, profileId, capturedAt = sy
     ["bodyFatPercent", "bodyFat"],
     ["leanBodyMassKg", "leanBodyMass"],
     ["activeEnergyKcal", "activeEnergy"],
+    ["exerciseMinutes", "exerciseMinutes"],
+    ["restingHeartRate", "restingHeartRate"],
   ];
   let changed = false;
   for (const [sourceKey, destinationKey] of mappings) {

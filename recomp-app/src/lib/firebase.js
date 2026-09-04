@@ -30,12 +30,13 @@ const objectValues = value => Array.isArray(value) ? value : Object.values(value
 
 export function encodeStore(store, userId = null) {
   return clean({
-    version: 5,
+    version: 6,
     logs: Object.fromEntries(Object.entries(store.logs).map(([profileId, logs]) => [profileId, Object.fromEntries(logs.map(log => [log.date, log]))])),
     workouts: Object.fromEntries(Object.entries(store.workouts).map(([profileId, workouts]) => [profileId, Object.fromEntries(workouts.map(workout => [`${workout.date}_${workout.type}`, workout]))])),
     healthWorkouts: Object.fromEntries(Object.entries(store.healthWorkouts || {}).map(([profileId, workouts]) => [profileId, Object.fromEntries(workouts.map(workout => [workout.id, workout]))])),
     integrations: store.integrations || { appleHealth: {} },
     preferences: store.preferences,
+    plans: store.plans,
     updatedAt: new Date().toISOString(),
     updatedBy: userId,
   });
@@ -46,7 +47,7 @@ export function decodeStore(value) {
   if (!value) return baseline;
   return {
     ...baseline,
-    version: 5,
+    version: 6,
     logs: {
       zackdark: objectValues(value.logs?.zackdark).sort((a, b) => a.date.localeCompare(b.date)),
       tony: objectValues(value.logs?.tony).sort((a, b) => a.date.localeCompare(b.date)),
@@ -60,7 +61,8 @@ export function decodeStore(value) {
       tony: objectValues(value.healthWorkouts?.tony).sort((a, b) => String(a.startAt).localeCompare(String(b.startAt))),
     },
     integrations: { ...baseline.integrations, ...(value.integrations || {}), appleHealth: { ...baseline.integrations.appleHealth, ...(value.integrations?.appleHealth || {}) } },
-    preferences: { ...baseline.preferences, ...(value.preferences || {}) },
+    preferences: { ...baseline.preferences, ...(value.preferences || {}), reminderTimes: { ...baseline.preferences.reminderTimes, ...(value.preferences?.reminderTimes || {}) } },
+    plans: { ...baseline.plans, ...(value.plans || {}) },
   };
 }
 
@@ -74,12 +76,13 @@ export function mergeStores(remote, local) {
   const baseline = initialStore();
   const result = {
     ...baseline,
-    version: 5,
+    version: 6,
     logs: {},
     workouts: {},
     healthWorkouts: {},
     integrations: { ...baseline.integrations, ...local.integrations, ...remote.integrations, appleHealth: { ...(local.integrations?.appleHealth || {}), ...(remote.integrations?.appleHealth || {}) } },
     preferences: { ...baseline.preferences, ...local.preferences, ...remote.preferences },
+    plans: { ...baseline.plans, ...local.plans, ...remote.plans },
   };
   for (const profileId of ["zackdark", "tony"]) {
     const logs = new Map();
@@ -157,6 +160,11 @@ export function writeRealtimeWorkout(profileId, workout) {
 export function writeRealtimePreferences(preferences) {
   if (!realtimeDb || !firebaseAuth?.currentUser) return Promise.resolve(false);
   return set(ref(realtimeDb, `${dataPath}/preferences`), clean(preferences)).then(() => true);
+}
+
+export function writeRealtimePlan(profileId, plan) {
+  if (!realtimeDb || !firebaseAuth?.currentUser) return Promise.resolve(false);
+  return set(ref(realtimeDb, `${dataPath}/plans/${profileId}`), clean(plan)).then(() => true);
 }
 
 export function replaceRealtimeStore(store) {

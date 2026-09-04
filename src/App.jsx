@@ -8,6 +8,17 @@ import Login from "./Login.jsx";
 import CustomerOrder from "./CustomerOrder.jsx";
 import LandingScreen, { LANDING_SCREEN_EXIT_MS, LANDING_SCREEN_MINIMUM_MS } from "./LandingScreen.jsx";
 import { resolveCustomerLaunch } from "./customerLaunch.js";
+import { loyaltyUnitsInOrder, menuEarnsLoyaltyBeans } from "./loyaltyEligibility.js";
+import {
+  calcRecipeCost,
+  describeInventoryIssue,
+  inventoryConfigurationIssues,
+  inventoryUsageSnapshot,
+  normalizeQuantityRule,
+  resolveIngredientAdjustmentsFromOptions,
+  resolveLines,
+  stockUsageFromSnapshot,
+} from "./inventory.js";
 
 const UNITS = { g: "กรัม", ml: "มล.", piece: "ชิ้น" };
 const CATEGORIES = [
@@ -57,13 +68,6 @@ function productTypeOf(item) {
 
 function productTypeMeta(item) {
   return PRODUCT_TYPES.find((type) => type.id === productTypeOf(item)) || PRODUCT_TYPES[0];
-}
-
-function loyaltyUnitsInOrder(order, menus = []) {
-  return (order?.items || []).reduce((sum, item) => {
-    const menu = menus.find((candidate) => candidate.id === item.menuId);
-    return sum + (productTypeOf(item.productType ? item : menu) === "drink" ? Number(item.qty) || 0 : 0);
-  }, 0);
 }
 
 // หมวดบัญชีพื้นฐานใช้ id คงที่ เพื่อให้รายงานย้อนหลังไม่เปลี่ยนเมื่อแก้ข้อความที่แสดงในอนาคต
@@ -228,6 +232,24 @@ function customerThemeForSettings(raw, date = new Date()) {
 
 function round4(n) { return Math.round(n * 10000) / 10000; }
 
+function inventoryMovementRecord(id, type, stockUsage, ingredientsById, createdAt, actorUid, details = {}) {
+  const items = inventoryUsageSnapshot(stockUsage, ingredientsById);
+  const direction = type === "sale" ? -1 : 1;
+  return {
+    id,
+    type,
+    orderId: details.orderId || null,
+    purchaseId: details.purchaseId || null,
+    reason: details.reason || null,
+    createdAt,
+    actorUid,
+    items: Object.fromEntries(Object.entries(items).map(([ingredientId, item]) => [ingredientId, {
+      ...item,
+      delta: round4(direction * item.qty),
+    }])),
+  };
+}
+
 function orderItemRewardDiscount(item) {
   if (!item?.freeUnit) return 0;
   const unitPrice = Math.max(0, Number(item.unitPrice) || 0);
@@ -289,7 +311,7 @@ function seedIngredients() {
 function seedMenus() {
   const mk = (name, priceStore, priceDelivery, ings, category, productType = "drink") => ({
     id: genId("menu"), name, priceStore, priceDelivery, available: true, category: category || "กาแฟ", imageUrl: "",
-    productType,
+    productType, earnsLoyaltyBeans: productType === "drink",
     ingredients: ings.map(([ingredientId, qty]) => ({ ingredientId, qty })),
   });
   const pack = [["cup_16", 1], ["lid_98", 1], ["straw_black", 1], ["zipbag_drink", 1], ["sticker", 1]];
@@ -405,9 +427,21 @@ function normalizeData(raw) {
       if (/classic/i.test(choice.label || "") && coffeeBluekoff) ingredientId = coffeeBluekoff.id;
       else if (/brazil/i.test(choice.label || "") && coffeePacamara) ingredientId = coffeePacamara.id;
     }
+    const primaryRule = normalizeQuantityRule({ ...choice, qtyPercent }, "percent");
     return {
-      ...choice, ingredientId, qtyPercent, isDefault: choice.isDefault || false, enabled: choice.enabled !== false,
-      extraAdjustments: (choice.extraAdjustments || []).filter(Boolean).map((a) => ({ ingredientId: a.ingredientId || null, qtyPercent: a.qtyPercent != null ? a.qtyPercent : 100 })),
+      ...choice, ingredientId, qtyPercent, qtyMode: choice.qtyMode || primaryRule.mode,
+      qtyValue: choice.qtyValue != null ? choice.qtyValue : primaryRule.value,
+      isDefault: choice.isDefault || false, enabled: choice.enabled !== false,
+      extraAdjustments: (choice.extraAdjustments || []).filter(Boolean).map((adjustment) => {
+        const rule = normalizeQuantityRule(adjustment, "percent");
+        return {
+          ...adjustment,
+          ingredientId: adjustment.ingredientId || null,
+          qtyPercent: adjustment.qtyPercent != null ? adjustment.qtyPercent : 100,
+          qtyMode: adjustment.qtyMode || rule.mode,
+          qtyValue: adjustment.qtyValue != null ? adjustment.qtyValue : rule.value,
+        };
+      }),
     };
   }
 
@@ -418,7 +452,7 @@ function normalizeData(raw) {
     menus: (raw.menus || []).filter(Boolean).map((m) => ({
       ...m, ingredients: (m.ingredients || []).filter(Boolean), optionGroupIds: (m.optionGroupIds || []).filter(Boolean),
       available: m.available ?? true, category: m.category || "อื่นๆ", description: String(m.description || ""), imageUrl: m.imageUrl || "", productType: productTypeOf(m),
-      recommended: m.recommended === true, ...normalizeMenuTag(m),
+      earnsLoyaltyBeans: menuEarnsLoyaltyBeans(m), recommended: m.recommended === true, ...normalizeMenuTag(m),
     })),
     // sales ย้ายไปอยู่โหนดแยก sales/{uid} แล้ว (ดู useEffect ที่ subscribe ใน ShopApp) — เหลือ field นี้ไว้เป็น [] เฉยๆ
     // เพื่อไม่ต้องแก้ shape ของ data ทั้งระบบ ของจริงมาจาก dataForDisplay.sales ที่ override ทับอีกที
@@ -520,54 +554,6 @@ function formatPromoDateTime(ms) {
   return new Date(ms).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" });
 }
 
-// วัตถุดิบ "ผสม" (เช่น mix milk = นมข้นหวาน:นมจืด 2:1) ไม่มีสต็อกของตัวเอง — กระจายปริมาณลงวัตถุดิบจริง
-// ตามสัดส่วน components แบบ recursive เผื่ออนาคตมีวัตถุดิบผสมซ้อนวัตถุดิบผสมอีกที (limit ความลึกกันลูปวนตั้งค่าพลาด)
-function expandIngredientLine(ingredientId, qty, ingredientsById, depth) {
-  const ing = ingredientsById[ingredientId];
-  if (!ing || !ing.components || ing.components.length === 0 || depth > 5) {
-    return [{ ingredientId, qty }];
-  }
-  const totalRatio = ing.components.reduce((s, c) => s + (Number(c.ratio) || 0), 0) || 1;
-  return ing.components.flatMap((c) =>
-    expandIngredientLine(c.ingredientId, round4(qty * ((Number(c.ratio) || 0) / totalRatio)), ingredientsById, depth + 1)
-  );
-}
-
-function expandLines(lines, ingredientsById) {
-  const merged = {};
-  for (const line of lines) {
-    for (const leaf of expandIngredientLine(line.ingredientId, line.qty, ingredientsById, 0)) {
-      merged[leaf.ingredientId] = round4((merged[leaf.ingredientId] || 0) + leaf.qty);
-    }
-  }
-  return Object.entries(merged).map(([ingredientId, qty]) => ({ ingredientId, qty }));
-}
-
-function resolveLines(menu, adjustments, ingredientsById) {
-  const lines = menu.ingredients.map((line) => {
-    const adj = adjustments[line.ingredientId];
-    if (!adj) return line;
-    const ingredientId = adj.ingredientId || line.ingredientId;
-    const qtyPercent = adj.qtyPercent != null ? adj.qtyPercent : 100;
-    return { ...line, ingredientId, qty: round4(line.qty * (qtyPercent / 100)) };
-  });
-  return expandLines(lines, ingredientsById);
-}
-
-function calcRecipeCost(menu, ingredientsById, adjustments) {
-  const lines = resolveLines(menu, adjustments || {}, ingredientsById);
-  let cost = 0;
-  const breakdown = [];
-  for (const line of lines) {
-    const ing = ingredientsById[line.ingredientId];
-    if (!ing) continue;
-    const lineCost = ing.costPerUnit * line.qty;
-    cost += lineCost;
-    breakdown.push({ ...line, name: ing.name, unit: ing.unit, unitCost: ing.costPerUnit, lineCost });
-  }
-  return { ingredientCost: cost, breakdown };
-}
-
 function milkChoiceFor(menu, ingredientsById) {
   const line = menu.ingredients.find((l) => ingredientsById[l.ingredientId] && ingredientsById[l.ingredientId].altGroup);
   if (!line) return null;
@@ -626,38 +612,6 @@ function OptionGroupPicker({ groups, selections, onPick }) {
       ))}
     </>
   );
-}
-
-function resolveIngredientAdjustmentsFromOptions(menu, options, ingredientsById) {
-  const adjustments = {};
-  for (const opt of options || []) {
-    // การแทนวัตถุดิบแบบเดิม (ผ่าน "กลุ่มทางเลือก" เช่น สลับชนิดนม) — ปรับได้ทีละ 1 รายการ
-    if (opt.ingredientId) {
-      const chosenIng = ingredientsById[opt.ingredientId];
-      if (chosenIng && chosenIng.altGroup) {
-        const origLine = menu.ingredients.find((l) => {
-          const li = ingredientsById[l.ingredientId];
-          return li && li.altGroup === chosenIng.altGroup;
-        });
-        if (origLine) {
-          const qtyPercent = opt.qtyPercent != null ? opt.qtyPercent : 100;
-          if (!(origLine.ingredientId === opt.ingredientId && qtyPercent === 100)) {
-            adjustments[origLine.ingredientId] = { ingredientId: opt.ingredientId, qtyPercent };
-          }
-        }
-      }
-    }
-    // ปรับปริมาณวัตถุดิบอื่นๆ ในสูตรพร้อมกันได้หลายรายการ ไม่ต้องแทนที่ ไม่ต้องตั้งกลุ่มทางเลือก
-    // (เช่น ลดความหวานแล้วต้องเพิ่มนมสดชดเชยปริมาณของเหลวในแก้ว)
-    for (const extra of opt.extraAdjustments || []) {
-      if (!extra.ingredientId) continue;
-      const hasLine = menu.ingredients.some((l) => l.ingredientId === extra.ingredientId);
-      if (!hasLine) continue;
-      const qtyPercent = extra.qtyPercent != null ? extra.qtyPercent : 100;
-      adjustments[extra.ingredientId] = { ingredientId: extra.ingredientId, qtyPercent };
-    }
-  }
-  return adjustments;
 }
 
 function ingredientPickerOptions(ingredients, currentId) {
@@ -1380,6 +1334,10 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
     const menu = data.menus.find((m) => m.id === menuId);
     if (!menu) throw new Error("ไม่พบเมนูที่ต้องการบันทึกยอดขาย");
     const substitutions = opts.substitutions || {};
+    const blockingInventoryIssues = (substitutions.issues || []).filter((issue) => issue.severity !== "warning");
+    if (blockingInventoryIssues.length) {
+      throw new Error(blockingInventoryIssues.map((issue) => describeInventoryIssue(issue, ingredientsById)).join(" · "));
+    }
     const { ingredientCost } = calcRecipeCost(menu, ingredientsById, substitutions);
     const lines = resolveLines(menu, substitutions, ingredientsById);
     const overhead = data.settings.overheadPerCup;
@@ -1415,6 +1373,7 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
       note: opts.note || null,
       orderId: opts.orderId || null,
       paymentMethod: opts.paymentMethod || null,
+      stockUsage: inventoryUsageSnapshot(Object.fromEntries(lines.map((line) => [line.ingredientId, round4(line.qty * qty)])), ingredientsById),
     };
     return { sale, lines };
   }
@@ -1443,8 +1402,16 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
     for (const [ingredientId, quantity] of Object.entries(stockUsage)) {
       const index = indexById.get(ingredientId);
       if (index == null || !quantity) continue;
+      const ingredient = data.ingredients[index];
+      if (direction < 0 && !ingredient.unlimited && Number(ingredient.stockQty) < quantity) {
+        throw new Error(`${ingredient.name} เหลือ ${fmtQty(ingredient.stockQty)} ${UNITS[ingredient.unit] || ingredient.unit} แต่ต้องใช้ ${fmtQty(quantity)}`);
+      }
       patch[`shops/${uid}/ingredients/${index}/stockQty`] = increment(round4(direction * quantity));
     }
+  }
+
+  function appendInventoryMovementToPatch(patch, movementId, type, stockUsage, timestamp, details = {}) {
+    patch[`inventoryMovements/${uid}/${movementId}`] = inventoryMovementRecord(movementId, type, stockUsage, ingredientsById, timestamp, uid, details);
   }
 
   function appendAuditToPatch(patch, action, details) {
@@ -1463,7 +1430,7 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
     const orderRef = push(ref(db, `orders/${uid}`));
     const orderId = orderRef.key;
     const items = cart.map((line) => ({
-      menuId: line.menuId, name: line.menuName, productType: productTypeOf(line), unitPrice: line.unitPrice,
+      menuId: line.menuId, name: line.menuName, productType: productTypeOf(line), earnsLoyaltyBeans: menuEarnsLoyaltyBeans(line), unitPrice: line.unitPrice,
       qty: line.qty, options: line.options, channel: line.channel, platformName: line.platformName || null,
     }));
     const total = round4(cart.reduce((sum, line) => {
@@ -1475,7 +1442,7 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
     const platformNames = [...new Set(cart.filter((l) => l.channel === "delivery" && l.platformName).map((l) => l.platformName))];
     const customerName = platformNames.length > 0 ? platformNames.join(", ") : "ขายหน้าร้าน";
     const patch = {};
-    patch[`orders/${uid}/${orderId}`] = {
+    const orderRecord = {
       customerName, customerPhone: customerPhone || "", note: note || "",
       paymentMethod, pickupDate: timestamp.slice(0, 10), items, total,
       status: "preparing", createdAt: timestamp,
@@ -1484,6 +1451,9 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
     const stockUsage = {};
     appendSaleBatchToPatch(patch, stockUsage, cart.map((line) => ({ ...line, note: note || null })), orderId, timestamp, paymentMethod);
     appendStockIncrementsToPatch(patch, stockUsage, -1);
+    orderRecord.stockUsage = inventoryUsageSnapshot(stockUsage, ingredientsById);
+    patch[`orders/${uid}/${orderId}`] = orderRecord;
+    appendInventoryMovementToPatch(patch, `sale_${orderId}`, "sale", stockUsage, timestamp, { orderId });
     appendAuditToPatch(patch, "admin_checkout", { orderId, paymentMethod, total, itemCount: items.length });
     await update(ref(db), patch);
     return orderId;
@@ -1525,6 +1495,8 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
       const stockUsage = {};
       appendSaleBatchToPatch(patch, stockUsage, entries, order.id, timestamp, order.paymentMethod);
       appendStockIncrementsToPatch(patch, stockUsage, -1);
+      patch[`orders/${uid}/${order.id}/stockUsage`] = inventoryUsageSnapshot(stockUsage, ingredientsById);
+      appendInventoryMovementToPatch(patch, `sale_${order.id}`, "sale", stockUsage, timestamp, { orderId: order.id });
       appendAuditToPatch(patch, "confirm_online_order", { orderId: order.id, paymentMethod: order.paymentMethod, total: order.total });
       await update(ref(db), patch);
       return { alreadyRecorded: false };
@@ -1587,18 +1559,22 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
     const patch = {};
     const cancelledAt = order.cancelledAt || new Date().toISOString();
     if (order.saleRecorded) {
-      const stockUsage = {};
-      for (const item of order.items || []) {
-        const itemMenu = data.menus.find((menu) => menu.id === item.menuId);
-        if (!itemMenu) continue;
-        const options = Array.isArray(item.options) ? item.options : Object.values(item.options || {});
-        const substitutions = resolveIngredientAdjustmentsFromOptions(itemMenu, options, ingredientsById);
-        for (const line of resolveLines(itemMenu, substitutions, ingredientsById)) {
-          const ingredient = ingredientsById[line.ingredientId];
-          if (ingredient && !ingredient.unlimited) stockUsage[line.ingredientId] = round4((stockUsage[line.ingredientId] || 0) + line.qty * (Number(item.qty) || 1));
+      const stockUsage = stockUsageFromSnapshot(order.stockUsage);
+      if (Object.keys(stockUsage).length === 0) {
+        // ออเดอร์เก่าก่อนมี snapshot ยังคงคืนด้วยสูตรได้ แต่รายการใหม่จะคืนจากยอดที่ตัดจริงเสมอ
+        for (const item of order.items || []) {
+          const itemMenu = data.menus.find((menu) => menu.id === item.menuId);
+          if (!itemMenu) continue;
+          const options = Array.isArray(item.options) ? item.options : Object.values(item.options || {});
+          const substitutions = resolveIngredientAdjustmentsFromOptions(itemMenu, options, ingredientsById);
+          for (const line of resolveLines(itemMenu, substitutions, ingredientsById)) {
+            const ingredient = ingredientsById[line.ingredientId];
+            if (ingredient && !ingredient.unlimited) stockUsage[line.ingredientId] = round4((stockUsage[line.ingredientId] || 0) + line.qty * (Number(item.qty) || 1));
+          }
         }
       }
       appendStockIncrementsToPatch(patch, stockUsage, 1);
+      appendInventoryMovementToPatch(patch, `cancel_${order.id}`, "refund", stockUsage, cancelledAt, { orderId: order.id });
       // ตัดยอดขายออกจากรายงานเดิม แต่เก็บ audit trail ฝั่งบัญชีด้วยรายการกลับยอดที่ใช้ sale id เดิมเป็น idempotency key
       const toRemove = salesRecords.filter((s) => s.orderId === order.id);
       if (toRemove.length > 0) {
@@ -1646,13 +1622,12 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
     }
   }
 
-  // ให้เมล็ดสะสมตอนออเดอร์ถึงสถานะ "เสร็จ" (done) เท่านั้น และนับเฉพาะเครื่องดื่ม
-  // อาหาร/ขนมปังยังขายและตัดสต็อกตามปกติ แต่ไม่เพิ่มเมล็ดและไม่สามารถใช้รางวัลจากกงล้อได้
+  // ให้เมล็ดสะสมตอนออเดอร์ถึงสถานะ "เสร็จ" (done) เท่านั้น และนับตามค่าที่กำหนดในแต่ละเมนู
   async function awardLoyaltyBeans(order) {
     const phoneKey = normalizeThaiPhone(order.customerPhone);
     if (!phoneKey) return { cups: 0, skipped: "invalid-phone" };
     const cups = loyaltyUnitsInOrder(order, data.menus);
-    if (cups <= 0) return { cups: 0, skipped: "no-drinks" };
+    if (cups <= 0) return { cups: 0, skipped: "no-eligible-items" };
     const awardedAt = new Date().toISOString();
     const customerRef = ref(db, `customers/${uid}/${phoneKey}`);
     const transaction = await runTransaction(customerRef, (cur) => {
@@ -2435,7 +2410,6 @@ function SellPanel({ data, ingredientsById, commitAdminCheckout, showToast }) {
   const [infoFor, setInfoFor] = useState(null);
   const [warnOpen, setWarnOpen] = useState({});
   const [advOpen, setAdvOpen] = useState({});
-  const [stockOverride, setStockOverride] = useState({});
 
   function get(menuId, key, fallback) {
     return (state[menuId] && state[menuId][key] !== undefined) ? state[menuId][key] : fallback;
@@ -2458,6 +2432,7 @@ function SellPanel({ data, ingredientsById, commitAdminCheckout, showToast }) {
   }
 
   function stockOk(menu, substitutions, qty) {
+    if ((substitutions.issues || []).some((issue) => issue.severity !== "warning")) return false;
     const cartUsage = cartIngredientUsage();
     const lines = resolveLines(menu, substitutions, ingredientsById);
     for (const line of lines) {
@@ -2479,7 +2454,7 @@ function SellPanel({ data, ingredientsById, commitAdminCheckout, showToast }) {
     const platform = channel === "delivery" ? data.settings.platforms.find((p) => p.id === platformId) : null;
     const optionsLabel = optionsArr.map((o) => o.label).join(", ") || null;
     setCart((c) => [...c, {
-      cartId: genId("cart"), menuId: menu.id, menuName: menu.name, productType: productTypeOf(menu), qty, channel,
+      cartId: genId("cart"), menuId: menu.id, menuName: menu.name, productType: productTypeOf(menu), earnsLoyaltyBeans: menuEarnsLoyaltyBeans(menu), qty, channel,
       platformId: channel === "delivery" ? platformId : null,
       platformName: platform ? platform.name : null,
       options: optionsArr, optionsLabel,
@@ -2681,7 +2656,6 @@ function SellPanel({ data, ingredientsById, commitAdminCheckout, showToast }) {
             const showAdvToggle = advancedGroups.length > 0;
             const isAdvOpen = !!advOpen[menu.id];
             const isWarnOpen = !!warnOpen[menu.id];
-            const overrideAllowed = !!stockOverride[menu.id];
 
             function pick(g, c) {
               set(menu.id, { options: { ...options, [g.id]: { ...c, groupId: g.id, groupName: g.name } } });
@@ -2737,9 +2711,8 @@ function SellPanel({ data, ingredientsById, commitAdminCheckout, showToast }) {
                     </button>
                     {isWarnOpen && (
                       <div style={{ fontSize: 11, color: "var(--warning-text)", marginTop: 4, paddingLeft: 4, lineHeight: 1.5 }}>
-                        {!ok && <div>สต็อกวัตถุดิบไม่พอ หากจำเป็นต้องขายต่อให้อนุมัติเป็นกรณีพิเศษ</div>}
+                        {!ok && <div>สต็อกวัตถุดิบไม่พอ กรุณารับเข้า หรือปรับยอดจากการนับจริงก่อนขาย</div>}
                         {missingRequired && <div>กรุณาเลือกตัวเลือกที่จำเป็นให้ครบก่อนหยิบใส่ตะกร้า</div>}
-                        {!ok && <button type="button" className="cbtn" style={{ marginTop:6 }} onClick={() => setStockOverride((current)=>({ ...current, [menu.id]:!current[menu.id] }))}>{overrideAllowed ? "ยกเลิกการอนุมัติ" : "อนุมัติขายเกินสต็อก"}</button>}
                       </div>
                     )}
                   </div>
@@ -2752,7 +2725,7 @@ function SellPanel({ data, ingredientsById, commitAdminCheckout, showToast }) {
                     <button onClick={() => set(menu.id, { qty: qty + 1 })}>+</button>
                   </div>
                   <button
-                    className="pos-add-btn" disabled={missingRequired || (!ok && !overrideAllowed)}
+                    className="pos-add-btn" disabled={missingRequired || !ok}
                     onClick={() => addToCart(menu, { qty, channel, options, platformId })}
                   >
                     <Icon name="shopping-cart-plus" size={16} /> เพิ่มลงตะกร้า
@@ -4574,6 +4547,9 @@ function MenuCard({ menu, totalCost, margin, stockFlag, selected, selectMode, on
       </div>
       <div style={{ padding: "14px 16px 16px", display: "flex", flexDirection: "column", flex: 1 }}>
         <div style={{ fontSize: 12, color: "#9C9690", letterSpacing: ".02em", marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><Icon name={typeMeta.icon} size={12} style={{ marginRight: 4, verticalAlign: -2 }} />{typeMeta.label} · {menu.category}</div>
+        <div style={{ display: "inline-flex", alignItems: "center", alignSelf: "flex-start", gap: 4, marginBottom: 5, padding: "3px 8px", borderRadius: 999, color: menuEarnsLoyaltyBeans(menu) ? "#7C4A12" : "#6B7280", background: menuEarnsLoyaltyBeans(menu) ? "#FFF4D8" : "#F3F4F6", fontSize: 10.5, fontWeight: 800 }}>
+          <Icon name={menuEarnsLoyaltyBeans(menu) ? "coffee" : "coffee-off"} size={11} /> {menuEarnsLoyaltyBeans(menu) ? "ได้เมล็ดสะสม" : "ไม่ได้เมล็ดสะสม"}
+        </div>
         {menu.recommended && <div style={{ display: "inline-flex", alignItems: "center", alignSelf: "flex-start", gap: 4, marginBottom: 5, padding: "3px 8px", borderRadius: 999, color: POS.primaryDark, background: POS.primarySoft, fontSize: 10.5, fontWeight: 800 }}><Icon name="star" size={11} /> เมนูแนะนำ</div>}
         <div style={{ fontSize: 16.5, fontWeight: 700, color: POS.navy, lineHeight: 1.25, marginBottom: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{menu.name}</div>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4, gap: 8 }}>
@@ -4786,14 +4762,14 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
 
   function newMenu() {
     const defaultPackaging = (data.settings.defaultPackagingLines || []).map((l) => ({ ...l }));
-    setInspector({ mode: "add", tab: "overview", menu: { id: null, name: "", description: "", productType: "drink", priceStore: 0, priceDelivery: 0, ingredients: defaultPackaging, optionGroupIds: [], available: true, category: categoryFilter !== "all" ? categoryFilter : "กาแฟ", imageUrl: "", recommended: false, ...normalizeMenuTag({}) } });
+    setInspector({ mode: "add", tab: "overview", menu: { id: null, name: "", description: "", productType: "drink", earnsLoyaltyBeans: true, priceStore: 0, priceDelivery: 0, ingredients: defaultPackaging, optionGroupIds: [], available: true, category: categoryFilter !== "all" ? categoryFilter : "กาแฟ", imageUrl: "", recommended: false, ...normalizeMenuTag({}) } });
   }
 
   function saveMenu(menu) {
     const now = new Date().toISOString();
     const requestedCategory = menu.category.trim() || "อื่นๆ";
     const canonicalCategory = categories.find((category)=>category.toLocaleLowerCase("th") === requestedCategory.toLocaleLowerCase("th")) || requestedCategory;
-    menu = { ...menu, name:menu.name.trim(), description: String(menu.description || "").trim(), productType: productTypeOf(menu), category: canonicalCategory, recommended: menu.recommended === true, ...normalizeMenuTag(menu) };
+    menu = { ...menu, name:menu.name.trim(), description: String(menu.description || "").trim(), productType: productTypeOf(menu), earnsLoyaltyBeans: menuEarnsLoyaltyBeans(menu), category: canonicalCategory, recommended: menu.recommended === true, ...normalizeMenuTag(menu) };
     updateData((next) => {
       if (menu.id) {
         const idx = next.menus.findIndex((m) => m.id === menu.id);
@@ -5231,7 +5207,7 @@ function MenuInspector({ mode, initial, initialTab, ingredients, ingredientsById
   const [form, setForm] = useState({
     ...initial, optionGroupIds: initial.optionGroupIds || [], available: initial.available ?? true,
     category: initial.category || "", description: initial.description || "", imageUrl: initial.imageUrl || "", productType: productTypeOf(initial),
-    recommended: initial.recommended === true, ...normalizeMenuTag(initial),
+    earnsLoyaltyBeans: menuEarnsLoyaltyBeans(initial), recommended: initial.recommended === true, ...normalizeMenuTag(initial),
   });
   const [tab, setTab] = useState(initialTab || "overview");
   const [imageError, setImageError] = useState(false);
@@ -5258,10 +5234,13 @@ function MenuInspector({ mode, initial, initialTab, ingredients, ingredientsById
   function removeLine(idx) { setForm((f) => ({ ...f, ingredients: f.ingredients.filter((_, i) => i !== idx) })); }
   function changeProductType(productType) {
     setForm((current) => {
-      if (productTypeOf(current) === productType) return current;
+      const previousProductType = productTypeOf(current);
+      if (previousProductType === productType) return current;
+      const wasUsingTypeDefault = menuEarnsLoyaltyBeans(current) === (previousProductType === "drink");
       return {
         ...current,
         productType,
+        earnsLoyaltyBeans: wasUsingTypeDefault ? productType === "drink" : current.earnsLoyaltyBeans,
         category: productType === "food" && (!current.category || current.category === "กาแฟ") ? "ขนมปังปิ้ง" : current.category,
         ingredients: mode === "add" && productType === "food"
           ? current.ingredients.filter((line) => ingredientsById[line.ingredientId]?.category !== "packaging")
@@ -5271,15 +5250,20 @@ function MenuInspector({ mode, initial, initialTab, ingredients, ingredientsById
   }
 
   const duplicateIngredientIds = form.ingredients.map((line)=>line.ingredientId).filter((id,index,all)=>id && all.indexOf(id)!==index);
+  const inventoryConfigErrors = inventoryConfigurationIssues(form, optionGroups, ingredientsById).filter((issue)=>issue.severity!=="warning").map((issue) => {
+    const context = issue.groupName ? `${issue.groupName}${issue.choiceLabel ? ` / ${issue.choiceLabel}` : ""}: ` : "";
+    return context + describeInventoryIssue(issue, ingredientsById);
+  });
   const formErrors = [
     !form.name.trim() ? "กรุณาใส่ชื่อเมนู" : "",
     !form.category.trim() ? "กรุณาระบุหมวดหมู่" : "",
     !Number.isFinite(Number(form.priceStore)) || Number(form.priceStore) < 0 ? "ราคาหน้าร้านต้องไม่ติดลบ" : "",
     !Number.isFinite(Number(form.priceDelivery)) || Number(form.priceDelivery) < 0 ? "ราคาเดลิเวอรี่ต้องไม่ติดลบ" : "",
-    form.ingredients.some((line)=>!line.ingredientId || !Number.isFinite(Number(line.qty)) || Number(line.qty) < 0) ? "ตรวจวัตถุดิบและจำนวนในสูตรให้ครบ" : "",
+    form.ingredients.some((line)=>!line.ingredientId || !Number.isFinite(Number(line.qty)) || Number(line.qty) <= 0) ? "จำนวนวัตถุดิบในสูตรต้องมากกว่า 0" : "",
     duplicateIngredientIds.length ? "มีวัตถุดิบซ้ำในสูตร กรุณารวมเป็นบรรทัดเดียว" : "",
     form.tagLabel && !/^#[0-9a-f]{6}$/i.test(form.tagColor) ? "สีพื้น Tag ต้องเป็นรหัสสีแบบ #00A3E0" : "",
     form.tagLabel && !/^#[0-9a-f]{6}$/i.test(form.tagTextColor) ? "สีข้อความ Tag ต้องเป็นรหัสสีแบบ #FFFFFF" : "",
+    ...inventoryConfigErrors,
   ].filter(Boolean);
   const canSave = formErrors.length === 0;
   const { totalCost, margin, breakdown } = menuCostAndMargin(form, ingredientsById, overheadPerCup);
@@ -5357,7 +5341,17 @@ function MenuOverviewTab({ form, setForm, onProductTypeChange, categories, image
             );
           })}
         </div>
-        <p style={{ fontSize: 11, color: "#9C9690", margin: "6px 0 0", lineHeight: 1.45 }}>{typeMeta.id === "food" ? "ขนมปังและอาหารจะขายเป็นชิ้น และไม่นับเมล็ดสะสม" : "เครื่องดื่มขายเป็นแก้วและเข้าระบบสะสมเมล็ดตามปกติ"}</p>
+        <p style={{ fontSize: 11, color: "#9C9690", margin: "6px 0 0", lineHeight: 1.45 }}>{typeMeta.id === "food" ? "ขนมปังและอาหารจะขายเป็นชิ้น" : "เครื่องดื่มจะขายเป็นแก้ว"}</p>
+      </div>
+      <div style={{ border: `1px solid ${POS.border}`, borderRadius: 14, padding: 14, background: "var(--cream-2)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14 }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 800, color: POS.navy }}>เมล็ดสะสม</div>
+          <div style={{ marginTop: 2, fontSize: 11, color: "#9C9690", lineHeight: 1.45 }}>เปิดเพื่อให้ลูกค้าได้รับ 1 เมล็ดต่อสินค้านี้ 1 ชิ้น/แก้ว เมื่อส่งมอบออเดอร์สำเร็จ</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: form.earnsLoyaltyBeans ? "#7C4A12" : "#6B7280" }}>{form.earnsLoyaltyBeans ? "ได้เมล็ด" : "ไม่ได้เมล็ด"}</span>
+          <OptgToggle checked={form.earnsLoyaltyBeans} onChange={(value) => setForm({ ...form, earnsLoyaltyBeans: value })} color={POS.primary} />
+        </div>
       </div>
       <div>
         <label style={lbl}>ชื่อเมนู</label>
@@ -6903,7 +6897,7 @@ function InvDrawer({ mode, initial, allIngredients, onClose, onSubmit }) {
           <button className="inv-icon-btn" onClick={onClose} aria-label="ปิด"><Icon name="x" size={18} /></button>
         </div>
         <div className="inv-drawer-body">
-          <IngredientForm value={form} onChange={setForm} onSubmit={() => onSubmit(form)} onCancel={onClose} submitLabel={mode === "add" ? "บันทึกวัตถุดิบ" : "บันทึกการแก้ไข"} allIngredients={allIngredients} />
+          <IngredientForm mode={mode} value={form} onChange={setForm} onSubmit={() => onSubmit(form)} onCancel={onClose} submitLabel={mode === "add" ? "บันทึกวัตถุดิบ" : "บันทึกการแก้ไข"} allIngredients={allIngredients} />
         </div>
       </div>
     </div>
@@ -6982,6 +6976,7 @@ function IngredientsPanel({ uid, data, updateData, showToast, onSaveAccounting, 
     };
     if(resultingCostPerUnit!=null)patch[`shops/${uid}/ingredients/${ingredientIndex}/costPerUnit`]=resultingCostPerUnit;
     if(totalPaid>0)patch[`accounting/${uid}/transactions/purchase_${purchaseId}`]=accountingTransactionFromPurchase(purchaseRecord,ingredient);
+    patch[`inventoryMovements/${uid}/restock_${purchaseId}`]=inventoryMovementRecord(`restock_${purchaseId}`,"restock",{[id]:addQty},ingredientsById,purchasedAt,uid,{purchaseId});
     const auditRef=push(ref(db,`auditLogs/${uid}`));patch[`auditLogs/${uid}/${auditRef.key}`]={action:"restock",actorUid:uid,createdAt:new Date().toISOString(),details:{ingredientId:id,qty:addQty,totalPaid,supplierName:purchaseForm.supplierName||""}};
     await update(ref(db),patch);
     setRestocking(null);
@@ -7019,6 +7014,7 @@ function IngredientsPanel({ uid, data, updateData, showToast, onSaveAccounting, 
 
     const patch={};
     for(const record of records){const index=data.ingredients.findIndex((item)=>item.id===record.ingredientId);patch[`shops/${uid}/ingredients/${index}/stockQty`]=increment(record.qtyAdded);if(record.resultingCostPerUnit!=null)patch[`shops/${uid}/ingredients/${index}/costPerUnit`]=record.resultingCostPerUnit;patch[`shops/${uid}/purchases/${record.id}`]=record;if(record.totalCost>0){const ingredient=data.ingredients[index];patch[`accounting/${uid}/transactions/purchase_${record.id}`]=accountingTransactionFromPurchase(record,ingredient);}}
+    const receivedUsage=Object.fromEntries(records.map((record)=>[record.ingredientId,record.qtyAdded]));patch[`inventoryMovements/${uid}/restock_${batchId}`]=inventoryMovementRecord(`restock_${batchId}`,"restock",receivedUsage,ingredientsById,purchasedAt,uid,{purchaseId:batchId});
     const auditRef=push(ref(db,`auditLogs/${uid}`));patch[`auditLogs/${uid}/${auditRef.key}`]={action:"bulk_restock",actorUid:uid,createdAt:new Date().toISOString(),details:{batchId,items:records.length,total:records.reduce((sum,record)=>sum+record.totalCost,0)}};
     await update(ref(db),patch);
     setBulkReceiving(false);
@@ -7028,7 +7024,8 @@ function IngredientsPanel({ uid, data, updateData, showToast, onSaveAccounting, 
   async function doAdjustStock(id, countedQty, reason) {
     const index=data.ingredients.findIndex((item)=>item.id===id);if(index<0)return;
     const auditRef=push(ref(db,`auditLogs/${uid}`));
-    await update(ref(db),{[`shops/${uid}/ingredients/${index}/stockQty`]:round4(countedQty),[`auditLogs/${uid}/${auditRef.key}`]:{action:"stock_adjustment",actorUid:uid,createdAt:new Date().toISOString(),details:{ingredientId:id,from:data.ingredients[index].stockQty,to:round4(countedQty),reason:String(reason||"").trim()}}});
+    const timestamp=new Date().toISOString();const from=Number(data.ingredients[index].stockQty)||0;const to=round4(countedQty);const movementId=`adjust_${auditRef.key}`;const ingredient=data.ingredients[index];
+    await update(ref(db),{[`shops/${uid}/ingredients/${index}/stockQty`]:to,[`inventoryMovements/${uid}/${movementId}`]:{id:movementId,type:"adjustment",createdAt:timestamp,actorUid:uid,reason:String(reason||"").trim(),items:{[id]:{ingredientId:id,name:ingredient.name,unit:ingredient.unit,qty:Math.abs(round4(to-from)),delta:round4(to-from)}}},[`auditLogs/${uid}/${auditRef.key}`]:{action:"stock_adjustment",actorUid:uid,createdAt:timestamp,details:{ingredientId:id,from,to,reason:String(reason||"").trim()}}});
     setAdjusting(null);showToast("ปรับปรุงสต็อกให้ตรงกับที่นับได้แล้ว");
   }
 
@@ -7047,7 +7044,8 @@ function IngredientsPanel({ uid, data, updateData, showToast, onSaveAccounting, 
     ing = { ...ing, components };
     updateData((next) => {
       const idx = next.ingredients.findIndex((i) => i.id === ing.id);
-      next.ingredients[idx] = { ...ing, altGroup: ing.altGroup || null };
+      const currentStockQty = next.ingredients[idx].stockQty;
+      next.ingredients[idx] = { ...ing, stockQty: currentStockQty, altGroup: ing.altGroup || null };
     });
     setDrawer(null);
     showToast("บันทึกแล้ว");
@@ -7372,7 +7370,7 @@ function DefaultPackagingSection({ data, updateData }) {
   );
 }
 
-function IngredientForm({ value, onChange, onSubmit, onCancel, submitLabel, allIngredients }) {
+function IngredientForm({ mode, value, onChange, onSubmit, onCancel, submitLabel, allIngredients }) {
   const isMix = value.components && value.components.length > 0;
   const pickable = (allIngredients || []).filter((i) => i.id !== value.id && (!i.components || i.components.length === 0));
   const nameRef = useRef(null);
@@ -7444,7 +7442,8 @@ function IngredientForm({ value, onChange, onSubmit, onCancel, submitLabel, allI
               <>
                 <div>
                   <label style={lbl}>สต็อกปัจจุบัน</label>
-                  <input className="inv-form-field" style={field} type="number" min="0" value={value.stockQty} onChange={(e) => onChange({ ...value, stockQty: Number(e.target.value) })} />
+                  <input className="inv-form-field" style={{ ...field, background:mode === "edit" ? "var(--cream-2)" : field.background }} type="number" min="0" value={value.stockQty} disabled={mode === "edit"} onChange={(e) => onChange({ ...value, stockQty: Number(e.target.value) })} />
+                  {mode === "edit" && <span style={{ display:"block", marginTop:4, color:INV.gray, fontSize:10.5 }}>ใช้ “ปรับยอดจากการนับจริง” เพื่อให้มีประวัติการแก้ไข</span>}
                 </div>
                 <div>
                   <label style={lbl}>แจ้งเตือนเมื่อต่ำกว่า</label>
@@ -9124,7 +9123,7 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
     const id = genId("choice");
     mutateGroups((groups) => {
       const g = groups.find((x) => x.id === groupId);
-      if (g) g.choices.unshift({ id, label: "", note: "", priceDelta: 0, ingredientId: null, qtyPercent: 100, isDefault: false, enabled: true, extraAdjustments: [] });
+      if (g) g.choices.unshift({ id, label: "", note: "", priceDelta: 0, ingredientId: null, qtyMode: "same", qtyValue: 100, qtyPercent: 100, isDefault: false, enabled: true, extraAdjustments: [] });
     });
     setCollapsed((current) => ({ ...current, [groupId]: false }));
     setActiveGroupId(groupId);
@@ -9136,7 +9135,7 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
       const c = g?.choices.find((x) => x.id === choiceId);
       if (c) {
         if (!c.extraAdjustments) c.extraAdjustments = [];
-        c.extraAdjustments.unshift({ ingredientId: null, qtyPercent: 100 });
+        c.extraAdjustments.unshift({ ingredientId: null, qtyMode: "percent", qtyValue: 100, qtyPercent: 100 });
       }
     });
   }
@@ -9197,13 +9196,26 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
   function moveGroup(groupId, delta) { mutateGroups((groups)=>{const index=groups.findIndex((group)=>group.id===groupId);const target=index+delta;if(index<0||target<0||target>=groups.length)return;[groups[index],groups[target]]=[groups[target],groups[index]];}); }
   function moveChoice(groupId, choiceId, delta) { mutateGroups((groups)=>{const choices=groups.find((group)=>group.id===groupId)?.choices;if(!choices)return;const index=choices.findIndex((choice)=>choice.id===choiceId);const target=index+delta;if(index<0||target<0||target>=choices.length)return;[choices[index],choices[target]]=[choices[target],choices[index]];}); }
   const dirty = JSON.stringify(draftGroups) !== JSON.stringify(data.optionGroups);
-  const validationErrors = draftGroups.flatMap((group)=>[
+  const invalidQuantity = (adjustment) => {
+    const rule = normalizeQuantityRule(adjustment, "percent");
+    if (rule.mode === "same") return false;
+    return !Number.isFinite(Number(rule.value)) || Number(rule.value) < 0 || (rule.mode === "percent" && Number(rule.value) > 500);
+  };
+  const fieldValidationErrors = draftGroups.flatMap((group)=>[
     !String(group.name||"").trim() ? "ทุกกลุ่มต้องมีชื่อ" : "",
     group.required && !group.choices.some((choice)=>choice.enabled!==false) ? `กลุ่ม “${group.name||"ไม่มีชื่อ"}” บังคับเลือกแต่ไม่มีตัวเลือกที่เปิดใช้` : "",
     group.choices.some((choice)=>!String(choice.label||"").trim()) ? `กลุ่ม “${group.name||"ไม่มีชื่อ"}” มีตัวเลือกไม่มีชื่อ` : "",
     group.choices.some((choice)=>!Number.isFinite(Number(choice.priceDelta)) || Number(choice.priceDelta)<0) ? `ราคาเพิ่มในกลุ่ม “${group.name||"ไม่มีชื่อ"}” ต้องไม่ติดลบ` : "",
-    group.choices.some((choice)=>choice.qtyPercent!=null && (!Number.isFinite(Number(choice.qtyPercent)) || Number(choice.qtyPercent)<0 || Number(choice.qtyPercent)>500)) ? `% วัตถุดิบในกลุ่ม “${group.name||"ไม่มีชื่อ"}” ต้องอยู่ระหว่าง 0–500` : "",
+    group.choices.some((choice)=>choice.ingredientId && invalidQuantity(choice)) ? `ปริมาณวัตถุดิบในกลุ่ม “${group.name||"ไม่มีชื่อ"}” ไม่ถูกต้อง` : "",
+    group.choices.some((choice)=>(choice.extraAdjustments||[]).some(invalidQuantity)) ? `ปริมาณวัตถุดิบเพิ่มเติมในกลุ่ม “${group.name||"ไม่มีชื่อ"}” ไม่ถูกต้อง` : "",
   ]).filter(Boolean);
+  const optionIngredientsById = Object.fromEntries(data.ingredients.map((ingredient) => [ingredient.id, ingredient]));
+  const configurationIssues = data.menus.flatMap((menu) => inventoryConfigurationIssues(menu, draftGroups, optionIngredientsById).map((issue)=>({menu,...issue})));
+  const configurationErrors = configurationIssues
+    .filter((issue) => issue.severity !== "warning" && ["missing_option_ingredient", "missing_extra_ingredient", "option_ingredient_without_group", "option_has_no_recipe_source"].includes(issue.code))
+    .map((issue) => `${issue.menu.name}: ${issue.groupName || "ตัวเลือก"} / ${issue.choiceLabel || "รายการ"} — ${describeInventoryIssue(issue, optionIngredientsById)}`);
+  const configurationWarnings = [...new Set(configurationIssues.filter((issue)=>issue.severity==="warning").map((issue)=>`${issue.menu.name}: ${issue.groupName || "ตัวเลือก"} / ${issue.choiceLabel || "รายการ"} — ${describeInventoryIssue(issue, optionIngredientsById)}`))];
+  const validationErrors = [...fieldValidationErrors, ...new Set(configurationErrors)];
   function saveGroups() { if(validationErrors.length)return;const validIds=new Set(draftGroups.map((group)=>group.id));updateData((next)=>{next.optionGroups=JSON.parse(JSON.stringify(draftGroups));for(const menu of next.menus)menu.optionGroupIds=(menu.optionGroupIds||[]).filter((id)=>validIds.has(id));});showToast("บันทึกตัวเลือกเสริมและอัปเดตเมนูที่ผูกแล้ว"); }
   function discardGroups(){setDraftGroups(JSON.parse(JSON.stringify(data.optionGroups)));setDeleteFor(null);}
   const totalGroups = draftGroups.length;
@@ -9284,7 +9296,8 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
           ตั้งค่าที่นี่ครั้งเดียว แล้วไปติ๊กเลือกว่าเมนูไหนใช้กลุ่มตัวเลือกไหนได้ในแท็บ "เมนู & สูตร" ตอนแก้ไขเมนู<br />
           <strong>แก้ชื่อกลุ่มหรือชื่อตัวเลือกย่อยตรงนี้ได้เลย</strong> เมนูทุกเมนูที่ผูกกลุ่มนี้ไว้จะเห็นชื่อใหม่ทันที โดยไม่ต้องเข้าไปผูกใหม่ทีละเมนู<br />
           ถ้าตัวเลือกไหนแทนวัตถุดิบ (เช่น เลือกเมล็ด/นมคนละแบบ) ให้เลือก "วัตถุดิบเชื่อมโยง" ระบบจะตัดสต็อกตามที่ลูกค้าเลือกจริงแทนสูตรตั้งต้น (วัตถุดิบต้นทางและตัวเลือกต้องตั้ง "กลุ่มทางเลือก" ให้ตรงกันในแท็บวัตถุดิบก่อน)<br />
-          เลือกวัตถุดิบเดิมของสูตรแล้วปรับ "% ที่ใช้" ได้ด้วย เช่น กลุ่ม "ความหวาน" เลือกไซรัปแล้วตั้งหวานปกติ 100%, หวานน้อย 50%, ไม่หวาน 0%<br />
+          กำหนดปริมาณได้ 3 แบบ: <strong>ตามสูตร</strong>, <strong>% สูตร</strong> หรือ <strong>จำนวนจริง</strong> เช่น 4 กรัม / 20 มล. ระบบจะแสดงหน่วยข้างช่องเสมอ<br />
+          ถ้ากำหนดแบบเปอร์เซ็นต์ วัตถุดิบนั้นต้องมีอยู่ในสูตรเมนู ส่วน “จำนวนจริง” สามารถเพิ่มวัตถุดิบที่ไม่มีในสูตรฐานได้<br />
           ถ้าตัวเลือกเดียวต้องปรับหลายวัตถุดิบพร้อมกัน ให้กด "ปรับวัตถุดิบอื่นพร้อมกัน" เพิ่มได้ไม่จำกัด ไม่ต้องตั้งกลุ่มทางเลือก<br />
           ปิดสวิตช์ “เปิดใช้” เพื่อซ่อนตัวเลือกชั่วคราว ข้อมูลเดิมและประวัติออเดอร์จะไม่ถูกลบ และเปิดกลับมาใช้ใหม่ได้ทุกเมื่อ<br />
           กดไอคอนดาว ★ เพื่อตั้งตัวเลือกเริ่มต้น ลูกค้าจะไม่ต้องกดเลือกเองถ้าไม่ต้องการเปลี่ยน
@@ -9341,14 +9354,33 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
                               ))}
                             </select>
                             {c.ingredientId && (
-                              <input
-                                className="optg-input"
-                                type="number"
-                                value={c.qtyPercent != null ? c.qtyPercent : 100}
-                                onChange={(e) => patchChoice(g.id, c.id, { qtyPercent: Number(e.target.value) })}
-                                style={{ width: 58, flexShrink: 0 }}
-                                title="ปริมาณที่ใช้ (% ของสูตรตั้งต้น)"
-                              />
+                              <>
+                                <select
+                                  className="optg-input"
+                                  value={c.qtyMode || "percent"}
+                                  onChange={(e) => patchChoice(g.id, c.id, { qtyMode: e.target.value, qtyValue: e.target.value === "same" ? 100 : (c.qtyValue ?? c.qtyPercent ?? 100) })}
+                                  style={{ width: 92, flexShrink: 0 }}
+                                  title="วิธีกำหนดปริมาณที่ตัดสต็อก"
+                                >
+                                  <option value="same">ตามสูตร</option>
+                                  <option value="percent">% สูตร</option>
+                                  <option value="absolute">จำนวนจริง</option>
+                                </select>
+                                {(c.qtyMode || "percent") !== "same" && (
+                                  <label style={{ display:"flex", alignItems:"center", gap:3, flexShrink:0 }}>
+                                    <input
+                                      className="optg-input"
+                                      type="number"
+                                      min="0"
+                                      value={c.qtyValue != null ? c.qtyValue : (c.qtyPercent != null ? c.qtyPercent : 100)}
+                                      onChange={(e) => patchChoice(g.id, c.id, { qtyValue: Number(e.target.value) })}
+                                      style={{ width: 64, flexShrink: 0 }}
+                                      title="ปริมาณที่ระบบจะใช้คำนวณสต็อก"
+                                    />
+                                    <span style={{ fontSize:10.5, color:OPTG.gray, whiteSpace:"nowrap" }}>{(c.qtyMode || "percent") === "absolute" ? (UNITS[data.ingredients.find((ingredient)=>ingredient.id===c.ingredientId)?.unit] || "หน่วย") : "%"}</span>
+                                  </label>
+                                )}
+                              </>
                             )}
                           </div>
                           <button
@@ -9369,7 +9401,7 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
                           <div style={{ marginLeft: 10, paddingLeft: 12, borderLeft: `2px solid ${OPTG.border}` }}>
                             {c.extraAdjustments.map((a, idx) => (
                               <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6, flexWrap: "wrap" }}>
-                                <span style={{ fontSize: 11, color: OPTG.gray, whiteSpace: "nowrap" }}>ปรับเพิ่ม:</span>
+                                <span style={{ fontSize: 11, color: OPTG.gray, whiteSpace: "nowrap" }}>ปรับวัตถุดิบ:</span>
                                 <select
                                   className="optg-input"
                                   style={{ flex: 1, minWidth: 140 }}
@@ -9381,14 +9413,28 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
                                     <option key={i.id} value={i.id}>{i.name}</option>
                                   ))}
                                 </select>
-                                <input
+                                <select
                                   className="optg-input"
-                                  type="number"
-                                  value={a.qtyPercent != null ? a.qtyPercent : 100}
-                                  onChange={(e) => patchExtraAdjustment(g.id, c.id, idx, { qtyPercent: Number(e.target.value) })}
-                                  style={{ width: 58 }}
-                                  title="ปริมาณที่ใช้ (% ของสูตรตั้งต้นของวัตถุดิบนี้ในเมนู)"
-                                />
+                                  value={a.qtyMode || "percent"}
+                                  onChange={(e) => patchExtraAdjustment(g.id, c.id, idx, { qtyMode:e.target.value, qtyValue:a.qtyValue ?? a.qtyPercent ?? 100 })}
+                                  style={{ width: 92 }}
+                                  title="ใช้เปอร์เซ็นต์ของสูตร หรือกำหนดจำนวนจริง"
+                                >
+                                  <option value="percent">% สูตร</option>
+                                  <option value="absolute">จำนวนจริง</option>
+                                </select>
+                                <label style={{ display:"flex", alignItems:"center", gap:3 }}>
+                                  <input
+                                    className="optg-input"
+                                    type="number"
+                                    min="0"
+                                    value={a.qtyValue != null ? a.qtyValue : (a.qtyPercent != null ? a.qtyPercent : 100)}
+                                    onChange={(e) => patchExtraAdjustment(g.id, c.id, idx, { qtyValue: Number(e.target.value) })}
+                                    style={{ width: 64 }}
+                                    title="ปริมาณที่ระบบจะใช้คำนวณสต็อก"
+                                  />
+                                  <span style={{ fontSize:10.5, color:OPTG.gray, whiteSpace:"nowrap" }}>{(a.qtyMode || "percent") === "absolute" ? (UNITS[data.ingredients.find((ingredient)=>ingredient.id===a.ingredientId)?.unit] || "หน่วย") : "%"}</span>
+                                </label>
                                 <button className="optg-fav-btn" style={{ color: OPTG.danger, borderColor: OPTG.dangerSoft }} onClick={() => removeExtraAdjustment(g.id, c.id, idx)} title="ลบรายการนี้"><Icon name="x" size={13} /></button>
                               </div>
                             ))}
@@ -9451,7 +9497,7 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
           )}
         </div>
       </div>
-      <div style={{ position:"sticky", bottom:0, marginTop:16, background:"var(--surface)", border:"1px solid var(--line)", borderRadius:14, padding:"12px 18px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, flexWrap:"wrap", boxShadow:"0 -4px 20px rgba(0,0,0,.06)", zIndex:10 }}><div style={{ color:validationErrors.length?"var(--danger)":dirty?OPTG.primaryDark:OPTG.gray, fontSize:12.5 }}>{validationErrors[0] || (dirty?"มีการเปลี่ยนแปลงที่ยังไม่ได้บันทึก":"ไม่มีการเปลี่ยนแปลง")}</div><div style={{ display:"flex", gap:8 }}><button className="cbtn" disabled={!dirty} onClick={discardGroups}>ยกเลิกการเปลี่ยนแปลง</button><button className="cbtn cbtn-accent" disabled={!dirty||validationErrors.length>0} onClick={saveGroups}>บันทึกตัวเลือกเสริม</button></div></div>
+      <div style={{ position:"sticky", bottom:0, marginTop:16, background:"var(--surface)", border:"1px solid var(--line)", borderRadius:14, padding:"12px 18px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, flexWrap:"wrap", boxShadow:"0 -4px 20px rgba(0,0,0,.06)", zIndex:10 }}><div title={[...validationErrors,...configurationWarnings].join("\n")} style={{ color:validationErrors.length?"var(--danger)":configurationWarnings.length?"var(--warning-text)":dirty?OPTG.primaryDark:OPTG.gray, fontSize:12.5 }}>{validationErrors[0] || (configurationWarnings.length?`มี ${configurationWarnings.length} รายการที่ข้ามเฉพาะเมนูซึ่งไม่มีวัตถุดิบนั้น (วางเมาส์เพื่อดู)`:(dirty?"มีการเปลี่ยนแปลงที่ยังไม่ได้บันทึก":"ไม่มีการเปลี่ยนแปลง"))}</div><div style={{ display:"flex", gap:8 }}><button className="cbtn" disabled={!dirty} onClick={discardGroups}>ยกเลิกการเปลี่ยนแปลง</button><button className="cbtn cbtn-accent" disabled={!dirty||validationErrors.length>0} onClick={saveGroups}>บันทึกตัวเลือกเสริม</button></div></div>
       {deleteFor&&<InvConfirmDialog
         title={deleteFor.kind==="group"?"ลบกลุ่มตัวเลือกนี้?":"ลบตัวเลือกนี้?"}
         message={deleteFor.kind==="group"?`“${deleteFor.label||"ไม่มีชื่อ"}” ผูกอยู่กับ ${deleteFor.linkedMenuCount||0} เมนู เมื่อบันทึก ระบบจะถอดกลุ่มนี้จากทุกเมนูด้วย`:`“${deleteFor.label||"ไม่มีชื่อ"}” จะหายจากทุกเมนูที่ใช้กลุ่มนี้หลังจากกดบันทึก`}
@@ -10617,6 +10663,11 @@ export default function App() {
       window.history.replaceState(null, "", customerLaunch.route.path);
     }
   }, [customerLaunch]);
+
+  useEffect(() => {
+    if (customerLaunch.isCustomerEntry || window.location.pathname !== "/") return;
+    window.history.replaceState(null, "", `/admin${window.location.search}${window.location.hash}`);
+  }, [customerLaunch.isCustomerEntry]);
 
   useEffect(() => {
     if (customerLaunch.isCustomerEntry) return undefined;

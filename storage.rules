@@ -1,0 +1,20 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /debtReceipts/{debtId}/{creditorUid}/{debtorUid}/{uploaderUid}/{fileName} {
+      allow read: if request.auth != null && (request.auth.uid == creditorUid || request.auth.uid == debtorUid);
+      allow create: if request.auth != null
+        && request.auth.uid == uploaderUid
+        && (request.auth.uid == creditorUid || request.auth.uid == debtorUid)
+        && request.resource.size > 0
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+      allow update, delete: if false;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

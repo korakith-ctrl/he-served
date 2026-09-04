@@ -60,6 +60,11 @@ function isFoodProduct(item) {
   return /ขนมปัง|เบเกอรี่|อาหาร|toast|bread|bakery/i.test((item && item.category) || "");
 }
 
+function menuEarnsLoyaltyBeans(item) {
+  if (typeof (item && item.earnsLoyaltyBeans) === "boolean") return item.earnsLoyaltyBeans;
+  return !isFoodProduct(item) && item?.productType !== "pass";
+}
+
 function validOrderDraft(order) {
   return order &&
     typeof order.customerName === "string" && order.customerName.trim().length > 0 && order.customerName.length <= 120 &&
@@ -321,7 +326,7 @@ exports.createCoffeePassOrder = onCall({ region: REGION }, async (request) => {
     note: String(note || "").trim().slice(0, 1000),
     paymentMethod,
     pickupDate: now.slice(0, 10),
-    items: [{ menuId: "coffee_pass", name: pass.name, productType: "pass", unitPrice: pass.price, qty: 1, options: [] }],
+    items: [{ menuId: "coffee_pass", name: pass.name, productType: "pass", earnsLoyaltyBeans: false, unitPrice: pass.price, qty: 1, options: [] }],
     total: pass.price,
     coffeePassPurchase: pass,
     coffeePassServerCreated: true,
@@ -573,7 +578,7 @@ exports.redeemCoffeePass = onCall({ region: REGION }, async (request) => {
     note: String(note || "").trim().slice(0, 1000),
     paymentMethod: optionTotal > 0 ? paymentMethod : "coffee-pass",
     pickupDate,
-    items: [{ menuId, name: String(menu.name || "เครื่องดื่ม"), productType: "drink", unitPrice: optionTotal, originalUnitPrice: (Number(menu.priceStore) || 0) + optionTotal, qty: 1, options: safeOptions, promoKind: "coffee-pass-redemption", passId }],
+    items: [{ menuId, name: String(menu.name || "เครื่องดื่ม"), productType: "drink", earnsLoyaltyBeans: menuEarnsLoyaltyBeans(menu), unitPrice: optionTotal, originalUnitPrice: (Number(menu.priceStore) || 0) + optionTotal, qty: 1, options: safeOptions, promoKind: "coffee-pass-redemption", passId }],
     total: optionTotal,
     passRedemption: { passId, redemptionAttemptId, packageName: pass.packageName || "Coffee Pass", optionTotal },
     status: "pending",
@@ -1828,27 +1833,35 @@ exports.confirmDebtPayment = onCall(DEBT_CALL_OPTIONS, async (request) => {
 
   const now = new Date().toISOString();
   await paymentRef.transaction((current) => {
-    if (!current || current.status === "rejected" || current.status === "confirmed") return current;
-    if (current.status === "processing" && current.processedBy !== user.uid) return current;
-    return { ...current, status: "processing", processedBy: user.uid, updatedAt: now };
+    // RTDB can invoke a transaction with an empty local cache on a cold
+    // Functions instance. The payment was just read and authorized above, so
+    // use that snapshot for the first attempt instead of aborting it as absent.
+    const currentPayment = current || payment;
+    if (currentPayment.status === "rejected" || currentPayment.status === "confirmed") return currentPayment;
+    if (currentPayment.status === "processing" && currentPayment.processedBy !== user.uid) return currentPayment;
+    return { ...currentPayment, status: "processing", processedBy: user.uid, updatedAt: now };
   });
 
   let appliedAmount = 0;
   let allocations = {};
   const debtResult = await debtRef.transaction((current) => {
-    if (!current || current.creditorUid !== user.uid) return;
-    const appliedPayments = current.appliedPayments || {};
+    // As above, keep the transaction alive when its first local view is empty.
+    // The server will compare this snapshot and retry with newer data if the
+    // debt changed after the authorization read.
+    const currentDebt = current || debt;
+    if (currentDebt.creditorUid !== user.uid) return;
+    const appliedPayments = currentDebt.appliedPayments || {};
     if (appliedPayments[paymentId]) {
       appliedAmount = Number(appliedPayments[paymentId].amount) || 0;
       allocations = appliedPayments[paymentId].allocations || {};
-      return current;
+      return currentDebt;
     }
-    const outstanding = Math.max(0, Number(current.outstandingAmount) || 0);
+    const outstanding = Math.max(0, Number(currentDebt.outstandingAmount) || 0);
     appliedAmount = Math.min(outstanding, Number(payment.amount) || 0);
     const excessAmount = Math.max(0, Math.round((Number(payment.amount || 0) - appliedAmount) * 100) / 100);
     const nextOutstanding = Math.round((outstanding - appliedAmount) * 100) / 100;
-    let nextInstallments = current.installments || null;
-    let nextInstallmentPlan = current.installmentPlan || null;
+    let nextInstallments = currentDebt.installments || null;
+    let nextInstallmentPlan = currentDebt.installmentPlan || null;
     if (nextInstallments && nextInstallmentPlan) {
       nextInstallments = JSON.parse(JSON.stringify(nextInstallments));
       let unallocated = appliedAmount;
@@ -1877,19 +1890,19 @@ exports.confirmDebtPayment = onCall(DEBT_CALL_OPTIONS, async (request) => {
       };
     }
     return {
-      ...current,
+      ...currentDebt,
       outstandingAmount: nextOutstanding,
       status: nextOutstanding <= 0 ? "paid" : "active",
-      dueDate: nextInstallmentPlan?.nextInstallmentDueDate || current.dueDate,
+      dueDate: nextInstallmentPlan?.nextInstallmentDueDate || currentDebt.dueDate,
       ...(nextInstallments ? { installments: nextInstallments, installmentPlan: nextInstallmentPlan } : {}),
-      paidAt: nextOutstanding <= 0 ? now : current.paidAt || null,
+      paidAt: nextOutstanding <= 0 ? now : currentDebt.paidAt || null,
       updatedAt: now,
       appliedPayments: {
         ...appliedPayments,
         [paymentId]: { amount: appliedAmount, excessAmount, allocations, confirmedAt: now, confirmedBy: user.uid },
       },
-      ...(excessAmount > 0 && terms.overpaymentPolicy === "credit" ? { creditBalance: Math.round((Number(current.creditBalance || 0) + excessAmount) * 100) / 100 } : {}),
-      ...(excessAmount > 0 && terms.overpaymentPolicy === "refund" ? { refundDue: Math.round((Number(current.refundDue || 0) + excessAmount) * 100) / 100 } : {}),
+      ...(excessAmount > 0 && terms.overpaymentPolicy === "credit" ? { creditBalance: Math.round((Number(currentDebt.creditBalance || 0) + excessAmount) * 100) / 100 } : {}),
+      ...(excessAmount > 0 && terms.overpaymentPolicy === "refund" ? { refundDue: Math.round((Number(currentDebt.refundDue || 0) + excessAmount) * 100) / 100 } : {}),
     };
   });
   if (!debtResult.committed) {

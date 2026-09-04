@@ -4,6 +4,13 @@
       "$uid": {
         ".read": "auth != null && auth.uid === $uid",
         ".write": "auth != null && auth.uid === $uid",
+        "ingredients": {
+          "$index": {
+            "stockQty": {
+              ".validate": "newData.isNumber() && newData.val() >= 0"
+            }
+          }
+        },
         "menus": {
           ".read": "auth != null"
         },
@@ -64,6 +71,12 @@
       }
     },
     "auditLogs": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "inventoryMovements": {
       "$uid": {
         ".read": "auth != null && auth.uid === $uid",
         ".write": "auth != null && auth.uid === $uid"

@@ -3,11 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ZONE 2 - RESERVE BAR</title>
+    <title>He Served - Coffee Shop Admin</title>
     <meta name="theme-color" content="#0B446F" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="ZONE 2" />
+    <meta name="apple-mobile-web-app-title" content="He Served" />
     <meta property="og:title" content="ZONE 2 - RESERVE BAR" />
     <meta property="og:type" content="website" />
     <meta property="og:image" content="https://he-served-three.vercel.app/logo.png" />
@@ -15,14 +15,15 @@
     <meta name="twitter:card" content="summary" />
     <meta name="twitter:title" content="ZONE 2 - RESERVE BAR" />
     <meta name="twitter:image" content="https://he-served-three.vercel.app/logo.png" />
-    <link rel="icon" type="image/png" href="/logo-zone2.png" />
-    <link rel="apple-touch-icon" href="/logo-zone2.png" />
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="apple-touch-icon" href="/logo.png" />
     <script>
       (() => {
         const routeMatch = window.location.pathname.match(/^\/order\/([A-Za-z0-9_-]{1,128})\/?$/);
+        const isCustomerPath = /^\/order(?:\/|$)/.test(window.location.pathname);
         const manifest = document.createElement("link");
         manifest.rel = "manifest";
-        manifest.href = "/site.webmanifest";
+        manifest.href = isCustomerPath ? "/site.webmanifest" : "/admin.webmanifest";
         if (routeMatch) {
           const query = new URLSearchParams({ shopUid: routeMatch[1] });
           const eventId = new URLSearchParams(window.location.search).get("event");
@@ -30,6 +31,13 @@
           manifest.href = `/api/site-manifest?${query}`;
         }
         document.head.appendChild(manifest);
+
+        if (isCustomerPath) {
+          document.title = "ZONE 2 - RESERVE BAR";
+          document.querySelector('meta[name="apple-mobile-web-app-title"]').content = "ZONE 2";
+          document.querySelector('link[rel="icon"]').href = "/logo-zone2.png";
+          document.querySelector('link[rel="apple-touch-icon"]').href = "/logo-zone2.png";
+        }
       })();
     </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />

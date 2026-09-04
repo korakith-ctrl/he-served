@@ -23,7 +23,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSHealthShareUsageDescription</key>
-	<string>Recomp อ่านจำนวนก้าว การนอน น้ำหนัก องค์ประกอบร่างกาย และการออกกำลังกาย เพื่ออัปเดตแดชบอร์ด 16 สัปดาห์ของคุณ</string>
+	<string>Recomp อ่านจำนวนก้าว นาทีออกกำลัง การนอน น้ำหนัก องค์ประกอบร่างกาย ชีพจรขณะพัก และ Workout เพื่ออัปเดตแดชบอร์ด 16 สัปดาห์ของคุณ</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

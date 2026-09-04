@@ -13,6 +13,7 @@ final class HealthKitManager {
     private var quantityTypes: [HKQuantityTypeIdentifier: HKQuantityType] {
         Dictionary(uniqueKeysWithValues: [
             .stepCount, .bodyMass, .bodyFatPercentage, .leanBodyMass, .activeEnergyBurned,
+            .appleExerciseTime, .restingHeartRate,
         ].compactMap { identifier in
             HKObjectType.quantityType(forIdentifier: identifier).map { (identifier, $0) }
         })
@@ -42,6 +43,8 @@ final class HealthKitManager {
 
         async let steps = dailySums(identifier: .stepCount, unit: .count(), start: start, end: end)
         async let energy = dailySums(identifier: .activeEnergyBurned, unit: .kilocalorie(), start: start, end: end)
+        async let exercise = dailySums(identifier: .appleExerciseTime, unit: .minute(), start: start, end: end)
+        async let restingHeartRate = dailyLatest(identifier: .restingHeartRate, unit: HKUnit.count().unitDivided(by: .minute()), start: start, end: end)
         async let weights = dailyLatest(identifier: .bodyMass, unit: .gramUnit(with: .kilo), start: start, end: end)
         async let bodyFatFractions = dailyLatest(identifier: .bodyFatPercentage, unit: .percent(), start: start, end: end)
         async let leanMass = dailyLatest(identifier: .leanBodyMass, unit: .gramUnit(with: .kilo), start: start, end: end)
@@ -50,6 +53,8 @@ final class HealthKitManager {
 
         for (date, value) in try await steps { days[date]?.steps = value }
         for (date, value) in try await energy { days[date]?.activeEnergyKcal = value }
+        for (date, value) in try await exercise { days[date]?.exerciseMinutes = value }
+        for (date, value) in try await restingHeartRate { days[date]?.restingHeartRate = value }
         for (date, value) in try await weights { days[date]?.weightKg = value }
         for (date, value) in try await bodyFatFractions { days[date]?.bodyFatPercent = value * 100 }
         for (date, value) in try await leanMass { days[date]?.leanBodyMassKg = value }
