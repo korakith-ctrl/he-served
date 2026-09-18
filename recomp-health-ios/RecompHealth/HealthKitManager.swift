@@ -24,7 +24,7 @@ final class HealthKitManager {
 
     func requestAuthorization() async throws {
         guard HKHealthStore.isHealthDataAvailable() else { throw HealthError.unavailable }
-        var readTypes = Set<HKObjectType>(quantityTypes.values)
+        var readTypes = Set<HKObjectType>(quantityTypes.values.map { $0 as HKObjectType })
         if let sleepType { readTypes.insert(sleepType) }
         readTypes.insert(workoutType)
         try await store.requestAuthorization(toShare: [], read: readTypes)

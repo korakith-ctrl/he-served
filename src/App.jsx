@@ -9,6 +9,8 @@ import CustomerOrder from "./CustomerOrder.jsx";
 import LandingScreen, { LANDING_SCREEN_EXIT_MS, LANDING_SCREEN_MINIMUM_MS } from "./LandingScreen.jsx";
 import { resolveCustomerLaunch } from "./customerLaunch.js";
 import { loyaltyUnitsInOrder, menuEarnsLoyaltyBeans } from "./loyaltyEligibility.js";
+import { newPendingOrders } from "./orderNotifications.js";
+import { disableOrderPush, enableOrderPush, orderPushIsEnabled, syncOrderPushAccount } from "./orderPush.js";
 import {
   calcRecipeCost,
   describeInventoryIssue,
@@ -765,6 +767,7 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
   const [pendingTab, setPendingTab] = useState(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [toast, setToast] = useState(null);
+  const [orderNotificationsEnabled, setOrderNotificationsEnabledState] = useState(() => orderPushIsEnabled(uid));
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => typeof window !== "undefined" && window.matchMedia("(max-width: 1024px)").matches
   );
@@ -790,7 +793,7 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
     return () => mq.removeEventListener("change", onChange);
   }, []);
   const [lastUpdated, setLastUpdated] = useState(null);
-  const prevPendingCount = useRef(0);
+  const previousOrdersRef = useRef([]);
   const isFirstOrdersSnapshot = useRef(true);
   const autoRecordedRef = useRef(new Set());
   const loyaltyRepairAttemptedRef = useRef(new Set());
@@ -829,16 +832,40 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
       const val = snap.val() || {};
       const list = Object.entries(val).map(([id, o]) => ({ id, ...o }));
       list.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-      const pendingCount = list.filter((o) => o.status === "pending").length;
-      if (!isFirstOrdersSnapshot.current && pendingCount > prevPendingCount.current) {
+      const incomingOrders = isFirstOrdersSnapshot.current ? [] : newPendingOrders(previousOrdersRef.current, list);
+      if (incomingOrders.length > 0) {
         playOrderChime();
+        const firstOrder = incomingOrders[0];
+        const extraOrders = incomingOrders.length - 1;
+        showToast(`มีออเดอร์ใหม่ #${String(firstOrder.id).slice(-6).toUpperCase()}${extraOrders > 0 ? ` และอีก ${extraOrders} ออเดอร์` : ""}`);
       }
-      prevPendingCount.current = pendingCount;
       isFirstOrdersSnapshot.current = false;
+      previousOrdersRef.current = list;
       setOrders(list);
     });
     return () => unsub();
   }, [uid]);
+
+  useEffect(() => {
+    setOrderNotificationsEnabledState(orderPushIsEnabled(uid));
+    syncOrderPushAccount(uid).catch(() => {});
+  }, [uid]);
+
+  async function toggleOrderNotifications() {
+    try {
+      if (orderNotificationsEnabled) {
+        await disableOrderPush();
+        setOrderNotificationsEnabledState(false);
+        showToast("พักการแจ้งเตือนออเดอร์บนอุปกรณ์นี้แล้ว");
+      } else {
+        await enableOrderPush();
+        setOrderNotificationsEnabledState(true);
+        showToast("เปิด Push Notification สำหรับออเดอร์ใหม่แล้ว");
+      }
+    } catch (error) {
+      showToast(error.message || "ตั้งค่าการแจ้งเตือนไม่สำเร็จ");
+    }
+  }
 
   // เก็บลูกค้า/เมล็ดสะสมแยกโหนดจาก shops/{uid} เหมือน orders — เพราะการหมุนกงล้อและใช้สิทธิ์เกิดจากหน้าลูกค้า
   // (คนละ session กับแอดมิน) ถ้าฝากไว้ใน data ก้อนใหญ่ที่ set() ทับทั้งก้อนทุก 400ms จะโดนค่าเก่าทับหายได้
@@ -1956,6 +1983,15 @@ function ShopApp({ uid, user, theme, onToggleTheme, onReady }) {
               <h1 style={{ margin: "2px 0 0", fontFamily: "var(--f-display)", fontWeight: 600, fontSize: "clamp(19px, 5vw, 27px)", color: "var(--espresso-5)", whiteSpace: "nowrap" }}>{activeTabInfo?.label}</h1>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <button
+                className="theme-toggle"
+                onClick={toggleOrderNotifications}
+                title={orderNotificationsEnabled ? "พักการแจ้งเตือนออเดอร์บนอุปกรณ์นี้" : "เปิดการแจ้งเตือนออเดอร์ใหม่บนอุปกรณ์นี้"}
+                aria-label={orderNotificationsEnabled ? "พักการแจ้งเตือนออเดอร์" : "เปิดการแจ้งเตือนออเดอร์"}
+                aria-pressed={orderNotificationsEnabled}
+              >
+                <Icon name={orderNotificationsEnabled ? "bell-ringing" : "bell"} size={18} />
+              </button>
               <button className="theme-toggle" onClick={onToggleTheme} title={theme === "dark" ? "ใช้โหมดสว่าง" : "ใช้โหมดมืด"} aria-label={theme === "dark" ? "ใช้โหมดสว่าง" : "ใช้โหมดมืด"}>
                 <Icon name={theme === "dark" ? "sun" : "moon"} size={18} />
               </button>
@@ -4762,14 +4798,16 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
 
   function newMenu() {
     const defaultPackaging = (data.settings.defaultPackagingLines || []).map((l) => ({ ...l }));
-    setInspector({ mode: "add", tab: "overview", menu: { id: null, name: "", description: "", productType: "drink", earnsLoyaltyBeans: true, priceStore: 0, priceDelivery: 0, ingredients: defaultPackaging, optionGroupIds: [], available: true, category: categoryFilter !== "all" ? categoryFilter : "กาแฟ", imageUrl: "", recommended: false, ...normalizeMenuTag({}) } });
+    setInspector({ mode: "add", tab: "overview", menu: { id: null, name: "", description: "", kcal: "", productType: "drink", earnsLoyaltyBeans: true, priceStore: 0, priceDelivery: 0, ingredients: defaultPackaging, optionGroupIds: [], available: true, category: categoryFilter !== "all" ? categoryFilter : "กาแฟ", imageUrl: "", recommended: false, ...normalizeMenuTag({}) } });
   }
 
   function saveMenu(menu) {
     const now = new Date().toISOString();
     const requestedCategory = menu.category.trim() || "อื่นๆ";
     const canonicalCategory = categories.find((category)=>category.toLocaleLowerCase("th") === requestedCategory.toLocaleLowerCase("th")) || requestedCategory;
-    menu = { ...menu, name:menu.name.trim(), description: String(menu.description || "").trim(), productType: productTypeOf(menu), earnsLoyaltyBeans: menuEarnsLoyaltyBeans(menu), category: canonicalCategory, recommended: menu.recommended === true, ...normalizeMenuTag(menu) };
+    const kcalNumber = Number(menu.kcal);
+    const normalizedKcal = Number.isFinite(kcalNumber) && kcalNumber >= 0 ? Math.round(kcalNumber * 10) / 10 : null;
+    menu = { ...menu, name:menu.name.trim(), description: String(menu.description || "").trim(), kcal: normalizedKcal, productType: productTypeOf(menu), earnsLoyaltyBeans: menuEarnsLoyaltyBeans(menu), category: canonicalCategory, recommended: menu.recommended === true, ...normalizeMenuTag(menu) };
     updateData((next) => {
       if (menu.id) {
         const idx = next.menus.findIndex((m) => m.id === menu.id);
@@ -5206,7 +5244,7 @@ function MenusPanel({ data, ingredientsById, updateData, showToast }) {
 function MenuInspector({ mode, initial, initialTab, ingredients, ingredientsById, optionGroups, categories, platforms, overheadPerCup, onSave, onClose, onDelete }) {
   const [form, setForm] = useState({
     ...initial, optionGroupIds: initial.optionGroupIds || [], available: initial.available ?? true,
-    category: initial.category || "", description: initial.description || "", imageUrl: initial.imageUrl || "", productType: productTypeOf(initial),
+    category: initial.category || "", description: initial.description || "", kcal: initial.kcal ?? initial.calories ?? "", imageUrl: initial.imageUrl || "", productType: productTypeOf(initial),
     earnsLoyaltyBeans: menuEarnsLoyaltyBeans(initial), recommended: initial.recommended === true, ...normalizeMenuTag(initial),
   });
   const [tab, setTab] = useState(initialTab || "overview");
@@ -5369,6 +5407,11 @@ function MenuOverviewTab({ form, setForm, onProductTypeChange, categories, image
           style={{ ...field, height: "auto", minHeight: 82, padding: "10px 12px", resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }}
         />
         <div style={{ marginTop: 4, textAlign: "right", color: "#9C9690", fontSize: 10.5 }}>{form.description.length}/240</div>
+      </div>
+      <div>
+        <label style={lbl}>พลังงานพื้นฐาน (kcal) ต่อ {typeMeta.unit}</label>
+        <input className="mnu-field" style={field} type="number" min="0" step="0.1" value={form.kcal ?? ""} onChange={(e) => setForm({ ...form, kcal: e.target.value === "" ? "" : Number(e.target.value) })} placeholder="เช่น 120" />
+        <p style={{ fontSize: 11, color: "#9C9690", margin: "6px 0 0", lineHeight: 1.45 }}>แสดงให้ลูกค้าเห็นเป็นค่าพลังงานโดยประมาณ และยังไม่รวม kcal ที่เปลี่ยนตามตัวเลือก</p>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         <div>
@@ -9123,7 +9166,7 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
     const id = genId("choice");
     mutateGroups((groups) => {
       const g = groups.find((x) => x.id === groupId);
-      if (g) g.choices.unshift({ id, label: "", note: "", priceDelta: 0, ingredientId: null, qtyMode: "same", qtyValue: 100, qtyPercent: 100, isDefault: false, enabled: true, extraAdjustments: [] });
+      if (g) g.choices.unshift({ id, label: "", note: "", priceDelta: 0, kcalDelta: null, ingredientId: null, qtyMode: "same", qtyValue: 100, qtyPercent: 100, isDefault: false, enabled: true, extraAdjustments: [] });
     });
     setCollapsed((current) => ({ ...current, [groupId]: false }));
     setActiveGroupId(groupId);
@@ -9247,10 +9290,10 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
         }
         .optg-body { padding: 0 18px 18px; }
         @media (max-width: 760px) { .optg-body { padding:0 12px 12px; } }
-        .optg-row-head { display: grid; grid-template-columns: 1.1fr 1.2fr .65fr 1.2fr 70px 82px 78px; gap: 10px; padding: 0 10px; margin-bottom: 6px; }
+        .optg-row-head { display: grid; grid-template-columns: 1.1fr 1.2fr .65fr .55fr 1.2fr 70px 82px 78px; gap: 10px; padding: 0 10px; margin-bottom: 6px; }
         .optg-row-head span { font-size: 11px; font-weight: 700; color: ${OPTG.gray}; text-transform: uppercase; letter-spacing: .03em; }
         @media (max-width: 760px) { .optg-row-head { display: none; } }
-        .optg-choice-row { display: grid; grid-template-columns: 1.1fr 1.2fr .65fr 1.2fr 70px 82px 78px; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 12px; transition: background 150ms ease, opacity 150ms ease; }
+        .optg-choice-row { display: grid; grid-template-columns: 1.1fr 1.2fr .65fr .55fr 1.2fr 70px 82px 78px; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 12px; transition: background 150ms ease, opacity 150ms ease; }
         .optg-choice-row:hover { background: ${OPTG.warm}; }
         .optg-choice-row.disabled { opacity: .58; background: var(--cream-2); }
         .optg-choice-state { display:flex; align-items:center; justify-content:center; min-width:0; }
@@ -9333,7 +9376,7 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
                 {!isCollapsed && (
                   <div className="optg-body">
                     <div className="optg-row-head">
-                      <span>ชื่อตัวเลือก</span><span>คำอธิบาย</span><span>ราคาเพิ่ม</span><span>วัตถุดิบเชื่อมโยง</span><span>ค่าเริ่มต้น</span><span>เปิดใช้</span><span></span>
+          <span>ชื่อตัวเลือก</span><span>คำอธิบาย</span><span>ราคาเพิ่ม</span><span>kcal ±</span><span>วัตถุดิบเชื่อมโยง</span><span>ค่าเริ่มต้น</span><span>เปิดใช้</span><span></span>
                     </div>
                     {g.choices.map((c, choiceIndex) => (
                       <div key={c.id}>
@@ -9341,6 +9384,7 @@ function OptionGroupsPanel({ data, updateData, showToast }) {
                           <input ref={(element) => { inputRefs.current[`choice:${c.id}`] = element; }} className="optg-input" value={c.label} onChange={(e) => patchChoice(g.id, c.id, { label: e.target.value })} placeholder="เช่น หวานน้อย" aria-label={`ชื่อตัวเลือกในกลุ่ม ${g.name || "ที่สร้างใหม่"}`} title="แก้แล้วมีผลกับทุกเมนูที่ผูกกลุ่มนี้" />
                           <input className="optg-input" value={c.note} onChange={(e) => patchChoice(g.id, c.id, { note: e.target.value })} placeholder="คำอธิบาย (ถ้ามี)" />
                           <input className="optg-input" type="number" value={c.priceDelta} onChange={(e) => patchChoice(g.id, c.id, { priceDelta: Number(e.target.value) })} title="ราคาเพิ่ม (บาท)" />
+                          <input className="optg-input" type="number" step="0.1" value={c.kcalDelta ?? ""} onChange={(e) => patchChoice(g.id, c.id, { kcalDelta: e.target.value === "" ? null : Number(e.target.value) })} placeholder="เช่น +20" title="พลังงานที่เพิ่มหรือลดจากเมนูฐาน (kcal)" />
                           <div style={{ display: "flex", gap: 6, alignItems: "center", minWidth: 0 }}>
                             <select
                               className="optg-input"

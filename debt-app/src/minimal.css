@@ -1,0 +1,250 @@
+/* Clear Kan — warm paper, ink, and a single forest accent.
+   Loaded after the feature styles so layout and status semantics stay intact. */
+:root {
+  --paper: #faf9f6;
+  --surface: #ffffff;
+  --ink: #292d28;
+  --forest: #244b3e;
+  --muted: #70756c;
+  --line: #e2e4dc;
+  --cream: #f3f3ed;
+  --mint: #edf1e8;
+  --coral: #b66050;
+  --aurora-ink: var(--ink);
+  --aurora-muted: var(--muted);
+  --aurora-teal: var(--forest);
+  --aurora-teal-bright: #66816a;
+  --aurora-line: var(--line);
+  --aurora-surface: var(--surface);
+  --aurora-shadow: none;
+  color: var(--ink);
+  background: var(--paper);
+}
+body, .aurora-app, .auth-page, .app-loading { color: var(--ink); background: var(--paper); }
+body { -webkit-font-smoothing: antialiased; }
+::selection { color: var(--forest); background: #e0e8d7; }
+button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--forest); outline-offset: 4px; }
+input, select, textarea { color: var(--ink); border-color: var(--line); border-radius: 8px; }
+input:focus, select:focus, textarea:focus { border-color: #708776; box-shadow: 0 0 0 3px #244b3e0d; }
+.primary, .secondary, .google-button { border-radius: 8px; font-weight: 600; box-shadow: none; backdrop-filter: none; }
+.primary { color: #fff; background: var(--forest); }
+.primary:hover:not(:disabled) { background: #193c30; transform: none; }
+.secondary, .google-button { color: var(--ink); border-color: var(--line); background: #fff; }
+.secondary:hover:not(:disabled), .google-button:hover:not(:disabled) { color: var(--forest); border-color: #9fac99; background: #f4f6ef; }
+.eyebrow { color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .12em; }
+.brand { gap: 10px; color: var(--ink); font-size: 19px; font-weight: 650; line-height: 1.3; }
+.brand-caption { display: block; margin-top: 4px; color: var(--muted); font-size: 8px; font-weight: 500; letter-spacing: .22em; }
+.brand-mark, .brand .brand-mark, .aurora-app .brand-mark { width: 38px; height: 38px; box-shadow: none; }
+.aurora-app .brand:hover .brand-mark { transform: none; filter: none; }
+
+/* Entry: a quiet editorial spread, with a simple form. */
+.auth-page { grid-template-columns: 1.05fr 1fr; }
+.auth-story { min-height: 100dvh; padding: 110px clamp(40px, 7vw, 110px); color: var(--ink); border-right: 1px solid var(--line); background: #f0f1e9; }
+.auth-story::before, .auth-story::after { display: none; }
+.auth-story .brand { top: 46px; left: clamp(40px, 7vw, 110px); }
+.auth-story .eyebrow { margin-top: 45px; margin-bottom: 26px; color: #646e5c; font-size: 9px; letter-spacing: .16em; }
+.auth-story h1 { font-size: clamp(38px, 4.4vw, 64px); font-weight: 500; line-height: 1.4; letter-spacing: -.045em; }
+.auth-story h1 em { color: #728268; font-style: normal; font-weight: 400; }
+.story-copy { max-width: 330px; margin: 24px 0 34px; color: #626c5d; font-size: 14px; line-height: 1.9; }
+.story-card { max-width: 380px; padding: 22px 0 0; gap: 12px; border: 0; border-top: 1px solid #d5d9cc; border-radius: 0; background: none; backdrop-filter: none; }
+.story-icon { width: 28px; height: 28px; color: var(--forest); border: 1px solid #b9c4b1; background: none; font-size: 13px; font-weight: 500; }
+.story-card strong { font-size: 12px; font-weight: 500; }
+.story-card small { color: #697260; font-size: 11px; }
+.story-footer { position: absolute; bottom: 36px; color: #747b6b; font-size: 10px; letter-spacing: .03em; }
+.auth-panel { padding: 56px 32px; }
+.auth-card { width: min(370px, 100%); padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
+.auth-card h2 { margin: 10px 0 8px; font-size: 32px; font-weight: 500; letter-spacing: -.03em; }
+.auth-card > .muted { margin-bottom: 32px; font-size: 13px; }
+.auth-card label { margin-top: 20px; color: #51584c; font-size: 12px; font-weight: 500; }
+.auth-card input { min-height: 52px; font-size: 16px; }
+.auth-card .primary { min-height: 52px; margin-top: 26px; }
+.auth-card .text-button, .switch-auth { min-height: 44px; margin-top: 5px; color: var(--forest); }
+.or { margin: 16px 0; color: var(--muted); }
+.google-button { min-height: 50px; }
+
+/* Global navigation and shared overview. */
+.aurora-app::before, .aurora-dashboard-hero::after { display: none; }
+.aurora-app .topbar { height: 80px; padding-inline: max(28px, calc((100vw - 1120px) / 2)); border-color: var(--line); background: var(--paper); backdrop-filter: none; }
+.aurora-app .user-copy span { color: var(--muted); }
+.aurora-app .avatar { color: var(--forest); background: #e7ecdf; box-shadow: none; }
+.aurora-app .notification-button, .aurora-app .logout { min-height: 40px; color: #5b6557; border-color: var(--line); background: transparent; }
+.aurora-app .notification-button i { background: var(--coral); }
+.workspace-switch { width: min(1120px, calc(100% - 56px)); gap: 32px; margin-top: 16px; padding: 0; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: none; box-shadow: none; backdrop-filter: none; }
+.workspace-switch > button { flex: 0 1 auto; gap: 8px; min-height: 62px; padding: 12px 2px; border-bottom: 2px solid transparent; border-radius: 0; }
+.workspace-switch > button > span, .workspace-switch > button.active > span { width: 24px; height: 24px; color: inherit; border-radius: 0; background: none; }
+.workspace-switch > button.active { color: var(--forest); border-bottom-color: var(--forest); background: none; box-shadow: none; }
+.workspace-switch strong, .workspace-switch > button.active strong { color: inherit; font-size: 13px; font-weight: 600; }
+.workspace-switch small { display: none; }
+.aurora-app .dashboard, .aurora-app .personal-dashboard { width: min(1120px, calc(100% - 56px)); padding-top: 38px; }
+.aurora-dashboard-hero { grid-template-columns: 1fr 1fr; min-height: 255px; gap: 48px; padding: 12px 0 36px; overflow: visible; color: var(--ink); border: 0; border-radius: 0; background: none; box-shadow: none; }
+.hero-copy .eyebrow { margin-bottom: 16px; color: var(--muted); font-weight: 500; }
+.hero-copy h1 { font-size: clamp(34px, 4vw, 50px); font-weight: 500; line-height: 1.35; letter-spacing: -.04em; }
+.hero-copy h1 em { color: #79846e; font-weight: 400; }
+.hero-copy > p:not(.eyebrow) { margin: 14px 0 22px; color: var(--muted); font-size: 13px; }
+.hero-copy .create-button { min-height: 46px; padding: 12px 18px; color: #fff; background: var(--forest); box-shadow: none; }
+.net-spotlight { width: 100%; max-width: 420px; padding: 36px; color: var(--forest); border: 1px solid #e2e5d8; border-radius: 12px; background: #eef1e7; backdrop-filter: none; box-shadow: none; }
+.net-spotlight small { color: #66745d; font-size: 12px; font-weight: 500; }
+.net-spotlight strong { margin-top: 12px; font-size: clamp(30px, 3.7vw, 48px); font-weight: 500; letter-spacing: -.05em; overflow-wrap: anywhere; }
+.net-spotlight.positive strong { color: var(--forest); }
+.net-spotlight.negative strong { color: #984d40; }
+.net-spotlight p { margin-top: 16px; padding-top: 16px; color: #65705e; border-top: 1px solid #dbe0d0; font-size: 11px; }
+.summary-dock { width: 100%; grid-template-columns: 1fr 1fr 1fr; gap: 0; margin: 0 0 36px; padding: 24px 0; border-block: 1px solid var(--line); }
+.summary-chip { min-height: 76px; gap: 12px; padding: 0 26px; border: 0; border-left: 1px solid var(--line); border-radius: 0; background: none; box-shadow: none; backdrop-filter: none; }
+.summary-chip:first-child { padding-left: 0; border-left: 0; }
+.summary-chip .summary-icon { width: 34px; height: 34px; border-radius: 50%; }
+.summary-chip.receive .summary-icon { color: var(--forest); background: #e9eee2; }
+.summary-chip.pay .summary-icon { color: #a76151; background: #f3ebe3; }
+.summary-chip.active-count .summary-icon { color: #777c6e; background: #eeeee7; }
+.summary-chip small { color: #636c5e; font-size: 12px; font-weight: 500; }
+.summary-chip strong { margin: 5px 0; font-size: clamp(20px, 2.4vw, 30px); font-weight: 500; overflow-wrap: anywhere; }
+.summary-chip p { color: var(--muted); font-size: 11px; white-space: normal; }
+
+/* Lists and controls use lines instead of floating cards. */
+.list-section { margin-top: 36px; }
+.list-heading h2, .cashflow-hub-head h2, .cashflow-heading h2 { color: var(--ink); font-size: 23px; font-weight: 500; letter-spacing: -.02em; }
+.tabs, .cashflow-hub-head > nav, .cashflow-subtabs { border: 1px solid var(--line); border-radius: 8px; background: #f0f1ea; backdrop-filter: none; }
+.tabs button, .cashflow-hub-head > nav button, .cashflow-subtabs button { min-height: 40px; border-radius: 5px; font-weight: 500; }
+.tabs button.active, .cashflow-hub-head > nav button.active, .cashflow-subtabs button.active { color: var(--forest); background: #fff; box-shadow: 0 1px 3px #292d2810; }
+.debt-filter-bar { gap: 16px; padding: 0 0 16px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: none; box-shadow: none; backdrop-filter: none; }
+.debt-filter-chips button { min-height: 40px; color: #626c5e; border-color: var(--line); background: none; font-size: 11px; font-weight: 500; }
+.debt-filter-chips button.active { color: var(--forest); border-color: #c9d3bd; background: #eaf0e1; box-shadow: none; }
+.debt-search, .debt-sort { border-color: var(--line); border-radius: 8px; }
+.debt-search input, .debt-sort select { font-size: 12px; }
+.debt-result-summary { margin: 12px 0; font-size: 11px; }
+.debt-list { gap: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.debt-list > .compact-debt-card { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: #fff; box-shadow: none; backdrop-filter: none; }
+.debt-list > .compact-debt-card:last-child { border-bottom: 0; }
+.compact-debt-card::before { display: none; }
+.aurora-app .compact-debt-card:hover { transform: none; border-color: var(--line); background: #f7f8f2; box-shadow: none; }
+.empty-state { border: 0; border-radius: 12px; background: transparent; }
+.empty-illustration { color: var(--forest); border-color: #ced6c3; }
+.empty-illustration::before, .empty-illustration::after { display: none; }
+.empty-state h3 { font-size: 17px; font-weight: 500; }
+.aurora-app .cashflow-card.cashflow-primary { border-radius: 12px; background: #fff; box-shadow: none; backdrop-filter: none; }
+.aurora-app .cashflow-card.cashflow-primary:hover { box-shadow: none; }
+.aurora-app .cashflow-card.cashflow-primary .cashflow-total > strong { font-weight: 500; }
+.cashflow-other-list > button { border-radius: 8px; }
+.countdown-orb { --ring: #718763; }
+.countdown-orb.overdue, .countdown-orb.today { animation: none; }
+
+/* Personal finance follows the same palette, with one dark balance panel. */
+.aurora-app .personal-dashboard { --finance-ink: var(--ink); --finance-muted: var(--muted); --finance-line: var(--line); --finance-green: var(--forest); }
+.aurora-app .personal-head h1 { color: var(--ink); font-weight: 500; }
+.aurora-app .personal-head > div:first-child > p:last-child { color: var(--muted); }
+.aurora-app .month-picker { padding: 5px; border-color: var(--line); border-radius: 8px; background: #fff; box-shadow: none; }
+.aurora-app .month-picker button { border-radius: 5px; background: #f0f2e9; }
+.aurora-app .personal-tabs { padding: 4px; border-color: var(--line); border-radius: 8px; background: #eeefe8; }
+.aurora-app .personal-tabs button { min-height: 44px; color: var(--muted); border-radius: 5px; font-weight: 500; }
+.aurora-app .personal-tabs button.active { color: var(--forest); background: transparent; box-shadow: none; }
+.personal-tab-active { border-radius: 5px; box-shadow: 0 1px 3px #292d2810; }
+.aurora-app .personal-tabs i { color: var(--forest); background: #dfe7d3; }
+.aurora-app .personal-hero, .aurora-app .salary-cycle-debt-card, .aurora-app .debt-portfolio-head { border-radius: 12px; background: #294b3e; box-shadow: none; }
+.aurora-app .personal-hero.negative { background: #644a40; }
+.personal-hero::before, .personal-hero::after, .aurora-app .personal-kpis article::after { display: none; }
+.aurora-app .personal-hero-copy > .amount-highlight, .aurora-app .debt-portfolio-head > div > .amount-highlight { font-weight: 500; text-shadow: none; overflow-wrap: anywhere; }
+.aurora-app .flow-visual { border-radius: 8px; background: #ffffff06; }
+.aurora-app .flow-visual > div > strong { font-weight: 500; }
+.finance-status { border-radius: 6px; background: transparent; }
+.finance-status b { font-weight: 500; }
+.aurora-app .personal-kpis article, .aurora-app .personal-card, .aurora-app .quick-actions button, .aurora-app .debt-category { border-color: var(--line); border-radius: 10px; box-shadow: none; }
+.aurora-app .personal-kpis article > div > strong { color: var(--ink); font-weight: 500; }
+.aurora-app .personal-section-head h2 { color: var(--ink); font-weight: 500; }
+.aurora-app .personal-kpis small, .aurora-app .personal-kpis p, .aurora-app .personal-section-head .eyebrow { color: var(--muted); }
+.aurora-app .quick-actions span, .section-icon { color: var(--forest); background: #edf1e6; }
+.aurora-app .quick-actions strong, .aurora-app .personal-entry-row > div > strong { font-weight: 500; }
+.aurora-app .debt-category-head > div:nth-child(2) strong { font-weight: 500; }
+.debt-category-items { border-color: var(--line); background: #f5f6ef; }
+.due-bar-row > i > b { background: #b7846b; }
+
+/* Dialogs, notifications, and splash. Semantic warning colors remain local. */
+.modal-backdrop, .aurora-app .modal-backdrop { background: #252c2659; backdrop-filter: blur(5px); }
+.modal-card, .aurora-app .modal-card { color: var(--ink); border-color: var(--line); border-radius: 16px; background: var(--paper); box-shadow: 0 24px 80px #242c2626; }
+.modal-header h2, .modal-card.compact h2 { font-weight: 500; }
+.detail-hero { border-radius: 10px; background: var(--forest); }
+.detail-tabs { border-color: var(--line); border-radius: 8px; background: #f0f2e9; }
+.detail-tabs button.active { color: var(--forest); background: #fff; box-shadow: none; }
+.aurora-app .notification-panel { border-color: var(--line); border-radius: 12px; background: var(--paper); box-shadow: 0 16px 48px #242c261f; }
+.notification-list > button.unread { background: #edf2e5; }
+.splash-ambient, .splash-logo-scene > i, .splash-logo-scene::before { display: none; }
+.app-loading .splash-mark { box-shadow: none; animation: none; }
+.splash-logo-scene { width: 90px; height: 90px; margin-bottom: 20px; }
+.splash-wordmark strong { color: var(--ink); font-weight: 500; }
+.splash-progress { height: 3px; background: #e1e5d9; }
+.splash-progress > i { background: #728364; box-shadow: none; }
+.aurora-app .payment-plan-card, .aurora-app .direct-debtor-fields { border-color: var(--line); border-radius: 10px; background: #f1f4ec; }
+.aurora-app .delivery-method-toggle > button { border-color: var(--line); border-radius: 8px; }
+.aurora-app .delivery-method-toggle > button.active { border-color: #829473; background: #edf2e6; box-shadow: inset 0 0 0 1px #829473; }
+.aurora-app .success-orb { background: var(--forest); box-shadow: none; }
+.aurora-app .success-modal::before { display: none; }
+
+@media (max-width: 900px) {
+  .auth-page { grid-template-columns: 1fr 1fr; }
+  .auth-story { padding-inline: 36px; }
+  .auth-story .brand { left: 36px; }
+  .auth-story h1 { font-size: 40px; }
+  .summary-chip { gap: 8px; padding-inline: 16px; }
+  .summary-chip strong { font-size: 23px; }
+}
+@media (max-width: 820px) {
+  .auth-page { grid-template-columns: 1fr; }
+  .auth-story { display: none; }
+  .auth-panel { min-height: 100dvh; }
+}
+@media (max-width: 760px) {
+  .auth-page { grid-template-columns: 1fr; }
+  .auth-story { display: none; }
+  .auth-panel { min-height: 100dvh; padding: 40px 28px; }
+  .mobile-brand { display: flex; margin-bottom: 50px; }
+  .aurora-app .topbar { height: 70px; padding-inline: 20px; }
+  .brand { font-size: 17px; }
+  .aurora-app .topbar .brand > span:last-child { display: block; }
+  .brand-mark, .aurora-app .brand-mark { width: 34px; height: 34px; }
+  .workspace-switch { width: calc(100% - 40px); gap: 26px; margin-top: 8px; }
+  .workspace-switch > button { min-height: 56px; }
+  .workspace-switch strong { font-size: 12px; }
+  .aurora-app .dashboard, .aurora-app .personal-dashboard { width: calc(100% - 40px); padding-top: 28px; }
+  .aurora-dashboard-hero { grid-template-columns: 1fr; gap: 24px; padding: 0 0 26px; }
+  .hero-copy h1 { font-size: 36px; }
+  .hero-copy .eyebrow { margin-bottom: 12px; }
+  .hero-copy > p:not(.eyebrow) { margin: 12px 0 18px; font-size: 12px; }
+  .net-spotlight { max-width: none; padding: 22px 24px; }
+  .net-spotlight strong { font-size: clamp(30px, 7.5vw, 40px); }
+  .net-spotlight p { margin-top: 12px; padding-top: 12px; }
+  .summary-dock { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); width: 100%; gap: 18px 0; margin: 0 0 28px; padding: 20px 0; overflow: visible; }
+  .summary-chip, .summary-chip.active-count { flex: initial; min-width: 0; min-height: 0; padding: 0 0 0 16px; }
+  .summary-chip:first-child { padding-left: 0; }
+  .summary-chip .summary-icon { width: 28px; height: 28px; }
+  .summary-chip .summary-icon .ui-icon { width: 17px; }
+  .summary-chip strong { font-size: clamp(17px, 4.8vw, 24px); }
+  .summary-chip small, .summary-chip p { font-size: 10px; }
+  .summary-chip.active-count { grid-column: 1 / -1; padding: 14px 0 0; border: 0; border-top: 1px solid var(--line); }
+  .summary-chip.active-count > div { display: flex; flex: 1; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .summary-chip.active-count strong { order: -1; margin: 0; font-size: 20px; }
+  .summary-chip.active-count p { margin-left: auto; }
+  .list-section { margin-top: 30px; }
+  .list-heading { align-items: stretch; gap: 16px; }
+  .list-heading h2 { font-size: 22px; }
+  .tabs { display: flex; }
+  .tabs button { flex: 1; padding-inline: 10px; }
+  .debt-filter-bar { margin-inline: 0; padding: 0 0 16px; border-radius: 0; }
+  .debt-filter-chips { margin: 0; padding: 0; }
+  .debt-search input, .debt-sort select { font-size: 16px; }
+  .debt-sort { padding-block: 2px; }
+  .aurora-app .personal-hero, .aurora-app .salary-cycle-debt-card { padding: 24px; }
+  .modal-backdrop, .aurora-app .modal-backdrop { padding: 0; }
+  .modal-card, .aurora-app .modal-card { max-height: 94dvh; border-radius: 16px 16px 0 0; }
+  .aurora-app .detail-card .modal-header { background: var(--paper); }
+}
+@media (max-width: 380px) {
+  .aurora-app .topbar { padding-inline: 16px; }
+  .aurora-app .dashboard, .aurora-app .personal-dashboard, .workspace-switch { width: calc(100% - 32px); }
+  .workspace-switch { gap: 16px; }
+  .workspace-switch > button { gap: 5px; }
+  .summary-chip { gap: 6px; }
+  .summary-chip .summary-icon { width: 22px; height: 22px; }
+  .summary-chip strong { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}

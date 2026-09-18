@@ -16,6 +16,14 @@ export const mean = (items, key) => {
 
 export const percent = (value, target) => Math.min(100, Math.max(0, numeric(value) / Math.max(1, numeric(target, 1)) * 100));
 
+export function calorieTargetStatus(value, target) {
+  const calories = numeric(value, NaN);
+  if (!Number.isFinite(calories)) return { onTarget: false, label: "ยังไม่บันทึก", percentage: null };
+  const ratio = calories / Math.max(1, numeric(target, 1));
+  return { onTarget: ratio >= .9 && ratio <= 1.1, percentage: Math.round(ratio * 100),
+    label: calories > target ? `เกินเป้า ${Math.round(calories - target).toLocaleString()} kcal` : `เหลือ ${Math.round(target - calories).toLocaleString()} kcal` };
+}
+
 export function bangkokToday(date = new Date()) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
 }
@@ -76,7 +84,7 @@ export function rollingWeight(logs) {
 const measured = logs => logs.filter(log => Number.isFinite(numeric(log.weight, NaN)));
 
 export function weightStats(logs, profile, anchorDate = bangkokToday()) {
-  const weighted = measured(logs).sort((a, b) => a.date.localeCompare(b.date));
+  const weighted = measured(logs).filter(log => log.date <= anchorDate).sort((a, b) => a.date.localeCompare(b.date));
   const latest = weighted.at(-1) || { weight: profile.startWeight, date: CHALLENGE_START };
   const current7 = measured(calendarWindow(logs, anchorDate, 7));
   const previous7 = measured(calendarWindow(logs, anchorDate, 7, 7));
@@ -104,18 +112,18 @@ export function adherenceSummary(logs, profile, anchorDate, workouts = [], healt
   const proteinOnTarget = protein.filter(log => numeric(log.protein) >= profile.proteinMin).length;
   const validDates = new Set(week.map(log => log.date));
   const workoutDates = new Set([
-    ...week.filter(log => log.workout).map(log => log.date),
+    ...week.filter(log => log.workout && log.sources?.workout !== "appleHealth").map(log => log.date),
     ...workouts.filter(item => validDates.has(item.date)).map(item => item.date),
-    ...healthWorkouts.filter(item => validDates.has(String(item.startAt || "").slice(0, 10))).map(item => String(item.startAt).slice(0, 10)),
+    ...healthWorkouts.filter(item => /strength|resistance/i.test(item.activityType || item.type || "") && Number.isFinite(Date.parse(item.startAt)))
+      .map(item => bangkokToday(new Date(item.startAt))).filter(date => validDates.has(date)),
   ]);
   const manualZone2 = week.reduce((sum, log) => sum + numeric(log.zone2Minutes), 0);
-  const appleExercise = week.reduce((sum, log) => sum + numeric(log.exerciseMinutes), 0);
   return {
     days: week, trackedDays: active.length, excludedDays: week.filter(log => log.sickDay || log.vacationMode).length,
     nutritionDays: nutrition.length, caloriesOnTarget, calorieAdherence: nutrition.length ? caloriesOnTarget / nutrition.length : null, averageCalories: mean(nutrition, "calories"),
     proteinDays: protein.length, proteinOnTarget, proteinAdherence: protein.length ? proteinOnTarget / protein.length : null, averageProtein: mean(protein, "protein"),
     averageSteps: mean(steps, "steps"), averageSleep: mean(sleep, "sleep"), workoutSessions: workoutDates.size,
-    exerciseMinutes: Math.max(manualZone2, appleExercise), zone2Minutes: manualZone2,
+    exerciseMinutes: week.reduce((sum, log) => sum + Math.max(numeric(log.zone2Minutes), numeric(log.exerciseMinutes)), 0), zone2Minutes: manualZone2,
     fiberAverage: mean(active.filter(log => log.fiber != null), "fiber"), produceAverage: mean(active.filter(log => log.produceServings != null), "produceServings"),
   };
 }

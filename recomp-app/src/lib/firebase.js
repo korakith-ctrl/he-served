@@ -1,7 +1,8 @@
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { GoogleAuthProvider, getAuth, onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
-import { get, getDatabase, onValue, ref, runTransaction, set } from "firebase/database";
+import { get, getDatabase, onValue, ref, remove, runTransaction, set } from "firebase/database";
 import { getFunctions, httpsCallable } from "firebase/functions";
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "firebase/app-check";
 import { initialStore } from "./store.js";
 
 const firebaseConfig = {
@@ -17,9 +18,14 @@ const firebaseConfig = {
 
 const required = ["apiKey", "authDomain", "databaseURL", "projectId", "appId"];
 export const firebaseConfigured = required.every(key => Boolean(firebaseConfig[key]));
-const app = firebaseConfigured ? (getApps().length ? getApp() : initializeApp(firebaseConfig)) : null;
+export const firebaseApp = firebaseConfigured ? (getApps().length ? getApp() : initializeApp(firebaseConfig)) : null;
+const app = firebaseApp;
 export const firebaseAuth = app ? getAuth(app) : null;
 export const realtimeDb = app ? getDatabase(app) : null;
+const appCheckSiteKey = import.meta.env.VITE_FIREBASE_APPCHECK_SITE_KEY;
+// Firebase AI Logic is App Check-enforced. Its web key is public by design and
+// kept in Vercel environment configuration so each deployment can opt in.
+if (app && appCheckSiteKey) initializeAppCheck(app, { provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey), isTokenAutoRefreshEnabled: true });
 const firebaseFunctions = app ? getFunctions(app, "asia-southeast1") : null;
 export const CHALLENGE_ID = "16-week-2026";
 const challengePath = `recompChallenges/${CHALLENGE_ID}`;
@@ -115,6 +121,24 @@ export async function signInFirebase() {
 
 export const signOutFirebase = () => firebaseAuth ? signOut(firebaseAuth) : Promise.resolve();
 
+export async function estimateFoodPhoto(image) {
+  if (!firebaseFunctions || !firebaseAuth?.currentUser) throw new Error("กรุณาเข้าสู่ระบบสมาชิกใน Sync & reminders ก่อนประเมินรูปอาหาร");
+  const result = await httpsCallable(firebaseFunctions, "estimateRecompFoodPhoto", { timeout: 65000 })(image);
+  return result.data;
+}
+
+export async function estimateFoodText(description) {
+  if (!firebaseFunctions || !firebaseAuth?.currentUser) throw new Error("กรุณาเข้าสู่ระบบสมาชิกใน Sync & reminders ก่อนประเมินอาหาร");
+  const result = await httpsCallable(firebaseFunctions, "estimateRecompFoodPhoto", { timeout: 65000 })({ description });
+  return result.data;
+}
+
+export async function parseDailyLogText(description) {
+  if (!firebaseFunctions || !firebaseAuth?.currentUser) throw new Error("กรุณาเข้าสู่ระบบสมาชิกก่อนบันทึกด้วย AI");
+  const result = await httpsCallable(firebaseFunctions, "parseRecompDailyLog", { timeout: 65000 })({ description });
+  return result.data;
+}
+
 export async function createAppleHealthPairing() {
   if (!firebaseFunctions || !firebaseAuth?.currentUser) throw new Error("กรุณาเข้าสู่ระบบสมาชิกก่อน");
   const result = await httpsCallable(firebaseFunctions, "createAppleHealthPairingToken")({});
@@ -124,6 +148,18 @@ export async function createAppleHealthPairing() {
 export async function revokeAppleHealthPairing() {
   if (!firebaseFunctions || !firebaseAuth?.currentUser) throw new Error("กรุณาเข้าสู่ระบบสมาชิกก่อน");
   const result = await httpsCallable(firebaseFunctions, "revokeAppleHealthPairing")({});
+  return result.data;
+}
+
+export async function createRecompNativePairing() {
+  if (!firebaseFunctions || !firebaseAuth?.currentUser) throw new Error("กรุณาเข้าสู่ระบบสมาชิกก่อน");
+  const result = await httpsCallable(firebaseFunctions, "createRecompNativePairingToken")({});
+  return result.data;
+}
+
+export async function revokeRecompNativePairing() {
+  if (!firebaseFunctions || !firebaseAuth?.currentUser) throw new Error("กรุณาเข้าสู่ระบบสมาชิกก่อน");
+  const result = await httpsCallable(firebaseFunctions, "revokeRecompNativePairing")({});
   return result.data;
 }
 
@@ -150,6 +186,11 @@ export async function connectRealtime(user, localStore, { onStore, onState }) {
 export function writeRealtimeLog(profileId, log) {
   if (!realtimeDb || !firebaseAuth?.currentUser) return Promise.resolve(false);
   return set(ref(realtimeDb, `${dataPath}/logs/${profileId}/${log.date}`), clean(log)).then(() => true);
+}
+
+export function deleteRealtimeLog(profileId, date) {
+  if (!realtimeDb || !firebaseAuth?.currentUser) return Promise.resolve(false);
+  return remove(ref(realtimeDb, `${dataPath}/logs/${profileId}/${date}`)).then(() => true);
 }
 
 export function writeRealtimeWorkout(profileId, workout) {

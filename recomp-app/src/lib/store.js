@@ -50,12 +50,16 @@ export function saveStore(state) {
 }
 
 export function cleanLogInput(form) {
-  const numericFields = ["weight", "calories", "protein", "carbs", "fat", "fiber", "produceServings", "water", "steps", "zone2Minutes", "waist", "bodyFat", "muscle", "visceral", "hunger", "energy"];
-  const output = { date: form.date, mood: form.mood || null, notes: form.notes?.trim() || null, workout: Boolean(form.workout), restDay: Boolean(form.restDay), sickDay: Boolean(form.sickDay), vacationMode: Boolean(form.vacationMode) };
+  const numericFields = ["weight", "calories", "protein", "carbs", "fat", "fiber", "produceServings", "water", "steps", "zone2Minutes", "exerciseMinutes", "waist", "bodyFat", "muscle", "visceral", "hunger", "energy"];
+  const output = { date: form.date, mood: form.mood || null, notes: form.notes?.trim() || null, exerciseDescription: form.exerciseDescription?.trim() || null, workout: Boolean(form.workout), restDay: Boolean(form.restDay), sickDay: Boolean(form.sickDay), vacationMode: Boolean(form.vacationMode) };
   numericFields.forEach(key => {
+    if (Object.hasOwn(form, key) && (form[key] === "" || form[key] == null)) output[key] = null;
     if (form[key] !== "" && form[key] !== null && form[key] !== undefined && Number.isFinite(Number(form[key]))) output[key] = Number(form[key]);
   });
-  if (form.sleepHours !== "" || form.sleepMinutes !== "") output.sleep = (Number(form.sleepHours) || 0) * 60 + (Number(form.sleepMinutes) || 0);
+  if (Object.hasOwn(form, "sleepHours") || Object.hasOwn(form, "sleepMinutes")) {
+    output.sleep = [form.sleepHours, form.sleepMinutes].every(value => value === "" || value == null)
+      ? null : (Number(form.sleepHours) || 0) * 60 + (Number(form.sleepMinutes) || 0);
+  }
   const meals = Object.fromEntries(Object.entries(form.meals || {}).map(([key, meal]) => [key, {
     calories: Number(meal.calories) || 0,
     protein: Number(meal.protein) || 0,
@@ -65,7 +69,7 @@ export function cleanLogInput(form) {
     produceServings: Number(meal.produceServings) || 0,
     items: Array.isArray(meal.items) ? meal.items : [],
   }]).filter(([, meal]) => meal.calories || meal.protein || meal.carbs || meal.fat || meal.fiber || meal.produceServings || meal.items.length));
-  if (Object.keys(meals).length) output.meals = meals;
+  if (Object.hasOwn(form, "meals")) output.meals = Object.keys(meals).length ? meals : null;
   return output;
 }
 
@@ -73,10 +77,22 @@ export function upsertProfileLog(state, profileId, input) {
   const previous = state.logs[profileId] || [];
   const existing = previous.find(log => log.date === input.date) || {};
   const merged = { ...existing, ...input, id: existing.id || `${profileId}-${input.date}`, profileId, createdAt: existing.createdAt, updatedAt: new Date().toISOString() };
+  if (existing.sources) {
+    merged.sources = { ...existing.sources };
+    for (const field of Object.keys(existing.sources)) {
+      if (Object.hasOwn(input, field) && input[field] !== existing[field]) merged.sources[field] = "manual";
+    }
+  }
   return {
     ...state,
     logs: { ...state.logs, [profileId]: [...previous.filter(log => log.date !== input.date), merged].sort((a, b) => a.date.localeCompare(b.date)) },
   };
+}
+
+export function restoreProfileLog(logs, date, previous = null) {
+  const restored = (logs || []).filter(log => log.date !== date);
+  if (previous) restored.push(previous);
+  return restored.sort((a, b) => a.date.localeCompare(b.date));
 }
 
 export function downloadFile(name, content, type) {
@@ -90,7 +106,7 @@ export function downloadFile(name, content, type) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-const CSV_FIELDS = ["profileId", "date", "weight", "calories", "protein", "carbs", "fat", "fiber", "produceServings", "water", "steps", "zone2Minutes", "exerciseMinutes", "restingHeartRate", "sleep", "waist", "bodyFat", "muscle", "visceral", "mood", "hunger", "energy", "workout", "restDay", "sickDay", "vacationMode", "notes"];
+const CSV_FIELDS = ["profileId", "date", "weight", "calories", "protein", "carbs", "fat", "fiber", "produceServings", "water", "steps", "zone2Minutes", "exerciseMinutes", "exerciseDescription", "restingHeartRate", "sleep", "waist", "bodyFat", "muscle", "visceral", "mood", "hunger", "energy", "workout", "restDay", "sickDay", "vacationMode", "notes"];
 
 const csvCell = value => `"${String(value ?? "").replaceAll('"', '""')}"`;
 
@@ -99,32 +115,48 @@ export function exportCsv(logsByProfile) {
   return [CSV_FIELDS.join(","), ...rows.map(row => CSV_FIELDS.map(field => csvCell(row[field])).join(","))].join("\n");
 }
 
-function parseCsvLine(line) {
-  const result = [];
+function parseCsv(text) {
+  const rows = [], result = [];
   let value = "", quoted = false;
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    if (char === '"' && quoted && line[index + 1] === '"') { value += '"'; index += 1; }
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '"' && quoted && text[index + 1] === '"') { value += '"'; index += 1; }
     else if (char === '"') quoted = !quoted;
     else if (char === "," && !quoted) { result.push(value); value = ""; }
+    else if ((char === "\n" || char === "\r") && !quoted) {
+      result.push(value); value = "";
+      if (result.some(cell => cell !== "")) rows.push([...result]);
+      result.length = 0;
+      if (char === "\r" && text[index + 1] === "\n") index += 1;
+    }
     else value += char;
   }
+  if (quoted) throw new Error("CSV มีเครื่องหมายคำพูดที่ปิดไม่ครบ");
   result.push(value);
-  return result;
+  if (result.some(cell => cell !== "")) rows.push(result);
+  return rows;
 }
 
 export function importCsv(text) {
-  const lines = text.trim().split(/\r?\n/).filter(Boolean);
+  const lines = parseCsv(text.replace(/^\uFEFF/, ""));
   if (lines.length < 2) throw new Error("CSV ไม่มีข้อมูลสำหรับนำเข้า");
-  const headers = parseCsvLine(lines[0]);
+  const headers = lines[0];
   if (!headers.includes("profileId") || !headers.includes("date")) throw new Error("CSV ต้องมีคอลัมน์ profileId และ date");
-  return lines.slice(1).map(line => {
-    const values = parseCsvLine(line);
+  return lines.slice(1).map(values => {
+    if (values.length !== headers.length) throw new Error("จำนวนคอลัมน์ใน CSV ไม่ตรงกับหัวตาราง");
     const row = Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ""]));
     if (!PROFILES[row.profileId]) throw new Error(`ไม่รู้จัก profile: ${row.profileId}`);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.date)) throw new Error(`วันที่ไม่ถูกต้อง: ${row.date}`);
+    const parsedDate = new Date(`${row.date}T00:00:00Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.date) || !Number.isFinite(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== row.date) throw new Error(`วันที่ไม่ถูกต้อง: ${row.date}`);
     const numericFields = ["weight", "calories", "protein", "carbs", "fat", "fiber", "produceServings", "water", "steps", "zone2Minutes", "exerciseMinutes", "restingHeartRate", "sleep", "waist", "bodyFat", "muscle", "visceral", "hunger", "energy"];
-    numericFields.forEach(field => { if (row[field] === "") delete row[field]; else row[field] = Number(row[field]); });
+    numericFields.forEach(field => {
+      if (row[field] == null || row[field].trim() === "") delete row[field];
+      else {
+        const value = Number(row[field]);
+        if (!Number.isFinite(value) || value < 0) throw new Error(`ตัวเลขไม่ถูกต้อง: ${field} (${row.date})`);
+        row[field] = value;
+      }
+    });
     ["workout", "restDay", "sickDay", "vacationMode"].forEach(field => { row[field] = row[field] === "true"; });
     return row;
   });

@@ -178,6 +178,47 @@
         }
       }
     },
+    "debtPushInstallations": {
+      ".read": false,
+      ".write": false
+    },
+    "debtPushDeviceMembers": {
+      ".read": false,
+      ".write": false
+    },
+    "debtPushPreferences": {
+      ".read": false,
+      ".write": false
+    },
+    "debtPushDaily": {
+      ".read": false,
+      ".write": false
+    },
+    "debtPushWorkerLease": {
+      ".read": false,
+      ".write": false
+    },
+    "debtPushOutbox": {
+      ".read": false,
+      ".write": false,
+      ".indexOn": [
+        "nextAt"
+      ]
+    },
+    "debtPushDeliveries": {
+      ".read": false,
+      ".write": false,
+      ".indexOn": [
+        "expiresAt"
+      ]
+    },
+    "debtPushEventReceipts": {
+      ".read": false,
+      ".write": false,
+      ".indexOn": [
+        "expiresAt"
+      ]
+    },
     "debtRateLimits": {
       ".read": false,
       ".write": false
@@ -195,6 +236,18 @@
       ".write": false
     },
     "debtInitializations": {
+      ".read": false,
+      ".write": false
+    },
+    "orderPushInstallations": {
+      ".read": false,
+      ".write": false
+    },
+    "orderPushDeviceMembers": {
+      ".read": false,
+      ".write": false
+    },
+    "orderPushDeliveries": {
       ".read": false,
       ".write": false
     }

@@ -75,14 +75,15 @@ export default function AuthScreen({ hasInvite }) {
   return (
     <main className="auth-page">
       <section className="auth-story">
-        <div className="brand brand-light"><BrandMark /><span>เคลียร์กัน</span></div>
-        <p className="eyebrow">SHARED DEBT NOTE</p>
-        <h1>เรื่องเงินชัดเจน<br />ความสัมพันธ์ก็เบาลง</h1>
+        <div className="brand"><BrandMark /><span>เคลียร์กัน<small className="brand-caption">CLEAR KAN</small></span></div>
+        <p className="eyebrow">A LITTLE CLARITY. A LIGHTER LIFE.</p>
+        <h1>เรื่องเงินชัดเจน<br /><em>ความสัมพันธ์<br />ก็เบาลง</em></h1>
         <p className="story-copy">บันทึกยอดร่วมกัน ติดตามการจ่าย และเก็บหลักฐานไว้ในที่เดียว</p>
         <div className="story-card">
-          <span className="story-icon">✓</span>
-          <div><strong>เห็นข้อมูลชุดเดียวกัน</strong><small>ทุกการเปลี่ยนแปลงมีสถานะให้ทั้งสองฝ่ายตรวจสอบ</small></div>
+          <span className="story-icon" aria-hidden="true">✓</span>
+          <div><strong>เข้าใจตรงกัน ตั้งแต่ยอดแรก</strong><small>ตรวจสอบยอดและติดตามสถานะได้ทั้งสองฝ่าย</small></div>
         </div>
+        <span className="story-footer">บันทึกไว้ให้ชัด · ใช้ชีวิตให้เบา</span>
       </section>
 
       <section className="auth-panel">
@@ -91,12 +92,12 @@ export default function AuthScreen({ hasInvite }) {
           {hasInvite && <div className="invite-notice">คุณได้รับคำเชิญให้ตรวจสอบรายการหนี้ เข้าสู่ระบบเพื่อเปิดรายการ</div>}
           <p className="eyebrow">{mode === "login" ? "ยินดีต้อนรับกลับ" : "เริ่มต้นใช้งาน"}</p>
           <h2>{mode === "login" ? "เข้าสู่ระบบ" : "สร้างบัญชีใหม่"}</h2>
-          <p className="muted">ใช้บัญชี Firebase เดียวกับแอปร้านกาแฟได้</p>
+          <p className="muted">{mode === "login" ? "กลับมาจัดการเรื่องเงิน ให้สบายใจอีกนิด" : "พื้นที่เล็ก ๆ ที่ช่วยให้เรื่องเงินชัดเจนขึ้น"}</p>
 
-          <label>อีเมล</label>
-          <input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@example.com" />
-          <label>รหัสผ่าน</label>
-          <input type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={6} required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="อย่างน้อย 6 ตัวอักษร" />
+          <label htmlFor="auth-email">อีเมล</label>
+          <input id="auth-email" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@example.com" />
+          <label htmlFor="auth-password">รหัสผ่าน</label>
+          <input id="auth-password" type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={6} required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="อย่างน้อย 6 ตัวอักษร" />
 
           {error && <div className="form-message error" role="alert">{error}</div>}
           {notice && <div className="form-message success" role="status">{notice}</div>}

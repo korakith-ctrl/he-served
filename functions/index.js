@@ -10,6 +10,13 @@ const {
   normalizeAppleHealthPayload,
   safeTokenMatch,
 } = require("./recompHealth");
+const { pendingCounterpartyRole, isPendingInvitee, isPendingInviteCreator, debtCancellationMode, acceptInviteParticipant } = require("./debtInviteRoles");
+const {
+  DEBT_RECEIPT_SCHEMA,
+  debtReceiptPrompt,
+  normalizeDebtReceiptImage,
+  normalizeDebtReceiptResult,
+} = require("./debtReceiptOcr");
 
 admin.initializeApp();
 const db = admin.database();
@@ -18,6 +25,7 @@ const SLIPOK_API_KEY = defineSecret("SLIPOK_API_KEY");
 const SLIPOK_BRANCH_ID = defineString("SLIPOK_BRANCH_ID");
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 const GEMINI_RECEIPT_MODEL = defineString("GEMINI_RECEIPT_MODEL", { default: "gemini-3.5-flash" });
+const GEMINI_FOOD_MODEL = defineString("GEMINI_FOOD_MODEL", { default: "gemini-3.5-flash" });
 
 const REGION = "asia-southeast1";
 
@@ -1253,6 +1261,70 @@ async function enforceDebtRateLimit(uid, action, limit = 30, windowMs = 60 * 100
   }
 }
 
+// Receipt OCR is deliberately draft-only. Pixels are supplied inline for this
+// call and are neither written to RTDB/Storage nor included in logs. The user
+// must still inspect and submit the proposed debt through createDebt.
+exports.scanDebtReceipt = onCall({
+  ...DEBT_CALL_OPTIONS,
+  secrets: [GEMINI_API_KEY],
+  timeoutSeconds: 60,
+  memory: "512MiB",
+}, async (request) => {
+  const user = requiredDebtUser(request);
+  await enforceDebtRateLimit(user.uid, "scanDebtReceipt", 6, 60 * 60 * 1000);
+  let image;
+  try {
+    image = normalizeDebtReceiptImage(request.data?.imageBase64, request.data?.mimeType);
+  } catch (error) {
+    if (error.message === "unsupported-mime") {
+      throw new HttpsError("invalid-argument", "รองรับรูปใบเสร็จ JPG, PNG หรือ WebP เท่านั้น");
+    }
+    if (error.message === "image-too-large") {
+      throw new HttpsError("invalid-argument", "รูปใบเสร็จต้องมีขนาดไม่เกิน 5MB");
+    }
+    throw new HttpsError("invalid-argument", "รูปใบเสร็จไม่ถูกต้อง");
+  }
+
+  const requestBody = {
+    contents: [{ parts: [
+      { text: debtReceiptPrompt },
+      { inlineData: { mimeType: image.mimeType, data: image.data } },
+    ] }],
+    generationConfig: { responseMimeType: "application/json", responseSchema: DEBT_RECEIPT_SCHEMA, temperature: 0.1 },
+  };
+  const modelCandidates = [...new Set([GEMINI_RECEIPT_MODEL.value(), "gemini-3.5-flash", "gemini-3.1-flash-lite"])];
+  try {
+    let response;
+    let lastModelError;
+    for (const model of modelCandidates) {
+      try {
+        response = await axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+          requestBody,
+          { headers: { "x-goog-api-key": GEMINI_API_KEY.value(), "Content-Type": "application/json" }, timeout: 55000 },
+        );
+        break;
+      } catch (modelError) {
+        lastModelError = modelError;
+        if (modelError.response?.status !== 404) throw modelError;
+        logger.warn("debt receipt model unavailable; trying fallback", { model, apiMessage: modelError.response?.data?.error?.message });
+      }
+    }
+    if (!response) throw lastModelError || new Error("no receipt model available");
+    const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) throw new Error("empty model response");
+    return normalizeDebtReceiptResult(JSON.parse(text));
+  } catch (error) {
+    // Do not log response payloads: receipt imagery and OCR text can contain
+    // sensitive transaction data.
+    logger.error("debt receipt OCR failed", { uid: user.uid, status: error.response?.status, message: error.message });
+    if (error.response?.status === 429) {
+      throw new HttpsError("resource-exhausted", "ระบบอ่านใบเสร็จกำลังถูกใช้งานมาก กรุณาลองใหม่อีกครั้ง");
+    }
+    throw new HttpsError("internal", "อ่านใบเสร็จไม่สำเร็จ กรุณาถ่ายใหม่ให้เห็นทั้งใบและตัวหนังสือชัดเจน");
+  }
+});
+
 async function requiredDebtForUser(debtId, user) {
   const snapshot = await db.ref(`debts/${debtId}`).once("value");
   const debt = snapshot.val();
@@ -1313,6 +1385,7 @@ function normalizedDebtDraft(payload, user, overrides = {}) {
   const lineItems = (Array.isArray(payload.lineItems) ? payload.lineItems : []).slice(0, 100).map((item) => ({
     title: String(item?.title || "").trim().slice(0, 160),
     amount: Math.max(0, Math.round((Number(item?.amount) || 0) * 100) / 100),
+    info: String(item?.info || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 300),
   })).filter((item) => item.title && item.amount > 0);
 
   let outstandingAmount = outstandingUnconfirmed ? null : amount;
@@ -1376,50 +1449,73 @@ exports.createDebt = onCall(DEBT_CALL_OPTIONS, async (request) => {
   const user = requiredDebtUser(request);
   await enforceDebtRateLimit(user.uid, "createDebt", 12, 60 * 60 * 1000);
   const payload = request.data || {};
+  const creatorRole = payload.creatorRole === "debtor" ? "debtor" : "creditor";
   const directDelivery = payload.deliveryMode === "direct";
-  let directDebtor = null;
+  let directCounterparty = null;
   if (directDelivery) {
-    const debtorEmail = String(payload.debtorEmail || "").trim().toLowerCase().slice(0, 254);
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(debtorEmail)) throw new HttpsError("invalid-argument", "กรุณาระบุอีเมลบัญชีลูกหนี้ให้ถูกต้อง");
+    const counterpartyEmail = String(creatorRole === "debtor" ? payload.creditorEmail : payload.debtorEmail || "").trim().toLowerCase().slice(0, 254);
+    const counterpartyLabel = creatorRole === "debtor" ? "เจ้าหนี้" : "ลูกหนี้";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(counterpartyEmail)) throw new HttpsError("invalid-argument", `กรุณาระบุอีเมลบัญชี${counterpartyLabel}ให้ถูกต้อง`);
     try {
-      directDebtor = await admin.auth().getUserByEmail(debtorEmail);
+      directCounterparty = await admin.auth().getUserByEmail(counterpartyEmail);
     } catch (error) {
-      if (error?.code === "auth/user-not-found") throw new HttpsError("not-found", "ไม่พบบัญชีลูกหนี้ด้วยอีเมลนี้ กรุณาตรวจอีเมลหรือใช้ลิงก์เชิญ");
+      if (error?.code === "auth/user-not-found") throw new HttpsError("not-found", `ไม่พบบัญชี${counterpartyLabel}ด้วยอีเมลนี้ กรุณาตรวจอีเมลหรือใช้ลิงก์เชิญ`);
       throw error;
     }
-    if (directDebtor.uid === user.uid) throw new HttpsError("failed-precondition", "ไม่สามารถเลือกรายการของตัวเองเป็นลูกหนี้ได้");
+    if (directCounterparty.uid === user.uid) throw new HttpsError("failed-precondition", "ไม่สามารถเลือกรายการของตัวเองเป็นคู่สัญญาได้");
   }
   const debtRef = db.ref("debts").push();
   const debtId = debtRef.key;
   const inviteCode = debtInviteCode();
   const now = new Date().toISOString();
   const debt = normalizedDebtDraft(payload, user, { inviteCode, now });
-  if (directDebtor) {
-    debt.debtorUid = directDebtor.uid;
-    debt.debtorName = String(payload.debtorName || directDebtor.displayName || directDebtor.email?.split("@")[0] || "ลูกหนี้").trim().slice(0, 120);
-    debt.debtorEmail = directDebtor.email || String(payload.debtorEmail).trim().toLowerCase();
+  if (creatorRole === "debtor") {
+    const creditorName = String(payload.creditorLegalName || "").trim().slice(0, 120);
+    const debtorName = String(payload.debtorName || user.name || "").trim().slice(0, 120);
+    if (!creditorName) throw new HttpsError("invalid-argument", "กรุณาระบุชื่อเจ้าหนี้");
+    debt.creditorUid = null;
+    debt.creditorName = creditorName;
+    delete debt.creditorEmail;
+    debt.debtorUid = user.uid;
+    debt.debtorName = debtorName || user.name;
+    debt.debtorEmail = user.email;
+    debt.pendingCounterpartyRole = "creditor";
+  }
+  if (directCounterparty) {
+    if (creatorRole === "debtor") {
+      debt.creditorUid = directCounterparty.uid;
+      debt.creditorName = String(payload.creditorLegalName || directCounterparty.displayName || directCounterparty.email?.split("@")[0] || "เจ้าหนี้").trim().slice(0, 120);
+      debt.creditorEmail = directCounterparty.email || String(payload.creditorEmail).trim().toLowerCase();
+    } else {
+      debt.debtorUid = directCounterparty.uid;
+      debt.debtorName = String(payload.debtorName || directCounterparty.displayName || directCounterparty.email?.split("@")[0] || "ลูกหนี้").trim().slice(0, 120);
+      debt.debtorEmail = directCounterparty.email || String(payload.debtorEmail).trim().toLowerCase();
+    }
     debt.inviteDelivery = "direct";
     debt.directInviteStatus = "pending";
+    debt.directInviteRole = creatorRole === "debtor" ? "creditor" : "debtor";
     delete debt.inviteCode;
   }
   const version = 1;
   const agreement = agreementVersionRecord(debt, version, {}, now);
-  agreement.acceptances[user.uid] = debtAcceptance(user, agreement.digest, now, "creditor_created");
+  agreement.acceptances[user.uid] = debtAcceptance(user, agreement.digest, now, creatorRole === "debtor" ? "debtor_created" : "creditor_created");
   debt.agreementVersion = version;
   debt.agreementDigest = agreement.digest;
-  debt.agreementStatus = "awaiting_debtor";
+  debt.agreementStatus = creatorRole === "debtor" ? "awaiting_creditor" : "awaiting_debtor";
   const updates = {
     [`debts/${debtId}`]: debt,
     [`debtAgreementVersions/${debtId}/v_${String(version).padStart(3, "0")}`]: agreement,
     [`debtMembers/${user.uid}/${debtId}`]: true,
-    ...(!directDebtor ? { [`debtInviteCodes/${inviteCode}`]: debtId } : { [`debtMembers/${directDebtor.uid}/${debtId}`]: true }),
+    ...(!directCounterparty ? { [`debtInviteCodes/${inviteCode}`]: debtId } : { [`debtMembers/${directCounterparty.uid}/${debtId}`]: true }),
   };
-  addDebtAudit(updates, debtId, directDebtor ? "direct_invite_sent" : "debt_created", user, { amount: debt.amount, debtType: debt.debtType, deliveryMode: directDebtor ? "direct" : "link" });
-  if (directDebtor) addDebtNotification(updates, directDebtor.uid, debtId, "direct_invite_received", "มีคำขอรายการหนี้ใหม่", `${user.name} ส่งรายการ ${debt.title} ฿${debt.amount.toLocaleString("th-TH")} ให้คุณตรวจสอบ`);
+  addDebtAudit(updates, debtId, directCounterparty ? "direct_invite_sent" : "debt_created", user, { amount: debt.amount, debtType: debt.debtType, creatorRole, deliveryMode: directCounterparty ? "direct" : "link" });
+  if (directCounterparty) addDebtNotification(updates, directCounterparty.uid, debtId, "direct_invite_received", "มีคำขอรายการหนี้ใหม่", `${user.name} ส่งรายการ ${debt.title} ฿${debt.amount.toLocaleString("th-TH")} ให้คุณตรวจสอบ`);
   await db.ref().update(updates);
-  return directDebtor
-    ? { debtId, deliveryMode: "direct", debtorName: debt.debtorName, debtorEmail: debt.debtorEmail }
-    : { debtId, inviteCode, deliveryMode: "link" };
+  const counterpartyName = creatorRole === "debtor" ? debt.creditorName : debt.debtorName;
+  const counterpartyEmail = creatorRole === "debtor" ? debt.creditorEmail : debt.debtorEmail;
+  return directCounterparty
+    ? { debtId, deliveryMode: "direct", creatorRole, counterpartyName, counterpartyEmail }
+    : { debtId, inviteCode, deliveryMode: "link", creatorRole, counterpartyName };
 });
 
 const PUN_WORKBOOK_DEBTS = [
@@ -1525,7 +1621,7 @@ exports.getDebtInvitePreview = onCall(DEBT_CALL_OPTIONS, async (request) => {
   const snapshots = await Promise.all(debtIds.map((debtId) => db.ref(`debts/${debtId}`).once("value")));
   const debts = snapshots.map((snapshot) => snapshot.val());
   if (!debtIds.length || debts.some((debt) => !debt)) throw new HttpsError("not-found", "ไม่พบรายการหนี้ในคำเชิญ");
-  if (debts.some((debt) => debt.creditorUid === user.uid)) throw new HttpsError("failed-precondition", "เจ้าหนี้ไม่สามารถรับคำเชิญของตัวเองได้");
+  if (debts.some((debt) => isPendingInviteCreator(debt, user.uid))) throw new HttpsError("failed-precondition", "ผู้ส่งคำเชิญไม่สามารถรับคำเชิญของตัวเองได้");
   const records = debts.map((debt, index) => {
     const version = Math.max(1, Number(debt.agreementVersion) || 1);
     const agreement = agreementVersionRecord(debt, version, {}, debt.createdAt || new Date().toISOString());
@@ -1564,7 +1660,7 @@ exports.acceptDebtInvite = onCall(DEBT_CALL_OPTIONS, async (request) => {
   const codeRef = db.ref(`debtInviteCodes/${inviteCode}`);
   const receiptRef = db.ref(`debtInviteAcceptances/${inviteCode}`);
   const existingReceipt = (await receiptRef.once("value")).val();
-  if (existingReceipt?.debtorUid === user.uid && Array.isArray(existingReceipt.debtIds) && existingReceipt.debtIds.length) {
+  if ((existingReceipt?.recipientUid === user.uid || existingReceipt?.debtorUid === user.uid) && Array.isArray(existingReceipt.debtIds) && existingReceipt.debtIds.length) {
     return { debtId: existingReceipt.debtIds[0], debtIds: existingReceipt.debtIds, alreadyAccepted: true };
   }
   const initialInvitationSnapshot = await codeRef.once("value");
@@ -1592,8 +1688,8 @@ exports.acceptDebtInvite = onCall(DEBT_CALL_OPTIONS, async (request) => {
     const debtSnapshots = await Promise.all(debtIds.map((debtId) => db.ref(`debts/${debtId}`).once("value")));
     const debts = debtSnapshots.map((snapshot) => snapshot.val());
     if (debts.some((debt) => !debt)) throw new HttpsError("not-found", "พบรายการหนี้ไม่ครบถ้วน");
-    if (debts.some((debt) => debt.creditorUid === user.uid)) throw new HttpsError("failed-precondition", "เจ้าหนี้ไม่สามารถรับคำเชิญของตัวเองได้");
-    if (debts.some((debt) => debt.debtorUid && debt.debtorUid !== user.uid)) throw new HttpsError("already-exists", "บางรายการมีผู้ยืนยันแล้ว");
+    if (debts.some((debt) => isPendingInviteCreator(debt, user.uid))) throw new HttpsError("failed-precondition", "ผู้ส่งคำเชิญไม่สามารถรับคำเชิญของตัวเองได้");
+    if (debts.some((debt) => pendingCounterpartyRole(debt) === "creditor" ? debt.creditorUid && debt.creditorUid !== user.uid : debt.debtorUid && debt.debtorUid !== user.uid)) throw new HttpsError("already-exists", "บางรายการมีผู้ยืนยันแล้ว");
 
     const agreementRecords = debts.map((debt, index) => {
       const version = Math.max(1, Number(debt.agreementVersion) || 1);
@@ -1606,16 +1702,24 @@ exports.acceptDebtInvite = onCall(DEBT_CALL_OPTIONS, async (request) => {
     const memberUpdates = {
       [`debtInviteCodes/${inviteCode}`]: null,
       [`debtInviteClaims/${inviteCode}`]: null,
-      [`debtInviteAcceptances/${inviteCode}`]: { debtorUid: user.uid, debtIds, acceptedAt: now },
+      [`debtInviteAcceptances/${inviteCode}`]: { recipientUid: user.uid, debtIds, acceptedAt: now },
     };
     debtIds.forEach((debtId, index) => {
       const debt = debts[index];
       const agreement = agreementRecords[index].agreement;
       const versionKey = `v_${String(agreement.version).padStart(3, "0")}`;
-      memberUpdates[`debts/${debtId}/debtorUid`] = user.uid;
-      memberUpdates[`debts/${debtId}/debtorName`] = debt.debtorName || user.name;
-      memberUpdates[`debts/${debtId}/debtorEmail`] = user.email;
-      memberUpdates[`debts/${debtId}/status`] = debt.outstandingStatus === "unconfirmed" ? "unconfirmed" : Number(debt.outstandingAmount) > 0 ? "active" : "paid";
+      const acceptingAsCreditor = pendingCounterpartyRole(debt) === "creditor";
+      const acceptedParticipant = acceptInviteParticipant(debt, user);
+      if (acceptingAsCreditor) {
+        memberUpdates[`debts/${debtId}/creditorUid`] = acceptedParticipant.creditorUid;
+        memberUpdates[`debts/${debtId}/creditorName`] = acceptedParticipant.creditorName;
+        memberUpdates[`debts/${debtId}/creditorEmail`] = acceptedParticipant.creditorEmail;
+      } else {
+        memberUpdates[`debts/${debtId}/debtorUid`] = user.uid;
+        memberUpdates[`debts/${debtId}/debtorName`] = debt.debtorName || user.name;
+        memberUpdates[`debts/${debtId}/debtorEmail`] = user.email;
+      }
+      memberUpdates[`debts/${debtId}/status`] = debt.outstandingStatus === "unconfirmed" ? "unconfirmed" : acceptedParticipant.status;
       memberUpdates[`debts/${debtId}/agreementVersion`] = agreement.version;
       memberUpdates[`debts/${debtId}/agreementDigest`] = agreement.digest;
       memberUpdates[`debts/${debtId}/agreementStatus`] = "accepted";
@@ -1625,10 +1729,10 @@ exports.acceptDebtInvite = onCall(DEBT_CALL_OPTIONS, async (request) => {
       memberUpdates[`debtAgreementVersions/${debtId}/${versionKey}/digest`] = agreement.digest;
       memberUpdates[`debtAgreementVersions/${debtId}/${versionKey}/snapshot`] = agreement.snapshot;
       memberUpdates[`debtAgreementVersions/${debtId}/${versionKey}/createdAt`] = agreement.createdAt;
-      memberUpdates[`debtAgreementVersions/${debtId}/${versionKey}/acceptances/${user.uid}`] = debtAcceptance(user, agreement.digest, now, "debtor_invite_acceptance");
+      memberUpdates[`debtAgreementVersions/${debtId}/${versionKey}/acceptances/${user.uid}`] = debtAcceptance(user, agreement.digest, now, acceptingAsCreditor ? "creditor_invite_acceptance" : "debtor_invite_acceptance");
       memberUpdates[`debtMembers/${user.uid}/${debtId}`] = true;
       addDebtAudit(memberUpdates, debtId, "invite_accepted", user, { agreementVersion: agreement.version, agreementDigest: agreement.digest });
-      addDebtNotification(memberUpdates, debt.creditorUid, debtId, "invite_accepted", "ลูกหนี้ยืนยันรายการแล้ว", `${user.name} ยืนยันรายการ ${debt.title}`);
+      addDebtNotification(memberUpdates, acceptingAsCreditor ? debt.debtorUid : debt.creditorUid, debtId, "invite_accepted", acceptingAsCreditor ? "เจ้าหนี้ยืนยันรายการแล้ว" : "ลูกหนี้ยืนยันรายการแล้ว", `${user.name} ยืนยันรายการ ${debt.title}`);
     });
     await db.ref().update(memberUpdates);
     return { debtId: debtIds[0], debtIds };
@@ -1645,7 +1749,7 @@ exports.acceptDebtAgreement = onCall(DEBT_CALL_OPTIONS, async (request) => {
   const debtId = String(request.data?.debtId || "");
   if (!validDebtId(debtId) || request.data?.consentConfirmed !== true) throw new HttpsError("failed-precondition", "กรุณาอ่านและยอมรับข้อตกลง");
   const debt = await requiredDebtForUser(debtId, user);
-  if (!debt.debtorUid) throw new HttpsError("failed-precondition", "ยังไม่มีลูกหนี้เข้าร่วมรายการ");
+  if (!debt.debtorUid || !debt.creditorUid) throw new HttpsError("failed-precondition", "ยังไม่มีคู่สัญญาเข้าร่วมรายการครบทั้งสองฝ่าย");
   if (String(request.data?.expectedUpdatedAt || "") !== String(debt.updatedAt || "")) throw new HttpsError("aborted", "รายการเพิ่งมีการเปลี่ยนแปลง กรุณาตรวจสอบอีกครั้ง");
   const version = Math.max(1, Number(debt.agreementVersion) || 1);
   const versionKey = `v_${String(version).padStart(3, "0")}`;
@@ -1665,7 +1769,7 @@ exports.acceptDebtAgreement = onCall(DEBT_CALL_OPTIONS, async (request) => {
   const acceptanceSnapshot = await db.ref(`debtAgreementVersions/${debtId}/${versionKey}/acceptances`).once("value");
   const acceptedUids = new Set([...Object.keys(acceptanceSnapshot.val() || {}), user.uid]);
   const fullyAccepted = acceptedUids.has(debt.creditorUid) && acceptedUids.has(debt.debtorUid);
-  const acceptingDirectInvite = debt.inviteDelivery === "direct" && debt.directInviteStatus === "pending" && debt.status === "pending" && debt.debtorUid === user.uid;
+  const acceptingDirectInvite = debt.inviteDelivery === "direct" && debt.directInviteStatus === "pending" && debt.status === "pending" && isPendingInvitee({ ...debt, pendingCounterpartyRole: debt.directInviteRole || debt.pendingCounterpartyRole }, user.uid);
   updates[`debts/${debtId}/agreementStatus`] = fullyAccepted ? "accepted" : "pending_signatures";
   if (acceptingDirectInvite) {
     updates[`debts/${debtId}/status`] = debt.outstandingStatus === "unconfirmed" ? "unconfirmed" : Number(debt.outstandingAmount) > 0 ? "active" : "paid";
@@ -1674,7 +1778,8 @@ exports.acceptDebtAgreement = onCall(DEBT_CALL_OPTIONS, async (request) => {
     updates[`debts/${debtId}/updatedAt`] = now;
   }
   addDebtAudit(updates, debtId, acceptingDirectInvite ? "direct_invite_accepted" : "agreement_accepted", user, { version, digest: agreement.digest });
-  addDebtNotification(updates, otherDebtUid(debt, user.uid), debtId, acceptingDirectInvite ? "direct_invite_accepted" : "agreement_accepted", acceptingDirectInvite ? "ลูกหนี้ยืนยันรายการแล้ว" : "อีกฝ่ายยืนยันข้อตกลงแล้ว", `${user.name} ยืนยัน${acceptingDirectInvite ? `รายการ ${debt.title}` : `ข้อตกลงเวอร์ชัน ${version}`}`);
+  const acceptedRole = (debt.directInviteRole || pendingCounterpartyRole(debt)) === "creditor" ? "เจ้าหนี้" : "ลูกหนี้";
+  addDebtNotification(updates, otherDebtUid(debt, user.uid), debtId, acceptingDirectInvite ? "direct_invite_accepted" : "agreement_accepted", acceptingDirectInvite ? `${acceptedRole}ยืนยันรายการแล้ว` : "อีกฝ่ายยืนยันข้อตกลงแล้ว", `${user.name} ยืนยัน${acceptingDirectInvite ? `รายการ ${debt.title}` : `ข้อตกลงเวอร์ชัน ${version}`}`);
   await db.ref().update(updates);
   return { accepted: true, directInviteAccepted: acceptingDirectInvite, version, digest: agreement.digest, fullyAccepted };
 });
@@ -1686,7 +1791,7 @@ exports.declineDirectDebtInvite = onCall(DEBT_CALL_OPTIONS, async (request) => {
   const reason = String(request.data?.reason || "").trim().slice(0, 500);
   if (!validDebtId(debtId) || !reason) throw new HttpsError("invalid-argument", "กรุณาระบุเหตุผลที่ไม่ยืนยันรายการ");
   const debt = await requiredDebtForUser(debtId, user);
-  if (debt.debtorUid !== user.uid || debt.inviteDelivery !== "direct") throw new HttpsError("permission-denied", "เฉพาะลูกหนี้ที่ได้รับคำขอโดยตรงเท่านั้นที่ปฏิเสธได้");
+  if (!isPendingInvitee({ ...debt, pendingCounterpartyRole: debt.directInviteRole || debt.pendingCounterpartyRole }, user.uid) || debt.inviteDelivery !== "direct") throw new HttpsError("permission-denied", "เฉพาะคู่สัญญาที่ได้รับคำขอโดยตรงเท่านั้นที่ปฏิเสธได้");
   if (debt.status !== "pending" || debt.directInviteStatus !== "pending") throw new HttpsError("failed-precondition", "คำขอนี้ถูกดำเนินการแล้ว");
   const now = new Date().toISOString();
   const updates = {
@@ -1698,7 +1803,8 @@ exports.declineDirectDebtInvite = onCall(DEBT_CALL_OPTIONS, async (request) => {
     [`debts/${debtId}/updatedAt`]: now,
   };
   addDebtAudit(updates, debtId, "direct_invite_declined", user, { reason });
-  addDebtNotification(updates, debt.creditorUid, debtId, "direct_invite_declined", "ลูกหนี้ไม่ยืนยันรายการ", `${user.name}: ${reason}`);
+  const declinedRole = (debt.directInviteRole || pendingCounterpartyRole(debt)) === "creditor" ? "เจ้าหนี้" : "ลูกหนี้";
+  addDebtNotification(updates, otherDebtUid(debt, user.uid), debtId, "direct_invite_declined", `${declinedRole}ไม่ยืนยันรายการ`, `${user.name}: ${reason}`);
   await db.ref().update(updates);
   return { declined: true };
 });
@@ -2250,8 +2356,9 @@ exports.cancelDebt = onCall(DEBT_CALL_OPTIONS, async (request) => {
   if (!validDebtId(debtId) || !reason) throw new HttpsError("invalid-argument", "กรุณาระบุเหตุผลในการยกเลิก");
   const debt = await requiredDebtForUser(debtId, user);
   if (debt.status === "cancelled") return { cancelled: true };
-  if (debt.debtorUid) return createDebtConsentRequest(debtId, debt, user, "debt_cancel", { reason });
-  if (debt.creditorUid !== user.uid) throw new HttpsError("permission-denied", "เฉพาะเจ้าหนี้เท่านั้นที่ยกเลิกรายการก่อนมีผู้ยืนยันได้");
+  const cancellationMode = debtCancellationMode(debt, user.uid);
+  if (cancellationMode === "consent") return createDebtConsentRequest(debtId, debt, user, "debt_cancel", { reason });
+  if (cancellationMode !== "direct") throw new HttpsError("permission-denied", "เฉพาะผู้สร้างรายการเท่านั้นที่ยกเลิกได้ก่อนอีกฝ่ายยืนยัน");
   const now = new Date().toISOString();
   const invitationSnapshot = debt.inviteCode ? await db.ref(`debtInviteCodes/${debt.inviteCode}`).once("value") : null;
   const rawInvitation = invitationSnapshot?.val();
@@ -2305,7 +2412,7 @@ exports.revokeDebtInvite = onCall(DEBT_CALL_OPTIONS, async (request) => {
   const debtId = String(request.data?.debtId || "");
   if (!validDebtId(debtId)) throw new HttpsError("invalid-argument", "รหัสรายการไม่ถูกต้อง");
   const debt = await requiredDebtForUser(debtId, user);
-  if (debt.creditorUid !== user.uid || debt.debtorUid) throw new HttpsError("failed-precondition", "ยกเลิกลิงก์ได้เฉพาะรายการที่ยังไม่มีลูกหนี้ยืนยัน");
+  if (!isPendingInviteCreator(debt, user.uid) || (pendingCounterpartyRole(debt) === "creditor" ? debt.creditorUid : debt.debtorUid)) throw new HttpsError("failed-precondition", "ยกเลิกลิงก์ได้เฉพาะรายการที่ยังไม่มีคู่สัญญายืนยัน");
   const invitationSnapshot = await db.ref(`debtInviteCodes/${debt.inviteCode}`).once("value");
   const rawInvitation = invitationSnapshot.val();
   const invitationDebtIds = typeof rawInvitation === "string" ? [rawInvitation] :
@@ -2330,19 +2437,19 @@ exports.renewDebtInvite = onCall(DEBT_CALL_OPTIONS, async (request) => {
   const debtId = String(request.data?.debtId || "");
   if (!validDebtId(debtId)) throw new HttpsError("invalid-argument", "รหัสรายการไม่ถูกต้อง");
   const debt = await requiredDebtForUser(debtId, user);
-  if (debt.creditorUid !== user.uid || debt.debtorUid) throw new HttpsError("failed-precondition", "สร้างลิงก์ใหม่ได้เฉพาะรายการที่ยังไม่มีลูกหนี้ยืนยัน");
+  if (!isPendingInviteCreator(debt, user.uid) || (pendingCounterpartyRole(debt) === "creditor" ? debt.creditorUid : debt.debtorUid)) throw new HttpsError("failed-precondition", "สร้างลิงก์ใหม่ได้เฉพาะรายการที่ยังไม่มีคู่สัญญายืนยัน");
   const memberSnapshot = await db.ref(`debtMembers/${user.uid}`).once("value");
   const memberIds = Object.keys(memberSnapshot.val() || {}).filter(validDebtId).slice(0, 500);
   const memberDebts = await Promise.all(memberIds.map((id) => db.ref(`debts/${id}`).once("value")));
   const affectedDebtIds = memberIds.filter((id, index) => {
     const item = memberDebts[index].val();
-    return item && item.creditorUid === user.uid && !item.debtorUid && item.inviteCode === debt.inviteCode && item.status === "invite_revoked";
+    return item && isPendingInviteCreator(item, user.uid) && !(pendingCounterpartyRole(item) === "creditor" ? item.creditorUid : item.debtorUid) && item.inviteCode === debt.inviteCode && item.status === "invite_revoked";
   });
   if (!affectedDebtIds.includes(debtId)) affectedDebtIds.push(debtId);
   const inviteCode = debtInviteCode();
   const updates = {
     [`debtInviteCodes/${debt.inviteCode}`]: null,
-    [`debtInviteCodes/${inviteCode}`]: affectedDebtIds.length > 1 ? { kind: "batch", debtIds: affectedDebtIds, creditorUid: user.uid, createdAt: new Date().toISOString() } : debtId,
+    [`debtInviteCodes/${inviteCode}`]: affectedDebtIds.length > 1 ? { kind: "batch", debtIds: affectedDebtIds, createdByUid: user.uid, createdAt: new Date().toISOString() } : debtId,
   };
   affectedDebtIds.forEach((id) => {
     updates[`debts/${id}/inviteCode`] = inviteCode;
@@ -2373,21 +2480,28 @@ exports.declineDebtInvite = onCall(DEBT_CALL_OPTIONS, async (request) => {
   const snapshots = await Promise.all(debtIds.map((id) => db.ref(`debts/${id}`).once("value")));
   const debts = snapshots.map((snapshot) => snapshot.val());
   if (!debtIds.length || debts.some((debt) => !debt)) throw new HttpsError("not-found", "ไม่พบรายการในคำเชิญ");
-  if (debts.some((debt) => debt.creditorUid === user.uid)) throw new HttpsError("failed-precondition", "เจ้าหนี้ไม่สามารถปฏิเสธคำเชิญของตัวเองได้");
+  if (debts.some((debt) => isPendingInviteCreator(debt, user.uid))) throw new HttpsError("failed-precondition", "ผู้ส่งคำเชิญไม่สามารถปฏิเสธคำเชิญของตัวเองได้");
   const now = new Date().toISOString();
   const updates = { [`debtInviteCodes/${inviteCode}`]: null };
   debtIds.forEach((debtId, index) => {
     const debt = debts[index];
-    updates[`debts/${debtId}/debtorUid`] = user.uid;
-    updates[`debts/${debtId}/debtorName`] = user.name;
-    updates[`debts/${debtId}/debtorEmail`] = user.email;
+    const decliningAsCreditor = pendingCounterpartyRole(debt) === "creditor";
+    if (decliningAsCreditor) {
+      updates[`debts/${debtId}/creditorUid`] = user.uid;
+      updates[`debts/${debtId}/creditorName`] = debt.creditorName || user.name;
+      updates[`debts/${debtId}/creditorEmail`] = user.email;
+    } else {
+      updates[`debts/${debtId}/debtorUid`] = user.uid;
+      updates[`debts/${debtId}/debtorName`] = debt.debtorName || user.name;
+      updates[`debts/${debtId}/debtorEmail`] = user.email;
+    }
     updates[`debts/${debtId}/status`] = "declined";
     updates[`debts/${debtId}/declinedAt`] = now;
     updates[`debts/${debtId}/declineReason`] = reason;
     updates[`debts/${debtId}/updatedAt`] = now;
     updates[`debtMembers/${user.uid}/${debtId}`] = true;
     addDebtAudit(updates, debtId, "invite_declined", user, { reason });
-    addDebtNotification(updates, debt.creditorUid, debtId, "invite_declined", "ลูกหนี้ไม่ยืนยันรายการ", `${debt.title} · ${reason}`);
+    addDebtNotification(updates, decliningAsCreditor ? debt.debtorUid : debt.creditorUid, debtId, "invite_declined", decliningAsCreditor ? "เจ้าหนี้ไม่ยืนยันรายการ" : "ลูกหนี้ไม่ยืนยันรายการ", `${debt.title} · ${reason}`);
   });
   await db.ref().update(updates);
   return { declined: true, debtIds };
@@ -2555,41 +2669,6 @@ exports.respondDebtConsent = onCall(DEBT_CALL_OPTIONS, async (request) => {
   }
 });
 
-exports.refreshDebtReminders = onCall(DEBT_CALL_OPTIONS, async (request) => {
-  const user = requiredDebtUser(request);
-  await enforceDebtRateLimit(user.uid, "refreshDebtReminders", 8, 60 * 60 * 1000);
-  const memberSnapshot = await db.ref(`debtMembers/${user.uid}`).once("value");
-  const notificationsSnapshot = await db.ref(`debtNotifications/${user.uid}`).once("value");
-  const existingNotifications = notificationsSnapshot.val() || {};
-  const debtIds = Object.keys(memberSnapshot.val() || {}).filter(validDebtId).slice(0, 500);
-  const snapshots = await Promise.all(debtIds.map((debtId) => db.ref(`debts/${debtId}`).once("value")));
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
-  const updates = {};
-  let created = 0;
-  snapshots.forEach((snapshot, index) => {
-    const debt = snapshot.val();
-    if (!debt || debt.debtorUid !== user.uid || debt.status !== "active" || !validDebtDate(debt.dueDate)) return;
-    const due = new Date(`${debt.dueDate}T00:00:00Z`);
-    const days = Math.round((due.getTime() - today.getTime()) / 86400000);
-    if (days > 3) return;
-    const debtId = debtIds[index];
-    const reminderId = `due_${debtId}_${debt.dueDate}`;
-    if (existingNotifications[reminderId]) return;
-    updates[`debtNotifications/${user.uid}/${reminderId}`] = {
-      debtId,
-      type: days < 0 ? "overdue" : "due_soon",
-      title: days < 0 ? "รายการเกินกำหนด" : days === 0 ? "ครบกำหนดวันนี้" : "ใกล้ถึงวันครบกำหนด",
-      body: `${debt.title} · ฿${Number(debt.outstandingAmount || 0).toLocaleString("th-TH")}`,
-      createdAt: new Date().toISOString(),
-      readAt: null,
-    };
-    created += 1;
-  });
-  if (created) await db.ref().update(updates);
-  return { created };
-});
-
 exports.markDebtNotificationRead = onCall(DEBT_CALL_OPTIONS, async (request) => {
   const user = requiredDebtUser(request);
   const notificationId = String(request.data?.notificationId || "");
@@ -2612,6 +2691,88 @@ async function requiredRecompMember(request) {
   if (!["zackdark", "tony"].includes(member.profileId)) throw new HttpsError("failed-precondition", "สมาชิกยังไม่มี profile ที่ถูกต้อง");
   return { ...member, uid: request.auth.uid };
 }
+
+async function rateLimitRecompAi(uid, category = "foodPhoto") {
+  const now = Date.now();
+  const path = category === "dailyText" ? "recompDailyTextRateLimits" : "recompFoodPhotoRateLimits";
+  const result = await db.ref(`${path}/${uid}`).transaction(current => {
+    if (!current || now - Number(current.startedAt) >= 60 * 60 * 1000) return { startedAt: now, count: 1 };
+    return { ...current, count: Number(current.count || 0) + 1 };
+  });
+  if (Number(result.snapshot.val()?.count) > 12) throw new HttpsError("resource-exhausted", "ประเมินด้วย AI ได้ 12 ครั้งต่อชั่วโมง กรุณารอก่อนลองใหม่");
+}
+
+const { FOOD_PHOTO_SCHEMA, FOOD_PHOTO_PROMPT, shouldTryNextFoodModel, createFoodPhotoHandler } = require("./recompFoodPhoto");
+exports.estimateRecompFoodPhoto = onCall({
+  region: REGION, secrets: [GEMINI_API_KEY], timeoutSeconds: 60, memory: "512MiB", maxInstances: 3,
+}, createFoodPhotoHandler({
+  requireMember: requiredRecompMember,
+  HttpsError,
+  rateLimit: uid => rateLimitRecompAi(uid),
+  generate: async input => {
+    const parts = input.description
+      ? [{ text: `ประเมินโภชนาการจากรายการที่ผู้ใช้พิมพ์: ${input.description}` }]
+      : [{ text: "ประเมินอาหารในภาพนี้" }, { inlineData: input.image }];
+    const modelCandidates = [...new Set([GEMINI_FOOD_MODEL.value(), "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"])];
+    let lastError;
+    for (const model of modelCandidates) {
+      try {
+        const response = await axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+          {
+            systemInstruction: { parts: [{ text: FOOD_PHOTO_PROMPT }] },
+            contents: [{ role: "user", parts }],
+            generationConfig: {
+              responseMimeType: "application/json",
+              responseSchema: FOOD_PHOTO_SCHEMA,
+              maxOutputTokens: 2048,
+              // Food estimates are short, so low thinking avoids a long wait without
+              // sacrificing the user review that happens before diary entries are saved.
+              thinkingConfig: { thinkingLevel: "low" },
+            },
+          },
+          { headers: { "x-goog-api-key": GEMINI_API_KEY.value() }, timeout: model === "gemini-3.8-flash" ? 8000 : model === "gemini-3.5-flash" ? 20000 : model === "gemini-3.5-flash-lite" ? 15000 : 12000 },
+        );
+        return response.data;
+      } catch (error) {
+        lastError = error;
+        if (!shouldTryNextFoodModel(error)) throw error;
+      }
+    }
+    throw lastError;
+  },
+}));
+
+const { DAILY_LOG_SCHEMA, DAILY_LOG_PROMPT, createDailyLogHandler } = require("./recompDailyLog");
+exports.parseRecompDailyLog = onCall({
+  region: REGION, secrets: [GEMINI_API_KEY], timeoutSeconds: 60, memory: "512MiB", maxInstances: 3,
+}, createDailyLogHandler({
+  requireMember: requiredRecompMember,
+  rateLimit: uid => rateLimitRecompAi(uid, "dailyText"),
+  HttpsError,
+  generate: async description => {
+    const models = ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"];
+    let lastError;
+    for (const model of models) {
+      try {
+        const response = await axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+          {
+            systemInstruction: { parts: [{ text: DAILY_LOG_PROMPT }] },
+            contents: [{ role: "user", parts: [{ text: description }] }],
+            generationConfig: { responseMimeType: "application/json", responseSchema: DAILY_LOG_SCHEMA, maxOutputTokens: 4096, thinkingConfig: { thinkingLevel: "low" } },
+          },
+          { headers: { "x-goog-api-key": GEMINI_API_KEY.value() }, timeout: model === "gemini-3.5-flash" ? 22000 : model === "gemini-3.5-flash-lite" ? 18000 : 14000 },
+        );
+        return response.data;
+      } catch (error) {
+        lastError = error;
+        if (!shouldTryNextFoodModel(error)) throw error;
+      }
+    }
+    throw lastError;
+  },
+}));
 
 exports.createAppleHealthPairingToken = onCall({ region: REGION }, async (request) => {
   const member = await requiredRecompMember(request);
@@ -2642,6 +2803,40 @@ exports.revokeAppleHealthPairing = onCall({ region: REGION }, async (request) =>
   ]);
   return { revoked: true, profileId: member.profileId };
 });
+
+const { createNativeHandler } = require("./recompNative");
+const { createNativeAi } = require("./recompNativeAi");
+exports.createRecompNativePairingToken = onCall({ region: REGION }, async (request) => {
+  const member = await requiredRecompMember(request);
+  const token = crypto.randomBytes(32).toString("base64url");
+  await db.ref(`${RECOMP_ROOT}/nativePairings/${member.profileId}`).set({
+    tokenHash: hashPairingToken(token),
+    createdAt: new Date().toISOString(),
+    createdBy: member.uid,
+  });
+  return {
+    profileId: member.profileId,
+    token,
+    endpoint: `https://${REGION}-${process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || "he-served"}.cloudfunctions.net/recompNative`,
+  };
+});
+
+exports.revokeRecompNativePairing = onCall({ region: REGION }, async (request) => {
+  const member = await requiredRecompMember(request);
+  await db.ref(`${RECOMP_ROOT}/nativePairings/${member.profileId}`).remove();
+  return { revoked: true };
+});
+
+const recompNativeAi = createNativeAi({
+  axios,
+  apiKey: () => GEMINI_API_KEY.value(),
+  foodModel: () => GEMINI_FOOD_MODEL.value(),
+  rateLimit: (profileId, category) => rateLimitRecompAi(profileId, category),
+});
+exports.recompNative = onRequest({
+  region: REGION, cors: false, timeoutSeconds: 90, memory: "512MiB", maxInstances: 3,
+  secrets: [GEMINI_API_KEY],
+}, createNativeHandler({ db, root: RECOMP_ROOT, ...recompNativeAi }));
 
 exports.syncAppleHealth = onRequest({ region: REGION, cors: false, timeoutSeconds: 60 }, async (request, response) => {
   if (request.method !== "POST") {
@@ -2699,3 +2894,6 @@ exports.syncAppleHealth = onRequest({ region: REGION, cors: false, timeoutSecond
     response.status(400).json({ error: error.message || "invalid-payload" });
   }
 });
+
+Object.assign(exports, require("./debtPush")({ admin, db, options: DEBT_CALL_OPTIONS, requiredUser: requiredDebtUser, rateLimit: enforceDebtRateLimit }));
+Object.assign(exports, require("./orderPush")({ admin, db, region: REGION }));

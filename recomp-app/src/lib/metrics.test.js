@@ -1,6 +1,35 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bangkokGreeting, calorieDecision, dailyScore, rollingWeight, weightStats, weeklyReview } from "./metrics.js";
+import { adherenceSummary, bangkokGreeting, calorieDecision, calorieTargetStatus, dailyScore, rollingWeight, weightStats, weeklyReview } from "./metrics.js";
+
+test("calorie status distinguishes missing intake and intake above target", () => {
+  assert.equal(calorieTargetStatus("", 2000).percentage, null);
+  assert.equal(calorieTargetStatus(3000, 2000).percentage, 150);
+  assert.equal(calorieTargetStatus(3000, 2000).onTarget, false);
+  assert.equal(calorieTargetStatus(2000, 2000).onTarget, true);
+});
+
+test("activity summary combines days without counting walking as strength training", () => {
+  const logs = [
+    { date: "2026-09-01", zone2Minutes: 30, exerciseMinutes: 20, workout: true, sources: { workout: "appleHealth" } },
+    { date: "2026-09-02", exerciseMinutes: 45 },
+  ];
+  const health = [
+    { activityType: "walking", startAt: "2026-09-01T10:00:00Z" },
+    { activityType: "traditionalStrengthTraining", startAt: "2026-08-31T18:30:00Z" },
+    { activityType: "functionalStrengthTraining", startAt: "2026-09-01T08:00:00Z" },
+  ];
+  const summary = adherenceSummary(logs, profile, "2026-09-07", [], health);
+  assert.equal(summary.exerciseMinutes, 75);
+  assert.equal(summary.workoutSessions, 1);
+  assert.equal(adherenceSummary(logs, profile, "2026-09-07", [], health.slice(0, 1)).workoutSessions, 0);
+});
+
+test("future weigh-ins do not change the current progress", () => {
+  const stats = weightStats([{ date: "2026-09-01", weight: 89 }, { date: "2026-10-01", weight: 80 }], profile, "2026-09-01");
+  assert.equal(stats.latest.weight, 89);
+  assert.equal(stats.sampleCount, 1);
+});
 
 const profile = { startWeight: 90, goalMax: 80, calorieTarget: 2000, proteinMin: 130, stepsTarget: 9000 };
 

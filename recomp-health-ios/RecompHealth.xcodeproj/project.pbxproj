@@ -21,13 +21,13 @@
 /* Begin PBXFileReference section */
 		1F38AE59A63E921436E31AC9 /* RecompHealthApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecompHealthApp.swift; sourceTree = "<group>"; };
 		1F598803745A0474FD63BA1E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		3C017B9AA092C5A4179893D4 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		3C017B9AA092C5A4179893D4 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		9D8D7999575FBD6BC79E04C1 /* SyncClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncClient.swift; sourceTree = "<group>"; };
 		A06A46F794ABF28E960511E3 /* HealthKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitManager.swift; sourceTree = "<group>"; };
 		A9581EC3B754E87D3AA0F667 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		B9A71CE739A535218D5D823A /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		DD1D2B62638CB8FD8E630A11 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		E667141E828D1AAB702F6882 /* RecompHealth.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RecompHealth.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E667141E828D1AAB702F6882 /* Recomp Health.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Recomp Health.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		EE19907D82270431E07ADA45 /* AppViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModel.swift; sourceTree = "<group>"; };
 		F409A99F9687CF5F62AF8CDA /* RecompHealth.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = RecompHealth.entitlements; sourceTree = "<group>"; };
 		F54FA75735C2C0BADCEE1B08 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -37,7 +37,7 @@
 		5FCB2AC694B3E3556FC30BF5 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				E667141E828D1AAB702F6882 /* RecompHealth.app */,
+				E667141E828D1AAB702F6882 /* Recomp Health.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -86,7 +86,7 @@
 			packageProductDependencies = (
 			);
 			productName = RecompHealth;
-			productReference = E667141E828D1AAB702F6882 /* RecompHealth.app */;
+			productReference = E667141E828D1AAB702F6882 /* Recomp Health.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -160,6 +160,7 @@
 				CODE_SIGN_ENTITLEMENTS = RecompHealth/RecompHealth.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = W7DM4KM395;
 				INFOPLIST_FILE = RecompHealth/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -304,6 +305,7 @@
 				CODE_SIGN_ENTITLEMENTS = RecompHealth/RecompHealth.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = W7DM4KM395;
 				INFOPLIST_FILE = RecompHealth/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

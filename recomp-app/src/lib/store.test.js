@@ -1,6 +1,39 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cleanLogInput, initialStore, upsertProfileLog } from "./store.js";
+import { cleanLogInput, exportCsv, importCsv, initialStore, restoreProfileLog, upsertProfileLog } from "./store.js";
+
+test("clearing daily fields and the last meal removes previous values", () => {
+  const state = initialStore();
+  state.logs.tony = [{ date: "2026-09-01", weight: 95, sleep: 480, calories: 400, meals: { lunch: { calories: 400 } }, exerciseMinutes: 20 }];
+  const next = upsertProfileLog(state, "tony", cleanLogInput({ date: "2026-09-01", weight: "", calories: "", sleepHours: "", sleepMinutes: "", meals: {} }));
+  const log = next.logs.tony[0];
+  for (const field of ["weight", "sleep", "calories", "meals"]) assert.equal(log[field], null);
+  assert.equal(log.exerciseMinutes, 20);
+  assert.equal(Object.hasOwn(cleanLogInput({ date: "2026-09-01" }), "sleep"), false);
+});
+
+test("manual edits stop retaining Apple Health ownership for changed fields", () => {
+  const state = initialStore();
+  state.logs.tony = [{ date: "2026-09-01", steps: 5000, weight: 95, sources: { steps: "appleHealth", weight: "appleHealth" } }];
+  const next = upsertProfileLog(state, "tony", { date: "2026-09-01", steps: 6000, weight: 95 });
+  assert.equal(next.logs.tony[0].sources.steps, "manual");
+  assert.equal(next.logs.tony[0].sources.weight, "appleHealth");
+});
+
+test("CSV round trips quoted multiline notes and accepts missing optional columns", () => {
+  const log = { profileId: "tony", date: "2026-09-01", weight: 95, notes: 'Lunch, "outside"\nWalk after dinner' };
+  const [restored] = importCsv(exportCsv({ tony: [log] }));
+  assert.equal(restored.notes, log.notes);
+  assert.equal(restored.weight, 95);
+  const [minimal] = importCsv("profileId,date,weight\ntony,2026-09-01,95");
+  assert.equal(Object.hasOwn(minimal, "sleep"), false);
+});
+
+test("CSV rejects invalid dates and non-finite values", () => {
+  assert.throws(() => importCsv("profileId,date,weight\ntony,2026-02-30,95"));
+  assert.throws(() => importCsv("profileId,date,weight\ntony,2026-09-01,Infinity"));
+  assert.throws(() => importCsv("profileId,date,weight\ntony,2026-09-01,abc"));
+});
 
 test("initial store keeps real starting weights and per-profile calorie plans", () => {
   const store = initialStore();
@@ -33,4 +66,10 @@ test("manual update preserves Apple Health-only metrics", () => {
   assert.equal(log.exerciseMinutes, 45);
   assert.equal(log.restingHeartRate, 60);
   assert.equal(log.calories, 2100);
+});
+
+test("undo restores only the saved date and keeps other dates", () => {
+  const logs = [{ date: "2026-09-15", weight: 80 }, { date: "2026-09-16", weight: 79 }, { date: "2026-09-17", weight: 78 }];
+  assert.deepEqual(restoreProfileLog(logs, "2026-09-16", null), [logs[0], logs[2]]);
+  assert.deepEqual(restoreProfileLog(logs, "2026-09-16", { date: "2026-09-16", weight: 79.5 }), [logs[0], { date: "2026-09-16", weight: 79.5 }, logs[2]]);
 });

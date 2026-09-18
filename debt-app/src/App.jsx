@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { animate, AnimatePresence, domAnimation, LazyMotion, m, MotionConfig, useReducedMotion } from "motion/react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { limitToLast, onValue, query, ref } from "firebase/database";
+import { get, limitToLast, onValue, query, ref } from "firebase/database";
 import { httpsCallable } from "firebase/functions";
 import { getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
 import { auth, cloudFunctions, db, storage } from "./firebase";
 import AuthScreen from "./AuthScreen";
 import BrandMark from "./BrandMark";
 import PersonalFinance from "./PersonalFinance";
+import PushSettings from "./PushSettings";
+import { syncPushAccount, logoutWithPush } from "./push";
+import { defaultReceiptItemIndexes, fileToBase64, normalizeDebtReceiptOcr, receiptNote, selectedReceiptItems, validateReceiptImage } from "./receiptOcr";
 
 const call = (name) => httpsCallable(cloudFunctions, name);
 const createDebt = call("createDebt");
@@ -35,6 +38,7 @@ const reverseDebtPayment = call("reverseDebtPayment");
 const refreshDebtReminders = call("refreshDebtReminders");
 const markDebtNotificationRead = call("markDebtNotificationRead");
 const respondDebtConsent = call("respondDebtConsent");
+const scanDebtReceipt = call("scanDebtReceipt");
 
 const DEFAULT_TERMS = {
   interestAnnualRate: "0",
@@ -379,7 +383,7 @@ function EmptyState({ tab, onCreate }) {
       <div className="empty-illustration"><span>฿</span></div>
       <h3>{tab === "archived" ? "คลังรายการยังว่าง" : tab === "payable" ? "ยังไม่มีรายการที่ต้องจ่าย" : tab === "receivable" ? "ยังไม่มีรายการที่ต้องรับ" : "เริ่มบันทึกรายการแรก"}</h3>
       <p>{tab === "archived" ? "รายการที่ชำระครบ ยกเลิก หรือปฏิเสธ สามารถเก็บไว้ที่นี่ได้" : "สร้างรายการแล้วส่งลิงก์ให้อีกฝ่ายกดยืนยัน ข้อมูลจะอัปเดตให้ทั้งคู่"}</p>
-      {!['payable', 'archived'].includes(tab) && <button className="primary" onClick={onCreate}>+ สร้างรายการหนี้</button>}
+      {tab !== 'archived' && <button className="primary" onClick={onCreate}>+ {tab === "payable" ? "เพิ่มรายการที่ต้องจ่าย" : "สร้างรายการหนี้"}</button>}
     </div>
   );
 }
@@ -463,21 +467,149 @@ function TermsEditor({ terms, onChange }) {
   );
 }
 
-function CreateDebtModal({ user, knownDebtors = [], onClose, onCreated }) {
-  const [form, setForm] = useState({ deliveryMode: "direct", knownDebtorUid: "", debtorEmail: "", debtType: "single", creditorLegalName: user?.displayName || user?.email?.split("@")[0] || "", debtorName: "", title: "", amount: "", dueDateMode: "date", dueDate: initialDueDate(), firstDueDate: initialDueDate(), totalInstallments: "", paidInstallments: "0", monthlyAmount: "", note: "", terms: { ...DEFAULT_TERMS } });
+function ReceiptOcrAssistant({ onApply }) {
+  const inputRef = useRef(null);
+  const [file, setFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [result, setResult] = useState(null);
+  const [selectedItemIndexes, setSelectedItemIndexes] = useState([]);
+  const [useReceiptDate, setUseReceiptDate] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!file) {
+      setPreviewUrl("");
+      return undefined;
+    }
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
+  function chooseFile(nextFile) {
+    const validationError = validateReceiptImage(nextFile);
+    setError(validationError);
+    setResult(null);
+    setSelectedItemIndexes([]);
+    setUseReceiptDate(false);
+    setFile(validationError ? null : nextFile);
+  }
+
+  function clear() {
+    setFile(null);
+    setResult(null);
+    setSelectedItemIndexes([]);
+    setError("");
+    setUseReceiptDate(false);
+    if (inputRef.current) inputRef.current.value = "";
+  }
+
+  async function scan() {
+    const validationError = validateReceiptImage(file);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const imageBase64 = await fileToBase64(file);
+      const response = await scanDebtReceipt({ imageBase64, mimeType: file.type });
+      const extracted = normalizeDebtReceiptOcr(response.data);
+      if (!extracted.title && !extracted.amount && !extracted.receiptNumber) {
+        throw new Error("อ่านข้อมูลจากใบเสร็จไม่ชัดเจน ลองถ่ายรูปใหม่หรือกรอกเองได้");
+      }
+      setResult(extracted);
+      setSelectedItemIndexes(defaultReceiptItemIndexes(extracted.items));
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function toggleItem(index) {
+    setError("");
+    setSelectedItemIndexes((current) => current.includes(index) ? current.filter((value) => value !== index) : [...current, index]);
+  }
+
+  function editItemTitle(index, title) {
+    setResult((current) => ({ ...current, items: current.items.map((item, itemIndex) => itemIndex === index ? { ...item, title, confidence: 1, manuallyEdited: true } : item) }));
+  }
+
+  function apply() {
+    if (!result) return;
+    const selection = selectedReceiptItems(result, selectedItemIndexes);
+    if (result.items.length && !selection.items.length) {
+      setError("เลือกอย่างน้อย 1 รายการจากใบเสร็จก่อนกรอกลงฟอร์ม");
+      return;
+    }
+    if (selection.items.some((item) => !item.title.trim())) {
+      setError("กรุณาแก้ชื่อรายการที่เลือกให้ครบก่อนกรอกลงฟอร์ม");
+      return;
+    }
+    onApply(result, useReceiptDate, selection);
+  }
+
+  const selection = selectedReceiptItems(result, selectedItemIndexes);
+
+  return (
+    <section className="receipt-ocr" aria-label="อ่านข้อมูลจากใบเสร็จ">
+      <div className="receipt-ocr-heading"><span className="receipt-ocr-icon"><UiIcon name="document" /></span><div><strong>มีใบเสร็จอยู่แล้ว?</strong><p>อัปโหลดรูปเพื่อช่วยกรอกชื่อรายการและยอด แล้วตรวจแก้ก่อนส่ง</p></div></div>
+      {!file ? <button type="button" className="receipt-upload-button" onClick={() => inputRef.current?.click()}><UiIcon name="sparkle" />อัปโหลดใบเสร็จเพื่ออ่านข้อมูล</button> : <div className="receipt-file-row"><img src={previewUrl} alt="ตัวอย่างใบเสร็จที่เลือก" /><div><strong>{file.name}</strong><span>{Math.ceil(file.size / 1024)} KB · รูปจะถูกใช้เพื่ออ่านข้อมูลเท่านั้น</span></div><button type="button" className="text-button" onClick={clear}>เปลี่ยนรูป</button></div>}
+      <input ref={inputRef} className="receipt-file-input" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => chooseFile(event.target.files?.[0] || null)} />
+      {file && !result && <button type="button" className="secondary receipt-scan-button" onClick={scan} disabled={busy}>{busy ? <><span className="button-spinner" />กำลังอ่านใบเสร็จ…</> : <><UiIcon name="sparkle" />อ่านและช่วยกรอกข้อมูล</>}</button>}
+      {result && <div className="receipt-result" aria-live="polite">
+        <div className="receipt-result-title"><strong>พบข้อมูลจากใบเสร็จ</strong>{result.confidence > 0 && <span>ความมั่นใจ {Math.round(result.confidence * 100)}%</span>}</div>
+        <dl><div><dt>ชื่อรายการ</dt><dd>{result.title || "ไม่พบ"}</dd></div><div><dt>ยอดรวมในใบเสร็จ</dt><dd>{result.amount ? `฿${money(result.amount)}` : "ไม่พบ"}</dd></div>{result.receiptDate && <div><dt>วันที่ในใบเสร็จ</dt><dd>{shortDate(result.receiptDate)}</dd></div>}{result.receiptNumber && <div><dt>เลขที่ใบเสร็จ</dt><dd>{result.receiptNumber}</dd></div>}</dl>
+        {result.items.length > 0 && <fieldset className="receipt-item-picker"><legend>เลือกรายการที่จะบันทึก</legend><div className="receipt-selection-toolbar"><span>เลือกแล้ว {selection.items.length}/{result.items.length}</span><div><button type="button" onClick={() => { setSelectedItemIndexes(result.items.map((_, index) => index)); setError(""); }}>เลือกทั้งหมด</button><button type="button" onClick={() => setSelectedItemIndexes([])}>ล้าง</button></div></div><p className="receipt-review-hint">เลือกเฉพาะรายการที่ต้องการ และแตะชื่อเพื่อแก้ข้อความที่อ่านคลาดเคลื่อน</p>{result.items.map((item, index) => { const uncertain = !item.manuallyEdited && (item.confidence < 0.75 || item.title.includes("?")); return <div key={index} className={`receipt-item-row ${selectedItemIndexes.includes(index) ? "selected" : ""}${uncertain ? " uncertain" : ""}`}><input type="checkbox" aria-label={`เลือกรายการ ${item.title || index + 1}`} checked={selectedItemIndexes.includes(index)} onChange={() => toggleItem(index)} /><span><span className="receipt-item-name-line"><input className="receipt-item-name" value={item.title} maxLength={160} aria-label={`แก้ชื่อรายการที่ ${index + 1}`} onChange={(event) => editItemTitle(index, event.target.value)} />{uncertain && <em>ตรวจชื่อ</em>}</span>{item.info && <small>{item.info}</small>}</span><b>{item.amount ? `฿${money(item.amount)}` : "ไม่พบยอด"}</b></div>; })}<div className="receipt-selected-total"><span>ยอดเฉพาะที่เลือก</span><strong>฿{money(selection.amount)}</strong></div></fieldset>}
+        {result.receiptDate && <label className="receipt-date-option"><input type="checkbox" checked={useReceiptDate} onChange={(event) => setUseReceiptDate(event.target.checked)} />ใช้วันที่ในใบเสร็จเป็นวันครบกำหนด</label>}
+        <div className="receipt-result-actions"><button type="button" className="text-button" onClick={scan} disabled={busy}>อ่านใหม่</button><button type="button" className="secondary mini" onClick={apply} disabled={result.items.length > 0 && !selection.items.length}>{result.items.length ? `ใช้ ${selection.items.length} รายการ · ฿${money(selection.amount)}` : "กรอกข้อมูลลงฟอร์ม"}</button></div><p className="receipt-disclaimer">ข้อมูลจากการอ่านอาจคลาดเคลื่อน โปรดตรวจสอบและแก้ไขก่อนสร้างรายการ</p>
+      </div>}
+      {error && <div className="form-message error receipt-error" role="alert">{error}</div>}
+    </section>
+  );
+}
+
+function CreateDebtModal({ user, knownCounterparties = [], initialRole = "creditor", onClose, onCreated }) {
+  const [creatorRole, setCreatorRole] = useState(initialRole === "debtor" ? "debtor" : "creditor");
+  const debtorFlow = creatorRole === "debtor";
+  const selfName = user?.displayName || user?.email?.split("@")[0] || "";
+  const [form, setForm] = useState(() => ({ deliveryMode: "direct", knownCounterpartyUid: "", counterpartyEmail: "", debtType: "single", creditorLegalName: initialRole === "debtor" ? "" : selfName, debtorName: initialRole === "debtor" ? selfName : "", title: "", amount: "", dueDateMode: "date", dueDate: initialDueDate(), firstDueDate: initialDueDate(), totalInstallments: "", paidInstallments: "0", monthlyAmount: "", note: "", lineItems: [], terms: { ...DEFAULT_TERMS } }));
   const [step, setStep] = useState(1);
   const [direction, setDirection] = useState(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const set = (key, value) => setForm((current) => ({ ...current, [key]: value }));
-  function selectKnownDebtor(uid) {
-    const person = knownDebtors.find((item) => item.uid === uid);
-    setForm((current) => ({ ...current, knownDebtorUid: uid, debtorEmail: person?.email || "", debtorName: person?.name || current.debtorName }));
+  function selectKnownCounterparty(uid) {
+    const person = knownCounterparties.find((item) => item.uid === uid);
+    setForm((current) => ({ ...current, knownCounterpartyUid: uid, counterpartyEmail: person?.email || "", ...(creatorRole === "debtor" ? { creditorLegalName: person?.name || current.creditorLegalName } : { debtorName: person?.name || current.debtorName }) }));
+  }
+  function changeCreatorRole(role) {
+    setCreatorRole(role);
+    setForm((current) => ({ ...current, knownCounterpartyUid: "", counterpartyEmail: "", creditorLegalName: role === "debtor" ? "" : selfName, debtorName: role === "debtor" ? selfName : "" }));
+  }
+
+  function applyReceipt(result, useReceiptDate, selection) {
+    const noteFromReceipt = receiptNote(result.receiptNumber, result.merchantName);
+    const selectedItems = selection?.items || [];
+    const selectedAmount = Number(selection?.amount) || 0;
+    const hasReceiptLines = result.items.length > 0;
+    setForm((current) => ({
+      ...current,
+      title: result.title || current.title,
+      amount: hasReceiptLines ? String(selectedAmount) : result.amount ? String(result.amount) : current.amount,
+      lineItems: selectedItems.filter((item) => item.title && item.amount > 0).map((item) => ({ title: item.title, amount: item.amount, info: item.info || "" })),
+      dueDate: useReceiptDate && result.receiptDate ? result.receiptDate : current.dueDate,
+      firstDueDate: useReceiptDate && result.receiptDate ? result.receiptDate : current.firstDueDate,
+      note: [current.note.trim(), result.suggestedNote, noteFromReceipt].filter((value, index, values) => value && values.indexOf(value) === index && !current.note.includes(value)).join("\n") || current.note,
+    }));
   }
 
   function validate(targetStep = step) {
     let message = "";
-    if (targetStep === 1 && (!form.creditorLegalName.trim() || !form.debtorName.trim() || (form.deliveryMode === "direct" && !/^\S+@\S+\.\S+$/.test(form.debtorEmail)))) message = "กรอกชื่อทั้งสองฝ่ายและอีเมลบัญชีลูกหนี้ให้ครบ";
+    if (targetStep === 1 && (!form.creditorLegalName.trim() || !form.debtorName.trim() || (form.deliveryMode === "direct" && !/^\S+@\S+\.\S+$/.test(form.counterpartyEmail)))) message = debtorFlow ? `กรอกชื่อเจ้าหนี้${form.deliveryMode === "direct" ? "และอีเมลบัญชีให้ครบ" : "ให้ครบ"}` : `กรอกชื่อทั้งสองฝ่าย${form.deliveryMode === "direct" ? "และอีเมลบัญชีลูกหนี้ให้ครบ" : "ให้ครบ"}`;
     if (targetStep === 2 && (!form.title.trim() || Number(form.amount) <= 0)) message = "กรอกชื่อรายการและยอดทั้งหมดให้ถูกต้อง";
     if (targetStep === 3 && form.debtType === "single" && form.dueDateMode === "date" && !form.dueDate) message = "เลือกวันครบกำหนด";
     if (targetStep === 3 && form.debtType === "installment" && (Number(form.totalInstallments) < 2 || Number(form.monthlyAmount) <= 0 || !form.firstDueDate)) message = "กรอกจำนวนงวด ยอดต่องวด และวันครบกำหนดให้ครบ";
@@ -500,8 +632,10 @@ function CreateDebtModal({ user, knownDebtors = [], onClose, onCreated }) {
     try {
       const result = await createDebt({
         ...form,
+        creatorRole,
         deliveryMode: form.deliveryMode,
-        debtorEmail: form.deliveryMode === "direct" ? form.debtorEmail : "",
+        debtorEmail: creatorRole === "creditor" && form.deliveryMode === "direct" ? form.counterpartyEmail : "",
+        creditorEmail: creatorRole === "debtor" && form.deliveryMode === "direct" ? form.counterpartyEmail : "",
         amount: Number(form.amount),
         dueDate: form.debtType === "installment" ? form.firstDueDate : form.dueDateMode === "none" ? null : form.dueDate,
         noDueDate: form.debtType === "single" && form.dueDateMode === "none",
@@ -521,32 +655,36 @@ function CreateDebtModal({ user, knownDebtors = [], onClose, onCreated }) {
   return (
     <m.div className="modal-backdrop wizard-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
       <m.form className="modal-card create-wizard" onSubmit={submit} noValidate initial={{ opacity: 0, y: 36, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 24, scale: 0.98 }} transition={{ type: "spring", stiffness: 280, damping: 28 }}>
-        <div className="modal-header wizard-header"><div><p className="eyebrow">รายการใหม่ · ขั้นตอน {step} จาก 4</p><h2>{["เลือกคู่สัญญา", "รายละเอียดหนี้", "กำหนดการและเงื่อนไข", "ตรวจสอบก่อนส่ง"][step - 1]}</h2></div><button type="button" className="close" onClick={onClose}>×</button></div>
-        <ol className="wizard-progress" aria-label="ขั้นตอนการสร้างรายการ">{["คู่สัญญา", "ยอดหนี้", "กำหนดการ", "ตรวจสอบ"].map((label, index) => <li key={label} className={step === index + 1 ? "active" : step > index + 1 ? "done" : ""}><button type="button" disabled={index + 1 > step} onClick={() => goTo(index + 1)}><span>{step > index + 1 ? <UiIcon name="check" /> : index + 1}</span><small>{label}</small></button></li>)}</ol>
+        <div className="modal-header wizard-header"><div><p className="eyebrow">รายการใหม่ · ขั้นตอน {step} จาก 4</p><h2>{(debtorFlow ? ["ระบุเจ้าหนี้", "ยอดที่ฉันต้องจ่าย", "กำหนดการชำระ", "ตรวจสอบก่อนส่ง"] : ["เลือกลูกหนี้", "ยอดที่ต้องได้รับ", "กำหนดการและเงื่อนไข", "ตรวจสอบก่อนส่ง"])[step - 1]}</h2></div><button type="button" className="close" onClick={onClose}>×</button></div>
+        <ol className="wizard-progress" aria-label="ขั้นตอนการสร้างรายการ">{(debtorFlow ? ["เจ้าหนี้", "ยอดที่ต้องจ่าย", "กำหนดการ", "ส่งให้ตรวจ"] : ["ลูกหนี้", "ยอดที่ต้องรับ", "กำหนดการ", "ตรวจสอบ"]).map((label, index) => <li key={label} className={step === index + 1 ? "active" : step > index + 1 ? "done" : ""}><button type="button" disabled={index + 1 > step} onClick={() => goTo(index + 1)}><span>{step > index + 1 ? <UiIcon name="check" /> : index + 1}</span><small>{label}</small></button></li>)}</ol>
         <div className="wizard-stage">
           <AnimatePresence mode="wait" initial={false} custom={direction}>
             <m.div key={step} className="wizard-panel" custom={direction} initial={{ opacity: 0, x: direction * 32 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: direction * -24 }} transition={{ duration: 0.24 }}>
               {step === 1 && <>
-                <div className="wizard-intro"><span><UiIcon name="user" /></span><div><h3>รายการนี้เกิดขึ้นระหว่างใคร?</h3><p>ข้อมูลทั้งสองฝ่ายจะปรากฏในข้อตกลงและประวัติรายการ</p></div></div>
-                <fieldset className="delivery-method-field"><legend>วิธีส่งให้ลูกหนี้</legend><div className="delivery-method-toggle" role="radiogroup" aria-label="วิธีส่งให้ลูกหนี้"><button type="button" role="radio" aria-checked={form.deliveryMode === "direct"} className={form.deliveryMode === "direct" ? "active" : ""} onClick={() => set("deliveryMode", "direct")}><UiIcon name="user" /><span><strong>ส่งเข้าบัญชี</strong><small>รู้จักอีเมลของลูกหนี้</small></span></button><button type="button" role="radio" aria-checked={form.deliveryMode === "link"} className={form.deliveryMode === "link" ? "active" : ""} onClick={() => set("deliveryMode", "link")}><UiIcon name="chevron" /><span><strong>ส่งเป็นลิงก์</strong><small>ให้อีกฝ่ายเปิดและยืนยัน</small></span></button></div></fieldset>
-                <div className="form-grid wizard-fields"><div><label>ชื่อเจ้าหนี้ในข้อตกลง</label><input maxLength={120} value={form.creditorLegalName} onChange={(event) => set("creditorLegalName", event.target.value)} placeholder="ชื่อ-นามสกุล" /></div><div><label>ชื่อลูกหนี้</label><input maxLength={120} value={form.debtorName} onChange={(event) => set("debtorName", event.target.value)} placeholder="ชื่อที่ต้องการแสดง" /></div>{form.deliveryMode === "direct" && <div className="wide direct-debtor-fields">{knownDebtors.length > 0 && <label><span>เลือกจากคนที่เคยทำรายการด้วย</span><select value={form.knownDebtorUid} onChange={(event) => selectKnownDebtor(event.target.value)}><option value="">เลือกจากรายชื่อเดิม</option>{knownDebtors.map((person) => <option key={person.uid} value={person.uid}>{person.name} · {person.email}</option>)}</select></label>}<label><span>{knownDebtors.length ? "หรือกรอกอีเมลบัญชี" : "อีเมลบัญชีลูกหนี้"}</span><input type="email" value={form.debtorEmail} onChange={(event) => setForm((current) => ({ ...current, knownDebtorUid: "", debtorEmail: event.target.value }))} placeholder="name@example.com" autoComplete="off" /></label><p>ค้นหาด้วยอีเมลที่ตรงกันเท่านั้น ระบบไม่เปิดเผยรายชื่อผู้ใช้อื่น</p></div>}</div>
+                <fieldset className="delivery-field"><legend>รายการนี้เป็นเงินเข้าหรือเงินออกของคุณ?</legend><div className="delivery-toggle" role="radiogroup"><button type="button" role="radio" aria-checked={creatorRole === "creditor"} className={creatorRole === "creditor" ? "active" : ""} onClick={() => changeCreatorRole("creditor")}><UiIcon name="incoming" /><span><strong>ฉันต้องได้รับเงิน</strong><small>อีกฝ่ายเป็นผู้จ่ายให้ฉัน</small></span></button><button type="button" role="radio" aria-checked={creatorRole === "debtor"} className={creatorRole === "debtor" ? "active" : ""} onClick={() => changeCreatorRole("debtor")}><UiIcon name="outgoing" /><span><strong>ฉันต้องจ่ายเงิน</strong><small>ฉันแจ้งยอดให้ผู้รับเงินตรวจสอบ</small></span></button></div></fieldset>
+                {debtorFlow && <div className="debtor-flow-guide" role="status"><strong>ขั้นตอนสั้น ๆ</strong><ol><li><span>1</span>คุณกรอกยอดที่ต้องจ่าย</li><li><span>2</span>ส่งให้เจ้าหนี้ตรวจสอบ</li><li><span>3</span>รายการเริ่มเมื่อเจ้าหนี้ยืนยัน</li></ol></div>}
+                <div className="wizard-intro"><span><UiIcon name="user" /></span><div><h3>{debtorFlow ? "คุณต้องจ่ายเงินให้ใคร?" : "ใครต้องจ่ายเงินให้คุณ?"}</h3><p>{debtorFlow ? `คุณคือผู้จ่าย (${selfName}) กรอกข้อมูลของผู้ที่จะรับเงินด้านล่าง` : "ระบุผู้จ่าย แล้วเลือกว่าอยากส่งรายการให้เขาด้วยวิธีใด"}</p></div></div>
+                <div className="form-grid wizard-fields party-fields">{debtorFlow ? <div className="wide"><label>ชื่อผู้รับเงิน (เจ้าหนี้)</label><input maxLength={120} value={form.creditorLegalName} onChange={(event) => set("creditorLegalName", event.target.value)} placeholder="ชื่อ-นามสกุลของคนที่คุณต้องจ่ายให้" autoFocus /></div> : <><div><label>ชื่อของคุณในข้อตกลง</label><input maxLength={120} value={form.creditorLegalName} onChange={(event) => set("creditorLegalName", event.target.value)} placeholder="ชื่อ-นามสกุล" /></div><div><label>ชื่อผู้จ่าย (ลูกหนี้)</label><input maxLength={120} value={form.debtorName} onChange={(event) => set("debtorName", event.target.value)} placeholder="ชื่อที่ต้องการแสดง" /></div></>}</div>
+                <fieldset className="delivery-method-field"><legend>{debtorFlow ? "ส่งให้เจ้าหนี้ตรวจสอบอย่างไร?" : "ส่งให้ลูกหนี้ตรวจสอบอย่างไร?"}</legend><div className="delivery-method-toggle" role="radiogroup" aria-label={debtorFlow ? "วิธีส่งให้เจ้าหนี้" : "วิธีส่งให้ลูกหนี้"}><button type="button" role="radio" aria-checked={form.deliveryMode === "direct"} className={form.deliveryMode === "direct" ? "active" : ""} onClick={() => set("deliveryMode", "direct")}><UiIcon name="user" /><span><strong>ส่งเข้าบัญชีโดยตรง</strong><small>{debtorFlow ? "ใช้อีเมลบัญชีของเจ้าหนี้" : "ใช้อีเมลบัญชีของลูกหนี้"}</small></span></button><button type="button" role="radio" aria-checked={form.deliveryMode === "link"} className={form.deliveryMode === "link" ? "active" : ""} onClick={() => set("deliveryMode", "link")}><UiIcon name="chevron" /><span><strong>สร้างลิงก์ส่งเอง</strong><small>ส่งผ่านแชตหรือช่องทางส่วนตัว</small></span></button></div></fieldset>
+                {form.deliveryMode === "direct" && <div className="direct-debtor-fields">{knownCounterparties.length > 0 && <label><span>เลือกจากคนที่เคยทำรายการด้วย</span><select value={form.knownCounterpartyUid} onChange={(event) => selectKnownCounterparty(event.target.value)}><option value="">เลือกจากรายชื่อเดิม</option>{knownCounterparties.map((person) => <option key={person.uid} value={person.uid}>{person.name} · {person.email}</option>)}</select></label>}<label><span>{knownCounterparties.length ? "หรือกรอกอีเมลบัญชี" : `อีเมลบัญชี${debtorFlow ? "เจ้าหนี้" : "ลูกหนี้"}`}</span><input type="email" value={form.counterpartyEmail} onChange={(event) => setForm((current) => ({ ...current, knownCounterpartyUid: "", counterpartyEmail: event.target.value }))} placeholder="name@example.com" autoComplete="off" /></label><p>ผู้รับจะเห็นรายละเอียดและต้องกดยืนยันก่อนรายการมีผลร่วมกัน</p></div>}
               </>}
               {step === 2 && <>
-                <div className="wizard-intro"><span><UiIcon name="wallet" /></span><div><h3>บันทึกยอดให้เข้าใจตรงกัน</h3><p>ตั้งชื่อสั้น กระชับ และเลือกว่าจะชำระครั้งเดียวหรือแบ่งงวด</p></div></div>
+                <div className="wizard-intro"><span><UiIcon name="wallet" /></span><div><h3>{debtorFlow ? "คุณต้องจ่ายเรื่องอะไร และเท่าไร?" : "บันทึกยอดให้เข้าใจตรงกัน"}</h3><p>{debtorFlow ? `ยอดนี้จะถูกส่งให้ ${form.creditorLegalName || "เจ้าหนี้"} ตรวจสอบ คุณยังแก้ไขได้ก่อนส่ง` : "ตั้งชื่อสั้น กระชับ และเลือกว่าจะชำระครั้งเดียวหรือแบ่งงวด"}</p></div></div>
+                <ReceiptOcrAssistant onApply={applyReceipt} />
                 <div className="debt-type-toggle"><button type="button" className={form.debtType === "single" ? "active" : ""} onClick={() => set("debtType", "single")}><strong>จ่ายครั้งเดียว</strong><span>ยอดเดียวหรือยังไม่กำหนดวัน</span></button><button type="button" className={form.debtType === "installment" ? "active" : ""} onClick={() => set("debtType", "installment")}><strong>ผ่อนรายเดือน</strong><span>แบ่งยอดเป็นหลายงวด</span></button></div>
-                <div className="form-grid wizard-fields"><div className="wide"><label>ชื่อรายการ</label><input maxLength={160} value={form.title} onChange={(event) => set("title", event.target.value)} placeholder="เช่น ค่าอาหารและค่าเดินทาง" autoFocus /></div><div className="wide amount-focus"><label>ยอดทั้งหมด</label><div className="money-input"><span>฿</span><input type="number" min="0.01" step="0.01" value={form.amount} onChange={(event) => set("amount", event.target.value)} placeholder="0.00" /></div></div></div>
+                <div className="form-grid wizard-fields"><div className="wide"><label>{debtorFlow ? "รายการนี้คือค่าอะไร?" : "ชื่อรายการ"}</label><input maxLength={160} value={form.title} onChange={(event) => set("title", event.target.value)} placeholder="เช่น ค่าอาหารและค่าเดินทาง" autoFocus /></div><div className="wide amount-focus"><label>{debtorFlow ? "ยอดที่คุณต้องจ่าย" : "ยอดทั้งหมด"}</label><div className="money-input"><span>฿</span><input type="number" min="0.01" step="0.01" value={form.amount} onChange={(event) => set("amount", event.target.value)} placeholder="0.00" /></div></div></div>
               </>}
               {step === 3 && <>
-                <div className="wizard-intro"><span><UiIcon name="calendar" /></span><div><h3>{form.debtType === "installment" ? "วางแผนแต่ละงวด" : "กำหนดวันที่คาดว่าจะชำระ"}</h3><p>วันที่นี้ใช้คำนวณ countdown และการแจ้งเตือน</p></div></div>
-                <div className="form-grid wizard-fields">{form.debtType === "single" ? <fieldset className="due-date-field wide"><legend>กำหนดชำระ</legend><div className="due-date-toggle" role="radiogroup"><button type="button" role="radio" aria-checked={form.dueDateMode === "date"} className={form.dueDateMode === "date" ? "active" : ""} onClick={() => set("dueDateMode", "date")}><strong>ระบุวันที่</strong><span>ติดตามและแจ้งเตือนอัตโนมัติ</span></button><button type="button" role="radio" aria-checked={form.dueDateMode === "none"} className={form.dueDateMode === "none" ? "active" : ""} onClick={() => set("dueDateMode", "none")}><strong>ไม่มีกำหนด</strong><span>เสนอวันชำระภายหลังได้</span></button></div>{form.dueDateMode === "date" ? <div className="date-control"><label htmlFor="create-due-date">วันครบกำหนด</label><input id="create-due-date" type="date" value={form.dueDate} onChange={(event) => set("dueDate", event.target.value)} /></div> : <p className="field-help">ลูกหนี้ยังเสนอวันที่และยอดที่ต้องการชำระภายหลังได้</p>}</fieldset> : <><div><label>จำนวนงวดทั้งหมด</label><input type="number" min="2" max="120" value={form.totalInstallments} onChange={(event) => set("totalInstallments", event.target.value)} placeholder="เช่น 10" /></div><div><label>ชำระแล้วกี่งวด</label><input type="number" min="0" max={Math.max(0, Number(form.totalInstallments) - 1)} value={form.paidInstallments} onChange={(event) => set("paidInstallments", event.target.value)} /></div><div><label>ยอดต่องวด</label><div className="money-input"><span>฿</span><input type="number" min="0.01" step="0.01" value={form.monthlyAmount} onChange={(event) => set("monthlyAmount", event.target.value)} placeholder={form.amount && form.totalInstallments ? money(Number(form.amount) / Number(form.totalInstallments)) : "0.00"} /></div></div><div><label>ครบกำหนดงวดถัดไป</label><input type="date" value={form.firstDueDate} onChange={(event) => set("firstDueDate", event.target.value)} /></div><button type="button" className="calculate-installment wide" onClick={() => { const count = Number(form.totalInstallments); if (count > 0 && Number(form.amount) > 0) set("monthlyAmount", String(Math.round((Number(form.amount) / count) * 100) / 100)); }}>คำนวณยอดต่องวดจากยอดรวม</button></>}
+                <div className="wizard-intro"><span><UiIcon name="calendar" /></span><div><h3>{form.debtType === "installment" ? (debtorFlow ? "คุณต้องการแบ่งจ่ายอย่างไร?" : "วางแผนแต่ละงวด") : (debtorFlow ? "คุณตั้งใจชำระเมื่อไร?" : "กำหนดวันที่คาดว่าจะชำระ")}</h3><p>ใช้วันที่นี้ติดตามจำนวนวันคงเหลือและแจ้งเตือนทั้งสองฝ่าย</p></div></div>
+                <div className="form-grid wizard-fields">{form.debtType === "single" ? <fieldset className="due-date-field wide"><legend>กำหนดชำระ</legend><div className="due-date-toggle" role="radiogroup"><button type="button" role="radio" aria-checked={form.dueDateMode === "date"} className={form.dueDateMode === "date" ? "active" : ""} onClick={() => set("dueDateMode", "date")}><strong>ระบุวันที่</strong><span>ติดตามและแจ้งเตือนอัตโนมัติ</span></button><button type="button" role="radio" aria-checked={form.dueDateMode === "none"} className={form.dueDateMode === "none" ? "active" : ""} onClick={() => set("dueDateMode", "none")}><strong>ยังไม่กำหนด</strong><span>ตกลงวันชำระภายหลังได้</span></button></div>{form.dueDateMode === "date" ? <div className="date-control"><label htmlFor="create-due-date">วันครบกำหนด</label><input id="create-due-date" type="date" value={form.dueDate} onChange={(event) => set("dueDate", event.target.value)} /></div> : <p className="field-help">สร้างรายการไว้ก่อนได้ แล้วค่อยเสนอวันชำระเมื่อพร้อม</p>}</fieldset> : <><div><label>จำนวนงวดทั้งหมด</label><input type="number" min="2" max="120" value={form.totalInstallments} onChange={(event) => set("totalInstallments", event.target.value)} placeholder="เช่น 10" /></div><div><label>ชำระแล้วกี่งวด</label><input type="number" min="0" max={Math.max(0, Number(form.totalInstallments) - 1)} value={form.paidInstallments} onChange={(event) => set("paidInstallments", event.target.value)} /></div><div><label>ยอดต่องวด</label><div className="money-input"><span>฿</span><input type="number" min="0.01" step="0.01" value={form.monthlyAmount} onChange={(event) => set("monthlyAmount", event.target.value)} placeholder={form.amount && form.totalInstallments ? money(Number(form.amount) / Number(form.totalInstallments)) : "0.00"} /></div></div><div><label>ครบกำหนดงวดถัดไป</label><input type="date" value={form.firstDueDate} onChange={(event) => set("firstDueDate", event.target.value)} /></div><button type="button" className="calculate-installment wide" onClick={() => { const count = Number(form.totalInstallments); if (count > 0 && Number(form.amount) > 0) set("monthlyAmount", String(Math.round((Number(form.amount) / count) * 100) / 100)); }}>คำนวณยอดต่องวดจากยอดรวม</button></>}
                   <TermsEditor terms={form.terms} onChange={(value) => set("terms", value)} /><div className="wide"><label>รายละเอียดเพิ่มเติม <span className="optional">(ไม่บังคับ)</span></label><textarea maxLength={1000} value={form.note} onChange={(event) => set("note", event.target.value)} placeholder="รายละเอียดหรือข้อตกลงระหว่างกัน" /></div></div>
               </>}
-              {step === 4 && <div className="review-card"><div className="review-orb"><UiIcon name="document" /></div><p className="eyebrow">พร้อมส่งให้อีกฝ่ายตรวจสอบ</p><h3>{form.title}</h3><strong className="review-amount">฿{money(form.amount)}</strong><div className="review-flow"><span>{form.creditorLegalName}</span><UiIcon name="chevron" /><span>{form.debtorName}</span></div><dl><div><dt>ประเภท</dt><dd>{form.debtType === "installment" ? `ผ่อน ${form.totalInstallments} งวด · ฿${money(form.monthlyAmount)}/งวด` : "ชำระครั้งเดียว"}</dd></div><div><dt>กำหนดชำระ</dt><dd>{form.debtType === "installment" ? shortDate(form.firstDueDate) : form.dueDateMode === "none" ? "ไม่มีกำหนด" : shortDate(form.dueDate)}</dd></div><div><dt>วิธีส่ง</dt><dd>{form.deliveryMode === "direct" ? `ส่งเข้า ${form.debtorEmail}` : "สร้างลิงก์ส่วนตัว"}</dd></div><div><dt>ชำระบางส่วน</dt><dd>{form.terms.allowPartialPayments ? "ได้" : "ไม่ได้"}</dd></div></dl><p className="review-notice"><UiIcon name="status" />อีกฝ่ายต้องตรวจสอบและยืนยันก่อนรายการมีผลร่วมกัน</p></div>}
+              {step === 4 && <div className="review-card"><div className="review-orb"><UiIcon name="document" /></div><p className="eyebrow">{debtorFlow ? "ตรวจสอบคำขอก่อนส่งให้เจ้าหนี้" : "พร้อมส่งให้อีกฝ่ายตรวจสอบ"}</p><h3>{form.title}</h3><strong className="review-amount">฿{money(form.amount)}</strong><div className="review-flow"><span><small>ผู้จ่าย</small>{form.debtorName}</span><UiIcon name="chevron" /><span><small>ผู้รับเงิน</small>{form.creditorLegalName}</span></div><dl><div><dt>ประเภท</dt><dd>{form.debtType === "installment" ? `ผ่อน ${form.totalInstallments} งวด · ฿${money(form.monthlyAmount)}/งวด` : "ชำระครั้งเดียว"}</dd></div><div><dt>กำหนดชำระ</dt><dd>{form.debtType === "installment" ? shortDate(form.firstDueDate) : form.dueDateMode === "none" ? "ไม่มีกำหนด" : shortDate(form.dueDate)}</dd></div><div><dt>วิธีส่ง</dt><dd>{form.deliveryMode === "direct" ? `ส่งเข้า ${form.counterpartyEmail}` : "สร้างลิงก์ส่วนตัว"}</dd></div><div><dt>ชำระบางส่วน</dt><dd>{form.terms.allowPartialPayments ? "ได้" : "ไม่ได้"}</dd></div></dl><p className="review-notice"><UiIcon name="status" />{debtorFlow ? `${form.creditorLegalName || "เจ้าหนี้"} ต้องยืนยันยอดก่อน รายการจึงเริ่มติดตามร่วมกัน` : "อีกฝ่ายต้องตรวจสอบและยืนยันก่อนรายการมีผลร่วมกัน"}</p></div>}
             </m.div>
           </AnimatePresence>
         </div>
         {error && <m.div className="form-message error" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}>{error}</m.div>}
-        <div className="modal-actions wizard-actions"><button type="button" className="secondary" onClick={() => step === 1 ? onClose() : goTo(step - 1)}>{step === 1 ? "ยกเลิก" : "ย้อนกลับ"}</button>{step < 4 ? <button type="button" className="primary" onClick={() => goTo(step + 1)}>ถัดไป <UiIcon name="chevron" /></button> : <button className="primary send-agreement" disabled={busy}>{busy ? "กำลังสร้าง…" : form.deliveryMode === "direct" ? "ส่งคำขอเข้าบัญชี" : "สร้างและรับลิงก์เชิญ"}<UiIcon name="sparkle" /></button>}</div>
+        <div className="modal-actions wizard-actions"><button type="button" className="secondary" onClick={() => step === 1 ? onClose() : goTo(step - 1)}>{step === 1 ? "ยกเลิก" : "ย้อนกลับ"}</button>{step < 4 ? <button type="button" className="primary" onClick={() => goTo(step + 1)}>ถัดไป <UiIcon name="chevron" /></button> : <button className="primary send-agreement" disabled={busy}>{busy ? "กำลังสร้าง…" : debtorFlow ? (form.deliveryMode === "direct" ? "ส่งให้เจ้าหนี้ตรวจสอบ" : "สร้างลิงก์ส่งให้เจ้าหนี้") : (form.deliveryMode === "direct" ? "ส่งให้ลูกหนี้ตรวจสอบ" : "สร้างลิงก์ส่งให้ลูกหนี้")}<UiIcon name="sparkle" /></button>}</div>
       </m.form>
     </m.div>
   );
@@ -563,8 +701,8 @@ function InviteCreatedModal({ data, onClose }) {
     <m.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
       <m.div className="modal-card compact success-modal" initial={{ opacity: 0, y: 32, scale: 0.9 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.94 }} transition={{ type: "spring", stiffness: 260, damping: 23 }}>
         <m.div className="success-orb" initial={{ rotate: -110, scale: 0 }} animate={{ rotate: 0, scale: 1 }} transition={{ delay: .12, type: "spring", stiffness: 250, damping: 16 }}><UiIcon name="check" /></m.div>
-        <h2>{data.batch ? "นำเข้ารายการแล้ว" : "สร้างรายการแล้ว"}</h2>
-        <p className="center muted">{data.batch ? "บัญชีนี้เป็นเจ้าหนี้ของรายการ Pun ทั้งหมด ส่งลิงก์เดียวนี้ให้ Pun เพื่อยืนยันพร้อมกัน" : "ส่งลิงก์นี้ให้ลูกหนี้เพื่อตรวจสอบและยืนยันรายการ"}</p>
+        <h2>{data.batch ? "นำเข้ารายการแล้ว" : data.creatorRole === "debtor" ? "สร้างคำขอแล้ว" : "สร้างรายการแล้ว"}</h2>
+        <p className="center muted">{data.batch ? "บัญชีนี้เป็นเจ้าหนี้ของรายการ Pun ทั้งหมด ส่งลิงก์เดียวนี้ให้ Pun เพื่อยืนยันพร้อมกัน" : data.creatorRole === "debtor" ? `ส่งลิงก์นี้ให้ ${data.counterpartyName || "เจ้าหนี้"} ตรวจสอบและยืนยันยอดที่คุณแจ้ง` : "ส่งลิงก์นี้ให้ลูกหนี้เพื่อตรวจสอบและยืนยันรายการ"}</p>
         <div className="invite-link"><span>{data.inviteUrl}</span><button onClick={copy}>{copied ? "คัดลอกแล้ว" : "คัดลอก"}</button></div>
         <p className="security-note">ลิงก์นี้ใช้รับสิทธิ์เข้าถึงรายการ ควรส่งให้อีกฝ่ายเป็นการส่วนตัว</p>
         <button className="primary full" onClick={onClose}>เสร็จสิ้น</button>
@@ -630,7 +768,7 @@ function AcceptInviteModal({ code, onClose, onAccepted }) {
         {!preview && !error && <div className="preview-loading"><div className="loader" /><span>กำลังโหลดข้อตกลงฉบับล่าสุด…</span></div>}
         {preview && <>
           <div className="agreement-preview-list">{preview.items.map((item, index) => <m.article key={item.debtId} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * .05 }}>
-            <div><strong>{item.title}</strong><span>{item.creditorName} → {item.debtorName}</span></div><strong className="agreement-amount">฿{money(item.outstandingStatus === "unconfirmed" ? item.amount : item.outstandingAmount)}</strong>
+            <div><strong>{item.title}</strong><span>ผู้จ่าย {item.debtorName} → ผู้รับเงิน {item.creditorName}</span></div><strong className="agreement-amount">฿{money(item.outstandingStatus === "unconfirmed" ? item.amount : item.outstandingAmount)}</strong>
             <dl><div><dt>ประเภท</dt><dd>{item.debtType === "installment" ? `ผ่อน ${item.installmentPlan?.totalInstallments || "—"} งวด` : "จ่ายครั้งเดียว"}</dd></div><div><dt>กำหนดชำระ</dt><dd>{item.dueDateMode === "none" ? "ไม่มีกำหนด" : shortDate(item.dueDate)}</dd></div><div><dt>เวอร์ชัน</dt><dd>{item.version}</dd></div></dl>
             <ul>{termsLines(item.terms).map((line) => <li key={line}>{line}</li>)}</ul>
             {item.note && <p>{item.note}</p>}
@@ -741,13 +879,33 @@ function ProofLink({ proof }) {
 }
 
 function NotificationsPanel({ notifications, onClose, onOpen }) {
+  const [filter, setFilter] = useState('all');
+  const panelRef = useRef(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    const previous = document.activeElement;
+    panelRef.current?.querySelector('button')?.focus();
+    const keydown = event => {
+      if (event.key === 'Escape') { event.preventDefault(); closeRef.current(); }
+      if (event.key !== 'Tab') return;
+      const buttons = [...panelRef.current.querySelectorAll('button:not(:disabled), input:not(:disabled), a[href]')].filter(node => node.getClientRects().length);
+      const first = buttons[0], last = buttons.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    const panel = panelRef.current;
+    panel.addEventListener('keydown', keydown);
+    return () => { panel.removeEventListener('keydown', keydown); previous?.focus(); };
+  }, []);
+  const visible = notifications.filter(item => filter === 'all' || (filter === 'unread' ? !item.readAt : /requested|received|payment_submitted|payment_rejected/.test(item.type)));
   const unreadCount = notifications.filter((item) => !item.readAt).length;
   return (
     <>
       <m.button type="button" className="notification-scrim" aria-label="ปิดการแจ้งเตือน" onClick={onClose} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} />
-      <m.div className="notification-panel" role="dialog" aria-label="การแจ้งเตือน" initial={{ opacity: 0, y: -12, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -8, scale: 0.97 }} transition={{ type: "spring", stiffness: 350, damping: 30 }}>
+      <m.div ref={panelRef} className="notification-panel" role="dialog" aria-modal="true" aria-label="การแจ้งเตือน" initial={{ opacity: 0, y: -12, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -8, scale: 0.97 }} transition={{ type: "spring", stiffness: 350, damping: 30 }}>
         <div className="notification-header"><div><strong>การแจ้งเตือน</strong>{unreadCount > 0 && <span>{unreadCount} ใหม่</span>}</div><button type="button" aria-label="ปิด" onClick={onClose}>×</button></div>
-        <div className="notification-list">{notifications.length ? notifications.slice(0, 30).map((item) => (
+        <PushSettings /><div className="notification-filters" aria-label="กรองการแจ้งเตือน">{[["all","ทั้งหมด"],["attention","ต้องตรวจสอบ"],["unread","ยังไม่อ่าน"]].map(([value,label]) => <button key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>)}</div><div className="notification-list">{visible.length ? visible.map((item) => (
           <m.button className={item.readAt ? "" : "unread"} key={item.id} onClick={() => onOpen(item)} initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} whileTap={{ scale: 0.99 }}>
             <span className="notification-icon" aria-hidden="true"><UiIcon name="bell" /></span><div><strong>{item.title}</strong><p>{item.body}</p><small>{dateTime(item.createdAt)}</small></div><UiIcon name="chevron" className="notification-chevron" />
           </m.button>
@@ -780,9 +938,15 @@ function DebtDetailModal({ debt, user, onClose, onToast, onArchived, archived, o
   const [confirmedOutstanding, setConfirmedOutstanding] = useState("");
   const [showEdit, setShowEdit] = useState(false);
   const [agreementConsent, setAgreementConsent] = useState(false);
-  const [detailTab, setDetailTab] = useState(debt.inviteDelivery === "direct" && debt.directInviteStatus === "pending" && debt.creditorUid !== user.uid ? "agreement" : "overview");
+  const [detailTab, setDetailTab] = useState(debt.inviteDelivery === "direct" && debt.directInviteStatus === "pending" && ((debt.directInviteRole || "debtor") === "creditor" ? debt.creditorUid === user.uid : debt.debtorUid === user.uid) ? "agreement" : "overview");
   const [celebration, setCelebration] = useState("");
   const creditor = debt.creditorUid === user.uid;
+  const directInvitee = debt.inviteDelivery === "direct" && debt.directInviteStatus === "pending" && ((debt.directInviteRole || "debtor") === "creditor" ? creditor : !creditor);
+  const pendingInviteCreator = debt.status === "pending" && ((debt.directInviteRole || debt.pendingCounterpartyRole || "debtor") === "creditor" ? !creditor : creditor);
+  const awaitingCounterparty = ["pending", "invite_revoked"].includes(debt.status) && debt.agreementStatus !== "accepted";
+  const canCancel = awaitingCounterparty
+    ? ((debt.directInviteRole || debt.pendingCounterpartyRole || "debtor") === "creditor" ? debt.debtorUid === user.uid : debt.creditorUid === user.uid)
+    : Boolean(debt.creditorUid === user.uid || debt.debtorUid === user.uid);
   const meta = statusMeta(debt);
   const installments = Object.values(debt.installments || {}).sort((a, b) => Number(a.sequence) - Number(b.sequence));
   const dueInfo = debtDueInfo(debt);
@@ -1047,10 +1211,10 @@ function DebtDetailModal({ debt, user, onClose, onToast, onArchived, archived, o
   return (
     <m.div className="modal-backdrop detail-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
       <m.div layoutId={`debt-${debt.id}`} className="modal-card detail-card" data-active-tab={detailTab} initial={{ opacity: 0, y: 30, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 20, scale: 0.98 }} transition={{ type: "spring", stiffness: 280, damping: 28 }}>
-        <div className="modal-header"><div><span className={`status ${meta.className}`}>{meta.label}</span><h2>{debt.title}</h2></div><div className="header-actions">{!["paid", "cancelled", "declined", "disputed"].includes(debt.status) && (debt.status !== "pending" || creditor) && <button className="secondary mini" onClick={() => setShowEdit(true)}>แก้ไข</button>}<button className="close" onClick={onClose}>×</button></div></div>
+        <div className="modal-header"><div><span className={`status ${meta.className}`}>{meta.label}</span><h2>{debt.title}</h2></div><div className="header-actions">{!["paid", "cancelled", "declined", "disputed"].includes(debt.status) && (debt.status !== "pending" || pendingInviteCreator) && <button className="secondary mini" onClick={() => setShowEdit(true)}>แก้ไข</button>}<button className="close" onClick={onClose}>×</button></div></div>
         <nav className="detail-tabs" aria-label="รายละเอียดรายการ">{[["overview", "ภาพรวม", "wallet"], ["schedule", "กำหนดการ", "calendar"], ["payments", "ชำระเงิน", "incoming"], ["agreement", "ข้อตกลง", "document"]].map(([value, label, icon]) => { const needsAttention = value === "agreement" ? !currentUserAcceptedAgreement || changeRequests.some((item) => item.status === "pending" && item.approverUid === user.uid) || consentRequests.some((item) => item.status === "pending" && item.approverUid === user.uid) : value === "payments" && creditor && payments.some((item) => ["pending", "processing"].includes(item.status)); return <button key={value} className={detailTab === value ? "active" : ""} aria-current={detailTab === value ? "page" : undefined} onClick={() => setDetailTab(value)}><UiIcon name={icon} /><span>{label}</span>{needsAttention && <i aria-label="มีรายการรอดำเนินการ" />}</button>; })}</nav>
         <AnimatePresence>{celebration && <m.div className="celebration-burst" role="status" initial={{ opacity: 0, scale: 0.65, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.86, y: -10 }}><span><UiIcon name="check" /></span><strong>{celebration}</strong><i /><i /><i /></m.div>}</AnimatePresence>
-        {debt.inviteDelivery === "direct" && debt.directInviteStatus === "pending" && debt.status === "pending" && !creditor && <div className="direct-invite-banner"><span><UiIcon name="bell" /></span><div><strong>เจ้าหนี้ส่งรายการนี้ให้คุณโดยตรง</strong><p>ตรวจสอบยอด วันชำระ และเงื่อนไขด้านล่าง ก่อนยืนยันเปิดรายการ</p></div><button className="danger-outline" disabled={busyId === "direct-invite"} onClick={declineDirectInvite}>ไม่ยืนยัน</button></div>}
+        {debt.inviteDelivery === "direct" && debt.directInviteStatus === "pending" && debt.status === "pending" && directInvitee && <div className="direct-invite-banner"><span><UiIcon name="bell" /></span><div><strong>{(debt.directInviteRole || "debtor") === "creditor" ? "ลูกหนี้" : "เจ้าหนี้"}ส่งรายการนี้ให้คุณโดยตรง</strong><p>ตรวจสอบยอด วันชำระ และเงื่อนไขด้านล่าง ก่อนยืนยันเปิดรายการ</p></div><button className="danger-outline" disabled={busyId === "direct-invite"} onClick={declineDirectInvite}>ไม่ยืนยัน</button></div>}
         <div className="detail-hero">
           <div><span>ยอดค้างชำระ</span><strong>{outstandingUnconfirmed ? "ยังไม่ระบุ" : `฿${money(debt.outstandingAmount)}`}</strong></div>
           <dl><div><dt>{outstandingUnconfirmed ? "ยอดอ้างอิง" : "ยอดตั้งต้น"}</dt><dd>฿{money(debt.amount)}</dd></div><div><dt>กำหนดชำระ</dt><dd>{debt.dueDateMode === "none" || !debt.dueDate ? "ไม่มีกำหนด" : shortDate(debt.dueDate)}</dd></div></dl>
@@ -1059,13 +1223,13 @@ function DebtDetailModal({ debt, user, onClose, onToast, onArchived, archived, o
         <div className="people-row"><div><small>เจ้าหนี้</small><strong>{debt.creditorName}</strong></div><span>→</span><div><small>ลูกหนี้</small><strong>{debt.debtorName}</strong></div></div>
         {debt.note && <div className="note-box">{debt.note}</div>}
         <section className="terms-summary">
-          <div className="section-title-row"><div><h3>เงื่อนไขที่ตกลงร่วมกัน</h3><small>เวอร์ชัน {debt.agreementVersion || 1} · {debt.agreementStatus === "accepted" ? "ทั้งสองฝ่ายยืนยันแล้ว" : debt.debtorUid ? "รอการยืนยันให้ครบทั้งสองฝ่าย" : "รอลูกหนี้ยืนยัน"}</small></div><span className={`status ${debt.agreementStatus === "accepted" ? "paid" : "pending"}`}>{debt.agreementStatus === "accepted" ? "ยืนยันครบ" : "รอยืนยัน"}</span></div>
+          <div className="section-title-row"><div><h3>เงื่อนไขที่ตกลงร่วมกัน</h3><small>เวอร์ชัน {debt.agreementVersion || 1} · {debt.agreementStatus === "accepted" ? "ทั้งสองฝ่ายยืนยันแล้ว" : debt.debtorUid && debt.creditorUid ? "รอการยืนยันให้ครบทั้งสองฝ่าย" : (debt.pendingCounterpartyRole || "debtor") === "creditor" ? "รอเจ้าหนี้ยืนยัน" : "รอลูกหนี้ยืนยัน"}</small></div><span className={`status ${debt.agreementStatus === "accepted" ? "paid" : "pending"}`}>{debt.agreementStatus === "accepted" ? "ยืนยันครบ" : "รอยืนยัน"}</span></div>
           <ul>{termsLines(debt.terms).map((line) => <li key={line}>{line}</li>)}</ul>
           {debt.agreementDigest && <code title={debt.agreementDigest}>SHA-256 {debt.agreementDigest.slice(0, 12)}…</code>}
-          {debt.debtorUid && !currentUserAcceptedAgreement && <div className="inline-agreement-consent"><label><input type="checkbox" checked={agreementConsent} onChange={(event) => setAgreementConsent(event.target.checked)} /><span>ฉันอ่านและยอมรับข้อตกลงเวอร์ชันนี้</span></label><button className="primary" disabled={!agreementConsent || busyId === "agreement"} onClick={acceptCurrentAgreement}>{busyId === "agreement" ? "กำลังบันทึก…" : debt.inviteDelivery === "direct" && debt.directInviteStatus === "pending" && !creditor ? "ยอมรับและเปิดรายการ" : "บันทึกการยอมรับ"}</button></div>}
+          {debt.debtorUid && debt.creditorUid && !currentUserAcceptedAgreement && <div className="inline-agreement-consent"><label><input type="checkbox" checked={agreementConsent} onChange={(event) => setAgreementConsent(event.target.checked)} /><span>ฉันอ่านและยอมรับข้อตกลงเวอร์ชันนี้</span></label><button className="primary" disabled={!agreementConsent || busyId === "agreement"} onClick={acceptCurrentAgreement}>{busyId === "agreement" ? "กำลังบันทึก…" : directInvitee ? "ยอมรับและเปิดรายการ" : "บันทึกการยอมรับ"}</button></div>}
         </section>
         {closure && <m.div className="closure-banner" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}><div><strong>ปิดบัญชีหนี้แล้ว</strong><span>ยอดคงเหลือเป็นศูนย์เมื่อ {dateTime(closure.closedAt)}</span></div><code>{String(closure.digest || "").slice(0, 12)}…</code></m.div>}
-        {debt.status === "pending" && creditor && debt.inviteDelivery !== "direct" && <div className="invite-actions"><button className="secondary" onClick={shareInvite}>คัดลอกลิงก์เชิญอีกครั้ง</button><button className="danger-outline" disabled={busyId === "invite"} onClick={doRevokeInvite}>ปิดลิงก์</button></div>}
+        {debt.status === "pending" && pendingInviteCreator && debt.inviteDelivery !== "direct" && <div className="invite-actions"><button className="secondary" onClick={shareInvite}>คัดลอกลิงก์เชิญอีกครั้ง</button><button className="danger-outline" disabled={busyId === "invite"} onClick={doRevokeInvite}>ปิดลิงก์</button></div>}
         {debt.status === "invite_revoked" && creditor && <button className="secondary full" disabled={busyId === "invite"} onClick={doRenewInvite}>สร้างลิงก์เชิญใหม่</button>}
 
         {openDispute && <div className="dispute-banner"><div><strong>รายการนี้มีข้อโต้แย้ง</strong><span>{openDispute.openedByName}: {openDispute.reason}</span></div><button disabled={busyId === "dispute"} onClick={doResolveDispute}>ยุติข้อโต้แย้ง</button></div>}
@@ -1094,7 +1258,7 @@ function DebtDetailModal({ debt, user, onClose, onToast, onArchived, archived, o
         {lineItems.length > 0 && (
           <section className="line-items-section">
             <div className="section-title-row"><h3>รายละเอียดรายการ</h3><span>{lineItems.length} รายการ</span></div>
-            <div className="line-items-list">{lineItems.map((item, index) => <div key={`${item.title}_${index}`}><span>{item.title}</span><strong>฿{money(item.amount)}</strong></div>)}</div>
+            <div className="line-items-list">{lineItems.map((item, index) => <div key={`${item.title}_${index}`}><span><b>{item.title}</b>{item.info && <small>{item.info}</small>}</span><strong>฿{money(item.amount)}</strong></div>)}</div>
           </section>
         )}
 
@@ -1172,7 +1336,7 @@ function DebtDetailModal({ debt, user, onClose, onToast, onArchived, archived, o
         <div className="record-actions">
           <button className="secondary" onClick={downloadAgreement}>ดาวน์โหลดหลักฐานข้อตกลง</button>
           {debt.debtorUid && !["cancelled", "declined", "paid"].includes(debt.status) && !openDispute && <button className="secondary" disabled={busyId === "dispute"} onClick={doDispute}>แจ้งยอดไม่ตรง/เปิดข้อโต้แย้ง</button>}
-          {(creditor || debt.debtorUid) && !["cancelled", "declined"].includes(debt.status) && <button className="danger-outline" disabled={busyId === "cancel"} onClick={doCancel}>{debt.debtorUid ? "ขอยกเลิกรายการ" : "ยกเลิกรายการ"}</button>}
+          {canCancel && !["cancelled", "declined"].includes(debt.status) && <button className="danger-outline" disabled={busyId === "cancel"} onClick={doCancel}>{awaitingCounterparty ? "ยกเลิกรายการ" : "ขอยกเลิกรายการ"}</button>}
           {!archived && ["paid", "cancelled", "declined"].includes(debt.status) && <button className="secondary" disabled={busyId === "archive"} onClick={doArchive}>เก็บเข้าคลัง</button>}
           {archived && <button className="secondary" disabled={busyId === "archive"} onClick={doRestore}>นำกลับจากคลัง</button>}
         </div>
@@ -1193,6 +1357,7 @@ export default function App() {
   const [debtSort, setDebtSort] = useState("attention");
   const [pendingPaymentsByDebt, setPendingPaymentsByDebt] = useState({});
   const [showCreate, setShowCreate] = useState(false);
+  const [createRole, setCreateRole] = useState("creditor");
   const [createdInvite, setCreatedInvite] = useState(null);
   const [inviteCode, setInviteCode] = useState(inviteFromLocation());
   const [selectedId, setSelectedId] = useState("");
@@ -1208,6 +1373,44 @@ export default function App() {
   const remindersAttemptedRef = useRef("");
 
   useEffect(() => onAuthStateChanged(auth, setUser), []);
+
+  useEffect(() => {
+    syncPushAccount(user?.uid).catch(() => {});
+    const receive = event => {
+      if (event.data?.type === 'DEBT_PUSH' && event.data.uid === user?.uid) {
+        setToast(event.data.body || 'มีการแจ้งเตือนใหม่');
+        window.setTimeout(() => setToast(''), 4000);
+      }
+    };
+    navigator.serviceWorker?.addEventListener('message', receive);
+    return () => navigator.serviceWorker?.removeEventListener('message', receive);
+  }, [user?.uid]);
+
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('notification');
+    if (!user || !id) return;
+    let active = true;
+    const clearLink = () => {
+      const url = new URL(window.location.href); url.searchParams.delete('notification');
+      window.history.replaceState({}, '', url);
+    };
+    if (id === 'inbox') { setShowNotifications(true); clearLink(); return; }
+    if (!/^[\w-]{1,160}$/.test(id)) { clearLink(); return; }
+    get(ref(db, `debtNotifications/${user.uid}/${id}`)).then(async snapshot => {
+      if (!active) return;
+      const item = snapshot.val();
+      if (!item?.debtId) throw new Error('missing');
+      const debt = await get(ref(db, `debts/${item.debtId}`));
+      if (!active) return;
+      if (!debt.exists()) throw new Error('missing');
+      setDebtsById(previous => ({...previous,[item.debtId]:{...debt.val(),id:item.debtId}}));
+      setWorkspaceMode('shared'); setSelectedId(item.debtId);
+      markDebtNotificationRead({notificationId:id}).catch(() => {});
+      clearLink();
+    }).catch(() => { if (active) { setToast(navigator.onLine ? 'รายการนี้ไม่พร้อมให้เปิดดู' : 'เชื่อมต่ออินเทอร์เน็ตแล้วเปิดแจ้งเตือนอีกครั้ง'); setShowNotifications(true); } });
+    return () => { active = false; };
+  }, [user?.uid]);
+
 
   useEffect(() => {
     if (!user || initializationAttemptedRef.current === user.uid) return;
@@ -1290,10 +1493,14 @@ export default function App() {
   }, [user]);
 
   const debts = useMemo(() => Object.values(debtsById).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))), [debtsById]);
-  const knownDebtors = useMemo(() => {
+  const knownCounterparties = useMemo(() => {
     const people = new Map();
-    debts.filter((debt) => debt.creditorUid === user?.uid && debt.debtorUid && debt.debtorEmail).forEach((debt) => {
-      people.set(debt.debtorUid, { uid: debt.debtorUid, name: debt.debtorName || debt.debtorEmail.split("@")[0], email: debt.debtorEmail });
+    debts.forEach((debt) => {
+      const isCreditor = debt.creditorUid === user?.uid;
+      const otherUid = isCreditor ? debt.debtorUid : debt.creditorUid;
+      const otherEmail = isCreditor ? debt.debtorEmail : debt.creditorEmail;
+      const otherName = isCreditor ? debt.debtorName : debt.creditorName;
+      if (otherUid && otherEmail) people.set(otherUid, { uid: otherUid, name: otherName || otherEmail.split("@")[0], email: otherEmail });
     });
     return [...people.values()].sort((a, b) => a.name.localeCompare(b.name, "th"));
   }, [debts, user?.uid]);
@@ -1403,29 +1610,28 @@ export default function App() {
 
   async function openNotification(item) {
     if (!item.readAt) markDebtNotificationRead({ notificationId: item.id }).catch(() => {});
-    if (item.debtId && debtsById[item.debtId]) setSelectedId(item.debtId);
+    if (item.debtId && debtsById[item.debtId]) { setWorkspaceMode("shared"); setSelectedId(item.debtId); }
     setShowNotifications(false);
   }
 
   return (
     <LazyMotion features={domAnimation}>
     <MotionConfig reducedMotion="user">
-    <m.div className="app-shell aurora-app" onPointerMove={(event) => { const rect = event.currentTarget.getBoundingClientRect(); event.currentTarget.style.setProperty("--pointer-x", `${event.clientX - rect.left}px`); event.currentTarget.style.setProperty("--pointer-y", `${event.clientY - rect.top}px`); }} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+    <m.div className="app-shell aurora-app" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <m.header className="topbar" initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45 }}>
-        <div className="brand"><BrandMark /><span>เคลียร์กัน</span></div>
-        <div className="user-area"><div className="notification-wrap"><button className="notification-button" aria-label={`การแจ้งเตือน${notifications.some((item) => !item.readAt) ? `ที่ยังไม่ได้อ่าน ${notifications.filter((item) => !item.readAt).length} รายการ` : ""}`} aria-expanded={showNotifications} onClick={() => setShowNotifications((value) => !value)}><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></svg>{notifications.some((item) => !item.readAt) && <i>{notifications.filter((item) => !item.readAt).length}</i>}</button></div><div className="user-copy"><strong>{user.displayName || user.email?.split("@")[0]}</strong><span>{user.email}</span></div><div className="avatar">{(user.displayName || user.email || "ค").charAt(0).toUpperCase()}</div><button className="logout" onClick={() => signOut(auth)}>ออกจากระบบ</button></div>
+        <div className="brand"><BrandMark /><span>เคลียร์กัน<small className="brand-caption">CLEAR KAN</small></span></div>
+        <div className="user-area"><div className="notification-wrap"><button className="notification-button" aria-label={`การแจ้งเตือน${notifications.some((item) => !item.readAt) ? `ที่ยังไม่ได้อ่าน ${notifications.filter((item) => !item.readAt).length} รายการ` : ""}`} aria-expanded={showNotifications} onClick={() => setShowNotifications((value) => !value)}><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></svg>{notifications.some((item) => !item.readAt) && <i>{notifications.filter((item) => !item.readAt).length}</i>}</button></div><div className="user-copy"><strong>{user.displayName || user.email?.split("@")[0]}</strong><span>{user.email}</span></div><div className="avatar">{(user.displayName || user.email || "ค").charAt(0).toUpperCase()}</div><button className="logout" onClick={() => logoutWithPush(signOut).catch(() => showToast("ออกจากระบบไม่สำเร็จ กรุณาลองใหม่"))}>ออกจากระบบ</button></div>
       </m.header>
       <AnimatePresence>{showNotifications && <NotificationsPanel notifications={notifications} onClose={() => setShowNotifications(false)} onOpen={openNotification} />}</AnimatePresence>
 
       <nav className="workspace-switch" aria-label="เลือกพื้นที่ทำงาน">
-        <button className={workspaceMode === "shared" ? "active" : ""} onClick={() => changeWorkspace("shared")}><span>⇄</span><div><strong>เคลียร์กับคนอื่น</strong><small>ข้อตกลงระหว่างบุคคล</small></div></button>
-        <button className={workspaceMode === "personal" ? "active" : ""} onClick={() => changeWorkspace("personal")}><span>◉</span><div><strong>การเงินของฉัน</strong><small>รายรับ รายจ่าย และหนี้ส่วนตัว</small></div><i>ส่วนตัว</i></button>
+        <button aria-pressed={workspaceMode === "shared"} className={workspaceMode === "shared" ? "active" : ""} onClick={() => changeWorkspace("shared")}><span aria-hidden="true">⇄</span><div><strong>เคลียร์กับคนอื่น</strong><small>ข้อตกลงระหว่างบุคคล</small></div></button>
+        <button aria-pressed={workspaceMode === "personal"} className={workspaceMode === "personal" ? "active" : ""} onClick={() => changeWorkspace("personal")}><span aria-hidden="true">◉</span><div><strong>การเงินของฉัน</strong><small>รายรับ รายจ่าย และหนี้ส่วนตัว</small></div></button>
       </nav>
 
       {workspaceMode === "shared" ? <main className="dashboard">
         <m.section className="aurora-dashboard-hero" initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.62, ease: [0.22, 1, 0.36, 1] }}>
-          <span className="aurora-blob blob-one" aria-hidden="true" /><span className="aurora-blob blob-two" aria-hidden="true" />
-          <div className="hero-copy"><p className="eyebrow"><UiIcon name="sparkle" /> พื้นที่การเงินระหว่างเรา</p><h1>ทุกยอดชัดเจน<br /><em>ทุกข้อตกลงเบาใจ</em></h1><p>เห็นเงินเข้า เงินออก และวันสำคัญในมุมเดียว</p><m.button className="primary create-button" onClick={() => setShowCreate(true)} whileHover={{ scale: 1.025 }} whileTap={{ scale: 0.97 }}><UiIcon name="plus" />สร้างรายการใหม่</m.button></div>
+          <div className="hero-copy"><p className="eyebrow">ภาพรวมระหว่างเรา</p><h1>ทุกยอดชัดเจน<br /><em>ทุกวันเบาใจ</em></h1><p>เงินเข้า เงินออก และข้อตกลงที่ดูแลร่วมกัน</p><m.button className="primary create-button" onClick={() => { setCreateRole(tab === "payable" ? "debtor" : "creditor"); setShowCreate(true); }} whileTap={{ scale: 0.98 }}><UiIcon name="plus" />สร้างรายการใหม่</m.button></div>
           <div className={`net-spotlight ${receivable - payable >= 0 ? "positive" : "negative"}`}><small>ยอดสุทธิของคุณ</small><strong><AnimatedMoney value={receivable - payable} signed /></strong><p>{receivable - payable >= 0 ? "คุณเป็นเจ้าหนี้สุทธิ" : "คุณเป็นลูกหนี้สุทธิ"}</p></div>
         </m.section>
 
@@ -1450,12 +1656,12 @@ export default function App() {
             </div>
           </div>
           <div className="debt-result-summary"><span>พบ <strong>{visibleDebts.length}</strong> รายการ</span>{debtStatusFilter !== "all" && <span>· {statusFilterDefinitions.find((filter) => filter.value === debtStatusFilter)?.label}</span>}</div>
-          <div className="debt-list">{visibleDebts.length ? displayedDebts.map((debt) => <DebtCard key={debt.id} debt={debt} user={user} pendingPaymentCount={pendingPaymentsByDebt[debt.id] || 0} onOpen={(item) => setSelectedId(item.id)} />) : (debtStatusFilter !== "all" || debtSearch ? <div className="empty-state filtered-empty"><div className="empty-illustration"><span>⌕</span></div><h3>ไม่พบรายการที่ตรงกับตัวกรอง</h3><p>ลองเปลี่ยนสถานะหรือคำค้นเพื่อดูรายการอื่น</p><button className="secondary" onClick={() => { setDebtStatusFilter("all"); setDebtSearch(""); }}>ล้างตัวกรอง</button></div> : <EmptyState tab={tab} onCreate={() => setShowCreate(true)} />)}</div>
+          <div className="debt-list">{visibleDebts.length ? displayedDebts.map((debt) => <DebtCard key={debt.id} debt={debt} user={user} pendingPaymentCount={pendingPaymentsByDebt[debt.id] || 0} onOpen={(item) => setSelectedId(item.id)} />) : (debtStatusFilter !== "all" || debtSearch ? <div className="empty-state filtered-empty"><div className="empty-illustration"><span>⌕</span></div><h3>ไม่พบรายการที่ตรงกับตัวกรอง</h3><p>ลองเปลี่ยนสถานะหรือคำค้นเพื่อดูรายการอื่น</p><button className="secondary" onClick={() => { setDebtStatusFilter("all"); setDebtSearch(""); }}>ล้างตัวกรอง</button></div> : <EmptyState tab={tab} onCreate={() => { setCreateRole(tab === "payable" ? "debtor" : "creditor"); setShowCreate(true); }} />)}</div>
           {visibleDebts.length > displayedDebts.length && <button className="secondary debt-list-more" onClick={() => setVisibleDebtLimit((value) => value + 6)}>ดูเพิ่มอีก {Math.min(6, visibleDebts.length - displayedDebts.length)} รายการ <span>แสดงแล้ว {displayedDebts.length}/{visibleDebts.length}</span></button>}
         </m.section>
       </main> : <PersonalFinance user={user} onToast={showToast} sharedReceivables={receivableDebts} sharedPayables={payableDebts} onOpenSharedDebt={openSharedDebtFromFinance} />}
 
-      <AnimatePresence>{workspaceMode === "shared" && showCreate && <CreateDebtModal user={user} knownDebtors={knownDebtors} onClose={() => setShowCreate(false)} onCreated={(data) => { setShowCreate(false); if (data.deliveryMode === "direct") { setSelectedId(data.debtId); showToast(`ส่งคำขอให้ ${data.debtorName} แล้ว`); } else setCreatedInvite({ ...data, inviteUrl: `${window.location.origin}${window.location.pathname}?invite=${encodeURIComponent(data.inviteCode)}` }); }} />}</AnimatePresence>
+      <AnimatePresence>{workspaceMode === "shared" && showCreate && <CreateDebtModal user={user} initialRole={createRole} knownCounterparties={knownCounterparties} onClose={() => setShowCreate(false)} onCreated={(data) => { setShowCreate(false); if (data.deliveryMode === "direct") { setSelectedId(data.debtId); showToast(`ส่งคำขอให้ ${data.counterpartyName || "คู่สัญญา"} แล้ว`); } else setCreatedInvite({ ...data, inviteUrl: `${window.location.origin}${window.location.pathname}?invite=${encodeURIComponent(data.inviteCode)}` }); }} />}</AnimatePresence>
       <AnimatePresence>{createdInvite && <InviteCreatedModal data={createdInvite} onClose={() => setCreatedInvite(null)} />}</AnimatePresence>
       {inviteCode && <AcceptInviteModal code={inviteCode} onClose={() => setInviteCode("")} onAccepted={(debtId) => { setInviteCode(""); setSelectedId(debtId); showToast("ยืนยันรายการเรียบร้อยแล้ว"); }} />}
       <AnimatePresence>{selectedCashflow && <CashflowDetailModal group={selectedCashflow} direction={selectedCashflowKey.direction} onClose={() => setSelectedCashflowKey(null)} onOpenDebt={(debtId) => { setSelectedCashflowKey(null); setSelectedId(debtId); }} />}</AnimatePresence>
