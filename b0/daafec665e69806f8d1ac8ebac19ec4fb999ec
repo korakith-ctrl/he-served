@@ -1,0 +1,81 @@
+debt-app/src/daily-cashflow.css
+  s_5d5adb9d4bcbe9::t_1c898ad2a19eec 1-27
+  s_5d5adb9d4bcbe9::t_e694b5af70f0b2 30-31
+  s_5d5adb9d4bcbe9::t_29b7bd60e18928 32-39
+  s_5d5adb9d4bcbe9::t_98968929f25fbf 28-29
+  s_5d5adb9d4bcbe9::t_3379b92efd970f 40-42
+debt-app/src/styles.css
+  s_5d5adb9d4bcbe9::t_0093e1a59cfbe4 1107,1432
+  s_5d5adb9d4bcbe9::t_3379b92efd970f 1416
+debt-app/DAILY_CASHFLOW_DESIGN.md
+  s_5d5adb9d4bcbe9::t_e83a3ab134c151 35,51,69,84,100-101
+  s_5d5adb9d4bcbe9::t_0e4195afd40cae 1-2,4-34,36-50,52-68,70-83,85-99,102-105,107,111,113
+  s_5d5adb9d4bcbe9::t_ccafc78fe92987 3,106,108-110,112,114
+debt-app/src/App.jsx
+  s_5d5adb9d4bcbe9::t_0631050f548a0e 1678
+  s_5d5adb9d4bcbe9::t_476c5b612c30f4 1359,1458,1462,1465,1471,1484-1487,1489-1493,1505
+  s_5d5adb9d4bcbe9::t_56ed0fb4233b85 1441,1488
+debt-app/src/PersonalFinance.jsx
+  s_5d5adb9d4bcbe9::t_aae1e37dfa961e 557-590
+  s_5d5adb9d4bcbe9::t_ed714e82c39569 756
+  s_5d5adb9d4bcbe9::t_0631050f548a0e 387,442
+  s_5d5adb9d4bcbe9::t_852a303fc76f65 836
+  s_5d5adb9d4bcbe9::t_cd597fe9e9baaf 400,431-436
+  s_5d5adb9d4bcbe9::t_27f1dcd97dd9b2 512,757,764-768
+  s_5d5adb9d4bcbe9::t_2eb3ebbbf71b87 591-604
+  s_5d5adb9d4bcbe9::t_dc411762d6cf41 7,443-445,447-449,451-461
+  s_5d5adb9d4bcbe9::t_47a440770f5321 495
+  s_5d5adb9d4bcbe9::t_422541d4097924 6,462-482,484-487
+  s_5d5adb9d4bcbe9::t_c95a6930203238 446,450
+  s_5d5adb9d4bcbe9::t_86c4355fa65a4d 483
+  s_5d5adb9d4bcbe9::t_f65f11e3f24bca 698
+  s_5d5adb9d4bcbe9::t_bd7d499d13b20b 441
+  s_5d5adb9d4bcbe9::t_28abadefe6a678 158,391
+  s_5d5adb9d4bcbe9::t_7e06be0679bff7 791
+  s_5d5adb9d4bcbe9::t_78bc394eddd6ca 838
+  s_5d5adb9d4bcbe9::t_4e0e5ced129695 20,394,396,425
+  s_5d5adb9d4bcbe9::t_5334d1bf4a701a 848
+  s_5d5adb9d4bcbe9::t_11ec8166cb4d21 769-770
+debt-app/src/dailyCashflow.test.js
+  s_5d5adb9d4bcbe9::t_71e1b25e41a5f6 61
+  s_5d5adb9d4bcbe9::t_03dd6db79c1582 1-14,16-60,62-66,69
+  s_5d5adb9d4bcbe9::t_b6da529f6c2c43 15,67-68
+  s_5d5adb9d4bcbe9::t_30b3446579dd3a 70-89
+debt-app/README.md
+  s_5d5adb9d4bcbe9::t_5fb77f6fd02153 9-10
+database.rules.json
+  s_5d5adb9d4bcbe9::t_6a7fb014764d5d 169
+  s_5d5adb9d4bcbe9::t_d666a54ceef0b2 166-168,170-171
+debt-app/src/dailyCashflow.js
+  s_5d5adb9d4bcbe9::t_71e1b25e41a5f6 142,145,147-150
+  s_5d5adb9d4bcbe9::t_94944ae03c810b 83,169-171
+  s_5d5adb9d4bcbe9::t_8bc215bb1c5a27 1-18,173
+  s_5d5adb9d4bcbe9::t_b6da529f6c2c43 66-67,146,155
+  s_5d5adb9d4bcbe9::t_90d0d8dd9b7e16 19-30,32-37,39-65,68-82,84-88,91-99,101-141,151-154,156-168,172
+  s_5d5adb9d4bcbe9::t_bb70f70ae858e6 89-90,100
+  s_5d5adb9d4bcbe9::t_82c9cb3c6ac5fb 31,38,143-144
+debt-app/src/DailyCashflow.jsx
+  s_5d5adb9d4bcbe9::t_d502efa9ed3079 10,28
+  s_5d5adb9d4bcbe9::t_ad25b1eafaa017 2-8,11,13-16,18-27,29-40,43-47,49-58,60,62-65,67-68,70-71,73,75-78
+  s_5d5adb9d4bcbe9::t_151894d9fcf84c 59
+  s_5d5adb9d4bcbe9::t_98968929f25fbf 12
+  s_5d5adb9d4bcbe9::t_e694b5af70f0b2 41,61
+  s_5d5adb9d4bcbe9::t_095e9f1192e465 9,66,69
+  s_5d5adb9d4bcbe9::t_b8673579b2efae 1,17,42,48,72,74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.3",
+  "base_commit_sha": "b0daafec665e69806f8d1ac8ebac19ec4fb999ec",
+  "prompts": {},
+  "sessions": {
+    "s_5d5adb9d4bcbe9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d212-f56a-76e0-bba5-9f25e581db75",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "korakrit insa <korakrit.ins@axonstech.com>"
+    }
+  }
+}
