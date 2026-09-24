@@ -1,0 +1,59 @@
+debt-app/src/PersonalFinance.jsx
+  s_5d5adb9d4bcbe9::t_840027f913f98d 8-9,398-400
+  s_5d5adb9d4bcbe9::t_cce5a936bb176e 621-644,647-648
+  s_5d5adb9d4bcbe9::t_603f1e8721edcc 466-478
+  s_5d5adb9d4bcbe9::t_d00b545cd5142f 880
+  s_5d5adb9d4bcbe9::t_0af2a027f60e5a 645-646
+  s_5d5adb9d4bcbe9::t_897f10f8a050de 788,882
+  s_5d5adb9d4bcbe9::t_5e080bbac70af5 891
+debt-app/DAILY_CASHFLOW_DESIGN.md
+  s_5d5adb9d4bcbe9::t_ba42f3203c10fc 115-116
+debt-app/src/finance-calendar.css
+  s_5d5adb9d4bcbe9::t_1c422b68803cd3 1-47,49-60
+  s_5d5adb9d4bcbe9::t_04203d2862ed74 48
+debt-app/src/financeCalendar.test.js
+  s_5d5adb9d4bcbe9::t_6cb9efed360506 1-20,37-97,99-105
+  s_5d5adb9d4bcbe9::t_6e827a0703c4bf 21-29,98
+  s_5d5adb9d4bcbe9::t_fe7d5939480500 106-116
+  s_5d5adb9d4bcbe9::t_47a106ec79099b 30-36
+debt-app/src/FinanceCalendar.jsx
+  s_5d5adb9d4bcbe9::t_1a5240edb316b4 2-15,20-26,29-33,35,45-53,63-67,69-73,76,78-82
+  s_5d5adb9d4bcbe9::t_3adf62c4753f2a 1,27,54-62,68
+  s_5d5adb9d4bcbe9::t_d4f7c38c3efd31 16-19,28,36-44
+  s_5d5adb9d4bcbe9::t_afeb70d4e1848f 75,77
+  s_5d5adb9d4bcbe9::t_3764e008a9474c 34,74
+debt-app/src/financeCalendar.js
+  s_5d5adb9d4bcbe9::t_c710d84c23f127 72,88,93,107
+  s_5d5adb9d4bcbe9::t_dde07eee54595f 147
+  s_5d5adb9d4bcbe9::t_b3cf54154b47f1 71
+  s_5d5adb9d4bcbe9::t_feb0afffb2c04c 3,68,79-84,120,130,142,155,165-166,181
+  s_5d5adb9d4bcbe9::t_9bd86794b45cb7 39,44,144,158,176
+  s_5d5adb9d4bcbe9::t_df8403bbf7d5a5 65,100-103
+  s_5d5adb9d4bcbe9::t_addcfcffb6677b 106
+  s_5d5adb9d4bcbe9::t_3d5a7653566c0b 1-2,4,10-38,40-43,45-46,48-56,58-64,66-67,69-70,73-78,85-87,89-92,94-99,104-105,108-119,121-129,131-137,141,143,145-146,148-154,156-157,159-164,167-175,177-180,182
+  s_5d5adb9d4bcbe9::t_09cd4fa2af064c 5-9,47
+  s_5d5adb9d4bcbe9::t_47a106ec79099b 57
+  s_5d5adb9d4bcbe9::t_fe7d5939480500 138-140
+debt-app/src/DailyCashflow.jsx
+  s_5d5adb9d4bcbe9::t_f5ecdc5b84abb4 12,41,43-48
+debt-app/CALENDAR_REDESIGN.md
+  s_5d5adb9d4bcbe9::t_7ddc2807355be6 50,88-96
+  s_5d5adb9d4bcbe9::t_ba42f3203c10fc 1-2,4-49,51-87,98-105
+  s_5d5adb9d4bcbe9::t_63d2c021ee6488 3,97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.3",
+  "base_commit_sha": "a7c4c69c22fff3cb443dbf9093dae619bc4f81ec",
+  "prompts": {},
+  "sessions": {
+    "s_5d5adb9d4bcbe9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d212-f56a-76e0-bba5-9f25e581db75",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "korakrit insa <korakrit.ins@axonstech.com>"
+    }
+  }
+}
