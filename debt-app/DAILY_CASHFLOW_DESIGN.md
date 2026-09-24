@@ -112,3 +112,5 @@
 ## ไฟล์ที่เกี่ยวข้อง
 
 `src/PersonalFinance.jsx` เชื่อมแท็บ ภาพรวม และปฏิทิน; `src/DailyCashflow.jsx` กับ `src/daily-cashflow.css` เป็นหน้าบันทึกและฟอร์ม; `src/dailyCashflow.js` รวมรายการและคำนวณยอดจริง/คาดการณ์; `src/App.jsx` ส่งรายการชำระระหว่างบุคคลที่แอปอ่านอยู่แล้วเข้าหน้าการเงิน; `database.rules.json` ตรวจข้อมูลรายการส่วนตัวใหม่
+
+แบบปรับหน้าปฏิทินเป็นตารางเดือนพร้อมรายละเอียดเมื่อกดวันอยู่ที่ [CALENDAR_REDESIGN.md](./CALENDAR_REDESIGN.md)

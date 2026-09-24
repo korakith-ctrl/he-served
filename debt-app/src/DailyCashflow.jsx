@@ -9,7 +9,7 @@ const categories = { income: ["เงินเดือน", "รายได้
 const methodLabels = { cash: "เงินสด", transfer: "โอน", other: "อื่นๆ" };
 const sourceLabel = (item) => item.source === "manual" ? "บันทึกเอง" : ["personal_debt", "personalPayment"].includes(item.source) ? "ชำระหนี้ของฉัน" : "รายการระหว่างบุคคล";
 
-export default function DailyCashflowPanel({ cycle, transactions = [], onSave, onDelete, onOpenSource, onPayPersonalDebt, onOpenSharedDebt, plans = [], today }) {
+export default function DailyCashflowPanel({ cycle, transactions = [], onSave, onDelete, onOpenSource, onPayPersonalDebt, onOpenSharedDebt, plans = [], today, openRequest, onRequestHandled }) {
   const todayValue = today || localDate();
   const start = cycle?.start || cycle?.from || "0000-01-01";
   const end = cycle?.end || cycle?.to || todayValue;
@@ -38,8 +38,14 @@ export default function DailyCashflowPanel({ cycle, transactions = [], onSave, o
   const grouped = useMemo(() => filtered.reduce((acc, t) => ((acc[t.date] ||= []).push(t), acc), {}), [filtered]);
   const categoryOptions = [...new Set([...categories.income, ...categories.expense, ...plans.map((p) => p.category).filter(Boolean), ...transactions.map((t) => t.category).filter(Boolean)])];
 
-  function openNew(direction = "expense") { if (start > todayValue) return; const defaultDate = todayValue > end ? end : todayValue; setError(""); setEditor({ kind: "new", initial: { direction, amount: "", date: defaultDate, title: "", category: categories[direction][0], method: "", note: "", planRef: "", occurrenceDate: defaultDate, completesOccurrence: false } }); }
+  function openNew(direction = "expense", requestedDate = "") { if (start > todayValue && !requestedDate) return; const defaultDate = requestedDate && requestedDate <= todayValue ? requestedDate : todayValue > end ? end : todayValue; setError(""); setEditor({ kind: "new", initial: { direction, amount: "", date: defaultDate, title: "", category: categories[direction][0], method: "", note: "", planRef: "", occurrenceDate: defaultDate, completesOccurrence: false } }); }
   function openEdit(item) { setError(""); setEditor({ kind: "edit", initial: { ...item, planRef: typeof item.planRef === "object" ? item.planRef?.id || "" : item.planRef || "", occurrenceDate: (typeof item.planRef === "object" ? item.planRef?.occurrenceDate : item.occurrenceDate) || item.date, completesOccurrence: Boolean(typeof item.planRef === "object" ? item.planRef?.completesOccurrence : item.completesOccurrence) } }); }
+  useEffect(() => {
+    if (!openRequest) return;
+    if (openRequest.type === "edit" && openRequest.item) openEdit(openRequest.item);
+    else if (openRequest.type === "create") openNew(openRequest.direction || "expense", openRequest.date);
+    onRequestHandled?.();
+  }, [openRequest]);
   async function save(event) {
     event.preventDefault(); const f = editor.initial;
     if (!f.title.trim() || !Number.isFinite(Number(f.amount)) || Number(f.amount) <= 0 || !f.date || f.date > todayValue) { setError(f.date > todayValue ? "วันที่รายการต้องไม่เกินวันนี้" : "กรุณากรอกชื่อรายการและจำนวนเงินให้ถูกต้อง"); return; }
