@@ -163,7 +163,12 @@
     "personalFinance": {
       "$uid": {
         ".read": "auth != null && auth.uid === $uid",
-        ".write": "auth != null && auth.uid === $uid"
+        ".write": "auth != null && auth.uid === $uid",
+        "dailyTransactions": {
+          "$transactionId": {
+            ".validate": "newData.hasChildren(['direction', 'amount', 'date', 'title', 'category', 'createdAt', 'updatedAt']) && newData.child('direction').isString() && (newData.child('direction').val() === 'income' || newData.child('direction').val() === 'expense') && newData.child('amount').isNumber() && newData.child('amount').val() > 0 && newData.child('amount').val() <= 1000000000 && newData.child('date').isString() && newData.child('date').val().matches(/^\\d{4}-\\d{2}-\\d{2}$/) && newData.child('title').isString() && newData.child('title').val().length > 0 && newData.child('title').val().length <= 120 && newData.child('category').isString() && newData.child('category').val().length > 0 && newData.child('category').val().length <= 80 && newData.child('createdAt').isString() && newData.child('createdAt').val().length <= 40 && newData.child('updatedAt').isString() && newData.child('updatedAt').val().length <= 40 && (!newData.hasChild('method') || (newData.child('method').isString() && (newData.child('method').val() === '' || newData.child('method').val() === 'cash' || newData.child('method').val() === 'transfer' || newData.child('method').val() === 'other'))) && (!newData.hasChild('note') || (newData.child('note').isString() && newData.child('note').val().length <= 500)) && (!newData.hasChild('planRef') || (newData.child('planRef').hasChildren(['kind', 'id', 'occurrenceDate', 'completesOccurrence']) && newData.child('planRef').child('kind').isString() && (newData.child('planRef').child('kind').val() === 'income' || newData.child('planRef').child('kind').val() === 'expense') && newData.child('planRef').child('id').isString() && newData.child('planRef').child('id').val().length > 0 && newData.child('planRef').child('id').val().length <= 160 && newData.child('planRef').child('occurrenceDate').isString() && newData.child('planRef').child('occurrenceDate').val().matches(/^\\d{4}-\\d{2}-\\d{2}$/) && newData.child('planRef').child('completesOccurrence').isBoolean()))"
+          }
+        }
       }
     },
     "recompChallenges": {

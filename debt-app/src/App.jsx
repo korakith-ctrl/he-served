@@ -1356,6 +1356,7 @@ export default function App() {
   const [debtSearch, setDebtSearch] = useState("");
   const [debtSort, setDebtSort] = useState("attention");
   const [pendingPaymentsByDebt, setPendingPaymentsByDebt] = useState({});
+  const [sharedPayments, setSharedPayments] = useState([]);
   const [showCreate, setShowCreate] = useState(false);
   const [createRole, setCreateRole] = useState("creditor");
   const [createdInvite, setCreatedInvite] = useState(null);
@@ -1437,6 +1438,7 @@ export default function App() {
       setNotifications([]);
       return undefined;
     }
+    setSharedPayments([]);
     const unsubscribeArchives = onValue(ref(db, `debtArchives/${user.uid}`), (snapshot) => setArchives(snapshot.val() || {}));
     const unsubscribeNotifications = onValue(query(ref(db, `debtNotifications/${user.uid}`), limitToLast(50)), (snapshot) => {
       const rows = Object.entries(snapshot.val() || {}).map(([id, value]) => ({ id, ...value })).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
@@ -1453,16 +1455,20 @@ export default function App() {
     if (!user) {
       setDebtsById({});
       setPendingPaymentsByDebt({});
+      setSharedPayments([]);
       return undefined;
     }
     let recordUnsubscribers = [];
+    let membershipGeneration = 0;
     const memberRef = ref(db, `debtMembers/${user.uid}`);
     const unsubscribeMembers = onValue(memberRef, (snapshot) => {
+      const generation = ++membershipGeneration;
       recordUnsubscribers.forEach((unsubscribe) => unsubscribe());
       recordUnsubscribers = [];
       const ids = Object.keys(snapshot.val() || {});
       setDebtsById((current) => Object.fromEntries(Object.entries(current).filter(([id]) => ids.includes(id))));
       setPendingPaymentsByDebt((current) => Object.fromEntries(Object.entries(current).filter(([id]) => ids.includes(id))));
+      setSharedPayments((current) => current.filter((payment) => ids.includes(payment.debtId)));
       ids.forEach((id) => {
         recordUnsubscribers.push(onValue(ref(db, `debts/${id}`), (debtSnapshot) => {
           setDebtsById((current) => {
@@ -1475,7 +1481,16 @@ export default function App() {
           });
         }));
         recordUnsubscribers.push(onValue(ref(db, `debtPayments/${id}`), (paymentSnapshot) => {
-          const pendingCount = Object.values(paymentSnapshot.val() || {}).filter((payment) => ["pending", "processing"].includes(payment?.status)).length;
+          if (generation !== membershipGeneration) return;
+          const rawPayments = paymentSnapshot.val() || {};
+          const records = Object.entries(rawPayments)
+            .filter(([, payment]) => ["confirmed", "pending", "processing"].includes(payment?.status))
+            .map(([paymentId, payment]) => ({ ...payment, debtId: id, paymentId }));
+          const pendingCount = records.filter((payment) => ["pending", "processing"].includes(payment.status)).length;
+          setSharedPayments((current) => [
+            ...current.filter((payment) => payment.debtId !== id),
+            ...records,
+          ]);
           setPendingPaymentsByDebt((current) => {
             if (pendingCount > 0) return { ...current, [id]: pendingCount };
             if (!(id in current)) return current;
@@ -1487,6 +1502,7 @@ export default function App() {
       });
     });
     return () => {
+      membershipGeneration += 1;
       unsubscribeMembers();
       recordUnsubscribers.forEach((unsubscribe) => unsubscribe());
     };
@@ -1659,7 +1675,7 @@ export default function App() {
           <div className="debt-list">{visibleDebts.length ? displayedDebts.map((debt) => <DebtCard key={debt.id} debt={debt} user={user} pendingPaymentCount={pendingPaymentsByDebt[debt.id] || 0} onOpen={(item) => setSelectedId(item.id)} />) : (debtStatusFilter !== "all" || debtSearch ? <div className="empty-state filtered-empty"><div className="empty-illustration"><span>⌕</span></div><h3>ไม่พบรายการที่ตรงกับตัวกรอง</h3><p>ลองเปลี่ยนสถานะหรือคำค้นเพื่อดูรายการอื่น</p><button className="secondary" onClick={() => { setDebtStatusFilter("all"); setDebtSearch(""); }}>ล้างตัวกรอง</button></div> : <EmptyState tab={tab} onCreate={() => { setCreateRole(tab === "payable" ? "debtor" : "creditor"); setShowCreate(true); }} />)}</div>
           {visibleDebts.length > displayedDebts.length && <button className="secondary debt-list-more" onClick={() => setVisibleDebtLimit((value) => value + 6)}>ดูเพิ่มอีก {Math.min(6, visibleDebts.length - displayedDebts.length)} รายการ <span>แสดงแล้ว {displayedDebts.length}/{visibleDebts.length}</span></button>}
         </m.section>
-      </main> : <PersonalFinance user={user} onToast={showToast} sharedReceivables={receivableDebts} sharedPayables={payableDebts} onOpenSharedDebt={openSharedDebtFromFinance} />}
+      </main> : <PersonalFinance user={user} onToast={showToast} sharedReceivables={receivableDebts} sharedPayables={payableDebts} allSharedDebts={debts} sharedPayments={sharedPayments} onOpenSharedDebt={openSharedDebtFromFinance} />}
 
       <AnimatePresence>{workspaceMode === "shared" && showCreate && <CreateDebtModal user={user} initialRole={createRole} knownCounterparties={knownCounterparties} onClose={() => setShowCreate(false)} onCreated={(data) => { setShowCreate(false); if (data.deliveryMode === "direct") { setSelectedId(data.debtId); showToast(`ส่งคำขอให้ ${data.counterpartyName || "คู่สัญญา"} แล้ว`); } else setCreatedInvite({ ...data, inviteUrl: `${window.location.origin}${window.location.pathname}?invite=${encodeURIComponent(data.inviteCode)}` }); }} />}</AnimatePresence>
       <AnimatePresence>{createdInvite && <InviteCreatedModal data={createdInvite} onClose={() => setCreatedInvite(null)} />}</AnimatePresence>
